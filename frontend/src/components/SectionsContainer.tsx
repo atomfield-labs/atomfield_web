@@ -28,7 +28,7 @@ export default function SectionsContainer() {
           {/* Dominant 3D Animation Header (Zoomed Out for Full Framing) */}
           <div className="w-full h-88 sm:h-96 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
             <Suspense fallback={<div className="w-full h-full bg-slate-50 animate-pulse" />}>
-              <Canvas camera={{ position: [0, 3.6, 10.5], fov: 45 }} className="w-full h-full">
+              <Canvas camera={{ position: [0, 3.8, 11.6], fov: 45 }} className="w-full h-full">
                 <ambientLight intensity={1.2} />
                 <directionalLight position={[10, 15, 10]} intensity={1.8} color="#ffffff" />
                 <directionalLight position={[-10, 10, -5]} intensity={1.0} color="#93c5fd" />
@@ -71,20 +71,22 @@ export default function SectionsContainer() {
           {/* Dominant 3D Animation Header */}
           <div className="w-full h-88 sm:h-96 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
             <Suspense fallback={<div className="w-full h-full bg-slate-50 animate-pulse" />}>
-              <Canvas camera={{ position: [0, 0, 7.5], fov: 45 }} className="w-full h-full">
-                <ambientLight intensity={1.2} />
-                <directionalLight position={[5, 10, 5]} intensity={1.8} color="#ffffff" />
+              <Canvas camera={{ position: [0, 0.15, 7.6], fov: 45 }} className="w-full h-full">
+                <ambientLight intensity={1.1} />
+                <directionalLight position={[6, 8, 6]} intensity={1.8} color="#ffffff" />
+                <directionalLight position={[-6, 4, 3]} intensity={0.8} color="#93c5fd" />
+                <pointLight position={[0, 0, 3]} intensity={0.5} color="#38bdf8" />
                 <JablonskiDiagram />
               </Canvas>
             </Suspense>
-            {/* Crisp State Overlays - Triplet placed at Middle Bands */}
+            {/* Crisp State Overlays - Triplet placed at Middle Bands with clear margin */}
             <div className="absolute left-4 bottom-4 px-2.5 py-1 rounded text-[10px] font-mono font-bold bg-slate-100/90 text-slate-700 border border-slate-200 shadow-xs pointer-events-none">
               S₀ Ground
             </div>
             <div className="absolute left-4 top-4 px-2.5 py-1 rounded text-[10px] font-mono font-bold bg-sky-50 text-sky-700 border border-sky-200 shadow-xs pointer-events-none">
               S₁ Singlet
             </div>
-            <div className="absolute right-4 top-[40%] -translate-y-1/2 px-2.5 py-1 rounded text-[10px] font-mono font-bold bg-pink-50 text-pink-700 border border-pink-200 shadow-xs pointer-events-none">
+            <div className="absolute right-4 top-[42%] -translate-y-1/2 px-2.5 py-1 rounded text-[10px] font-mono font-bold bg-pink-50 text-pink-700 border border-pink-200 shadow-xs pointer-events-none">
               T₁ Triplet
             </div>
             <div className="absolute top-4 right-4 px-3 py-1 text-[11px] font-bold tracking-wider rounded-full bg-slate-100 text-slate-600 border border-slate-200 shadow-xs backdrop-blur-md">
@@ -117,7 +119,7 @@ export default function SectionsContainer() {
           {/* Dominant 3D Animation Header (Zoomed Out for Full Framing) */}
           <div className="w-full h-88 sm:h-96 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
             <Suspense fallback={<div className="w-full h-full bg-slate-50 animate-pulse" />}>
-              <Canvas camera={{ position: [0, 0, 11.5], fov: 45 }} className="w-full h-full">
+              <Canvas camera={{ position: [0, 0, 13.0], fov: 45 }} className="w-full h-full">
                 <ambientLight intensity={1.2} />
                 <directionalLight position={[10, 10, 10]} intensity={1.8} color="#ffffff" />
                 <IonLattice />

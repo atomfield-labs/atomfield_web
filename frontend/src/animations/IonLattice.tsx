@@ -50,11 +50,10 @@ export default function IonLattice() {
   const hostGeo = useMemo(() => new THREE.SphereGeometry(0.2, 16, 16), [])
   const hostMat = useMemo(() => new THREE.MeshPhysicalMaterial({ 
       color: new THREE.Color("#7c3aed"), // Vibrant Violet
-      roughness: 0.2, 
-      metalness: 0.1,
-      clearcoat: 0.8, 
-      transparent: true,
-      opacity: 0.95
+      roughness: 0.25, 
+      metalness: 0.15, 
+      clearcoat: 0.9, 
+      clearcoatRoughness: 0.1
   }), [])
 
   const cloudGeo = useMemo(() => new THREE.SphereGeometry(0.65, 16, 16), []) // Spread the clouds out
@@ -111,8 +110,7 @@ export default function IonLattice() {
     }
 
     // Update statically allocated materials
-    hostMat.opacity = 0.9
-    cloudMat.opacity = 0.22
+    cloudMat.opacity = 0.16
     bondsMat.opacity = 0.4
 
     const s = state.current
@@ -170,9 +168,6 @@ export default function IonLattice() {
       }
     }
 
-    if (ionMeshRef.current?.material) {
-       (ionMeshRef.current.material as THREE.Material).opacity = 0.95
-    }
 
     // --- 2. HOST LATTICE PHYSICS (Phonons, Polarons, & Electron Clouds) ---
     const time = clock.getElapsedTime()
@@ -275,8 +270,15 @@ export default function IonLattice() {
 
       {/* Lithium Ion */}
       <mesh ref={ionMeshRef}>
-        <sphereGeometry args={[0.3, 32, 32]} />
-        <meshBasicMaterial color="#f59e0b" transparent /> 
+        <sphereGeometry args={[0.32, 32, 32]} />
+        <meshPhysicalMaterial 
+          color="#f59e0b" 
+          roughness={0.2} 
+          metalness={0.2} 
+          emissive="#d97706" 
+          emissiveIntensity={0.5} 
+          clearcoat={0.9} 
+        /> 
       </mesh>
 
       {/* Diffusion Trail */}
