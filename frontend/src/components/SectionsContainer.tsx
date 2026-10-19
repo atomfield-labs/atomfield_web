@@ -25,10 +25,10 @@ export default function SectionsContainer() {
           onClick={() => window.location.hash = '#pipeline/nanoreactor'}
           className="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-xl hover:border-blue-400 transition-all duration-300 flex flex-col overflow-hidden cursor-pointer group"
         >
-          {/* Dominant 3D Animation Header with White Background */}
+          {/* Dominant 3D Animation Header (Zoomed Out for Full Framing) */}
           <div className="w-full h-88 sm:h-96 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
             <Suspense fallback={<div className="w-full h-full bg-slate-50 animate-pulse" />}>
-              <Canvas camera={{ position: [0, 2.8, 7.5], fov: 45 }} className="w-full h-full">
+              <Canvas camera={{ position: [0, 3.6, 10.5], fov: 45 }} className="w-full h-full">
                 <ambientLight intensity={1.2} />
                 <directionalLight position={[10, 15, 10]} intensity={1.8} color="#ffffff" />
                 <directionalLight position={[-10, 10, -5]} intensity={1.0} color="#93c5fd" />
@@ -41,8 +41,8 @@ export default function SectionsContainer() {
             </div>
           </div>
 
-          {/* Compact Text Section */}
-          <div className="p-6 flex flex-col justify-between flex-grow">
+          {/* Shaded Text Section */}
+          <div className="p-6 flex flex-col justify-between flex-grow bg-slate-50/80 border-t border-slate-100 rounded-b-2xl">
             <div>
               <h3 className="text-xl font-bold text-slate-900 tracking-tight group-hover:text-blue-600 transition-colors">
                 Nanoreactor & Catalysis
@@ -68,7 +68,7 @@ export default function SectionsContainer() {
 
         {/* Card 2: Optoelectronics (Second) */}
         <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-xl hover:border-slate-300 transition-all duration-300 flex flex-col overflow-hidden">
-          {/* Dominant 3D Animation Header with White Background */}
+          {/* Dominant 3D Animation Header */}
           <div className="w-full h-88 sm:h-96 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
             <Suspense fallback={<div className="w-full h-full bg-slate-50 animate-pulse" />}>
               <Canvas camera={{ position: [0, 0, 7.5], fov: 45 }} className="w-full h-full">
@@ -77,14 +77,14 @@ export default function SectionsContainer() {
                 <JablonskiDiagram />
               </Canvas>
             </Suspense>
-            {/* Crisp State Overlays */}
-            <div className="absolute left-4 bottom-4 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-700 border border-slate-200 shadow-xs pointer-events-none">
+            {/* Crisp State Overlays - Triplet placed at Middle Bands */}
+            <div className="absolute left-4 bottom-4 px-2.5 py-1 rounded text-[10px] font-mono font-bold bg-slate-100/90 text-slate-700 border border-slate-200 shadow-xs pointer-events-none">
               S₀ Ground
             </div>
-            <div className="absolute left-4 top-4 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-sky-50 text-sky-700 border border-sky-200 shadow-xs pointer-events-none">
+            <div className="absolute left-4 top-4 px-2.5 py-1 rounded text-[10px] font-mono font-bold bg-sky-50 text-sky-700 border border-sky-200 shadow-xs pointer-events-none">
               S₁ Singlet
             </div>
-            <div className="absolute right-4 bottom-14 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-pink-50 text-pink-700 border border-pink-200 shadow-xs pointer-events-none">
+            <div className="absolute right-4 top-[40%] -translate-y-1/2 px-2.5 py-1 rounded text-[10px] font-mono font-bold bg-pink-50 text-pink-700 border border-pink-200 shadow-xs pointer-events-none">
               T₁ Triplet
             </div>
             <div className="absolute top-4 right-4 px-3 py-1 text-[11px] font-bold tracking-wider rounded-full bg-slate-100 text-slate-600 border border-slate-200 shadow-xs backdrop-blur-md">
@@ -92,8 +92,8 @@ export default function SectionsContainer() {
             </div>
           </div>
 
-          {/* Compact Text Section */}
-          <div className="p-6 flex flex-col justify-between flex-grow">
+          {/* Shaded Text Section */}
+          <div className="p-6 flex flex-col justify-between flex-grow bg-slate-50/80 border-t border-slate-100 rounded-b-2xl">
             <div>
               <h3 className="text-xl font-bold text-slate-900 tracking-tight">
                 Optoelectronic Properties
@@ -105,19 +105,19 @@ export default function SectionsContainer() {
                 Calculate electronic excited states, fluorescence vs phosphorescence pathways, oscillator strengths, and frontier orbital energies directly in-browser.
               </p>
             </div>
-            <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400 font-mono">
+            <div className="mt-5 pt-3 border-t border-slate-200/60 flex items-center justify-between text-xs text-slate-400 font-mono">
               <span>Status: Roadmap</span>
               <span>Engine: TD-DFT</span>
             </div>
           </div>
         </div>
 
-        {/* Card 3: Solid State (Third) */}
+        {/* Card 3: Solid State (Third - Zoomed Out) */}
         <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-xl hover:border-slate-300 transition-all duration-300 flex flex-col overflow-hidden">
-          {/* Dominant 3D Animation Header with White Background */}
+          {/* Dominant 3D Animation Header (Zoomed Out for Full Framing) */}
           <div className="w-full h-88 sm:h-96 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
             <Suspense fallback={<div className="w-full h-full bg-slate-50 animate-pulse" />}>
-              <Canvas camera={{ position: [0, 0, 8.5], fov: 45 }} className="w-full h-full">
+              <Canvas camera={{ position: [0, 0, 11.5], fov: 45 }} className="w-full h-full">
                 <ambientLight intensity={1.2} />
                 <directionalLight position={[10, 10, 10]} intensity={1.8} color="#ffffff" />
                 <IonLattice />
@@ -128,8 +128,8 @@ export default function SectionsContainer() {
             </div>
           </div>
 
-          {/* Compact Text Section */}
-          <div className="p-6 flex flex-col justify-between flex-grow">
+          {/* Shaded Text Section */}
+          <div className="p-6 flex flex-col justify-between flex-grow bg-slate-50/80 border-t border-slate-100 rounded-b-2xl">
             <div>
               <h3 className="text-xl font-bold text-slate-900 tracking-tight">
                 Solid State & Lattices
@@ -141,7 +141,7 @@ export default function SectionsContainer() {
                 Model infinite crystal structures, phonon dispersions, and interstitial ion migration pathways in solid electrolytes and battery cathode materials.
               </p>
             </div>
-            <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400 font-mono">
+            <div className="mt-5 pt-3 border-t border-slate-200/60 flex items-center justify-between text-xs text-slate-400 font-mono">
               <span>Status: Roadmap</span>
               <span>Engine: Plane-Wave DFT</span>
             </div>
@@ -165,8 +165,8 @@ export default function SectionsContainer() {
             </div>
           </div>
 
-          {/* Compact Text Section */}
-          <div className="p-6 flex flex-col justify-between flex-grow">
+          {/* Shaded Text Section */}
+          <div className="p-6 flex flex-col justify-between flex-grow bg-slate-50/80 border-t border-slate-100 rounded-b-2xl">
             <div>
               <h3 className="text-xl font-bold text-slate-900 tracking-tight">
                 Polymer Chain Dynamics
@@ -178,7 +178,7 @@ export default function SectionsContainer() {
                 Simulate macromolecular entanglement, stress-strain curves, glass transition temperatures ($T_g$), and mechanical bond scission events.
               </p>
             </div>
-            <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400 font-mono">
+            <div className="mt-5 pt-3 border-t border-slate-200/60 flex items-center justify-between text-xs text-slate-400 font-mono">
               <span>Status: Roadmap</span>
               <span>Engine: MD / GROMACS</span>
             </div>
