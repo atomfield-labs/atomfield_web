@@ -1,6 +1,5 @@
 import { useRef, useMemo, useEffect } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { useScroll } from '@react-three/drei'
 import * as THREE from 'three'
 
 // Terrain elevation function (Slower movement will be handled by passing slower time)
@@ -179,12 +178,11 @@ function DynamicMolecule({ template, center, phase, radius, speed }: { template:
 export default function PESTerrain() {
   const meshRef = useRef<THREE.Mesh>(null)
   const groupRef = useRef<THREE.Group>(null)
-  const scroll = useScroll()
   const frameCount = useRef(0)
   
-  // High-resolution grid scaled down to avoid filling the entire screen
+  // Grid sized for card header
   const geometry = useMemo(() => {
-    const geo = new THREE.PlaneGeometry(35, 35, 120, 120)
+    const geo = new THREE.PlaneGeometry(26, 26, 70, 70)
     geo.rotateX(-Math.PI / 2)
     
     const count = geo.attributes.position.count
@@ -199,29 +197,21 @@ export default function PESTerrain() {
     }
   }, [geometry])
 
-  // Slightly lighter colors for peak and valley (Orange-500 and Blue-500)
+  // Lighter colors for peak and valley (Orange-500 and Blue-500)
   const colorValley = useMemo(() => new THREE.Color('#f97316'), []) 
   const colorPeak = useMemo(() => new THREE.Color('#3b82f6'), []) 
   const tempColor = useMemo(() => new THREE.Color(), [])
   const tempVertex = useMemo(() => new THREE.Vector3(), [])
 
   useFrame(({ clock }) => {
-    // SLOWER TIME for the overall terrain waving
+    // Smooth time for terrain waving
     const t = clock.getElapsedTime() * 0.4
-    const offset = scroll.offset
     
-    const distance = Math.abs(offset - 0.0)
-    const fade = Math.max(0, 1 - (distance * 4))
-    const isVisible = fade > 0.01
-
     if (groupRef.current) {
-        groupRef.current.visible = isVisible
-        const targetOffset = 0.0
-        const pageOffset = (offset - targetOffset) / 0.20
-        groupRef.current.position.y = -4 + (pageOffset * 25)
+      groupRef.current.visible = true
+      groupRef.current.position.set(0, -1.8, -2)
+      groupRef.current.rotation.set(-0.25, 0, 0)
     }
-
-    if (!isVisible) return
 
     const positionAttribute = geometry.attributes.position
     const colorAttribute = geometry.attributes.color
@@ -233,7 +223,6 @@ export default function PESTerrain() {
       positionAttribute.setY(i, y)
       
       // Calculate Gradient: Top = Blue, Valley = Orange
-      // Elevation ranges up to ~5.0 on the left edge now
       const factor = Math.min(Math.max((y + 1.2) / 3.0, 0), 1)
       tempColor.lerpColors(colorValley, colorPeak, factor)
       
@@ -243,29 +232,27 @@ export default function PESTerrain() {
     positionAttribute.needsUpdate = true
     colorAttribute.needsUpdate = true
 
-    // Compute normals every frame for perfect shading smoothness
     frameCount.current++
-    if (true) {
+    if (frameCount.current % 2 === 0) {
       geometry.computeVertexNormals()
     }
 
     if (meshRef.current?.material) {
-        (meshRef.current.material as THREE.MeshPhysicalMaterial).opacity = fade * 0.8
+      (meshRef.current.material as THREE.MeshPhysicalMaterial).opacity = 0.85
     }
   })
 
   return (
-    <group ref={groupRef} position={[0, -4, -5]} rotation={[-0.2, 0, 0]}>
+    <group ref={groupRef} position={[0, -1.8, -2]} rotation={[-0.25, 0, 0]}>
       <mesh ref={meshRef} geometry={geometry}>
         <meshPhysicalMaterial 
           vertexColors={true}
-          color="#ffffff" // Required so vertex colors aren't darkened
-          roughness={0.7} // Higher roughness stops it from just reflecting white light
+          color="#ffffff"
+          roughness={0.7}
           metalness={0.0}
-          clearcoat={0.1} // Lower clearcoat to prevent washing out colors
+          clearcoat={0.1}
           transparent={true}
-          opacity={0.8}
-          wireframe={false}
+          opacity={0.85}
           side={THREE.DoubleSide}
         />
       </mesh>
@@ -279,17 +266,12 @@ export default function PESTerrain() {
         />
       </mesh>
 
-      {/* Spread out ecosystem across the far corners of the grid */}
-      {/* Top Left */}
-      <DynamicMolecule template={MOLECULES.CH4} center={[-12, -12]} phase={0} radius={5} speed={0.8} />
-      {/* Top Right */}
-      <DynamicMolecule template={MOLECULES.NH3} center={[12, -12]} phase={Math.PI * 0.6} radius={6} speed={0.6} />
-      {/* Bottom Left */}
-      <DynamicMolecule template={MOLECULES.H2O} center={[-10, 8]} phase={Math.PI * 1.2} radius={4} speed={0.9} />
-      {/* Bottom Right */}
-      <DynamicMolecule template={MOLECULES.CH2O} center={[10, 10]} phase={Math.PI * 1.7} radius={7} speed={0.5} />
-      {/* Center (bonus molecule) */}
-      <DynamicMolecule template={MOLECULES.H2O} center={[0, -2]} phase={Math.PI * 0.3} radius={3} speed={1.2} />
+      {/* Dynamic molecules visible within card frustum */}
+      <DynamicMolecule template={MOLECULES.CH4} center={[-6, -4]} phase={0} radius={3.5} speed={0.8} />
+      <DynamicMolecule template={MOLECULES.NH3} center={[6, -4]} phase={Math.PI * 0.6} radius={3.5} speed={0.6} />
+      <DynamicMolecule template={MOLECULES.H2O} center={[-4, 3]} phase={Math.PI * 1.2} radius={3} speed={0.9} />
+      <DynamicMolecule template={MOLECULES.CH2O} center={[4, 3]} phase={Math.PI * 1.7} radius={3.5} speed={0.5} />
+      <DynamicMolecule template={MOLECULES.H2O} center={[0, -0.5]} phase={Math.PI * 0.3} radius={2} speed={1.1} />
     </group>
   )
 }

@@ -1,121 +1,210 @@
+import { Suspense } from 'react'
+import { Canvas } from '@react-three/fiber'
+import PESTerrain from '../animations/PESTerrain'
+import JablonskiDiagram from '../animations/JablonskiDiagram'
+import IonLattice from '../animations/IonLattice'
+import PolymerMelt from '../animations/PolymerMelt'
+
 export default function SectionsContainer() {
   return (
-    <>
-      {/* Section 1: Nanoreactor (Active) */}
-      <section className="w-full h-screen flex flex-col justify-center px-6 pointer-events-none">
+    <section id="modules-grid" className="w-full px-4 sm:px-6 md:px-8 lg:px-10 xl:px-12 pb-24">
+      {/* Section Header */}
+      <div className="mb-10 text-center md:text-left max-w-2xl">
+        <h2 className="text-3xl font-extrabold tracking-tight text-slate-900">
+          Calculation Modules
+        </h2>
+        <p className="text-base text-slate-600 mt-2 font-medium">
+          Preconfigured high-throughput quantum and molecular simulation workflows.
+        </p>
+      </div>
+
+      {/* 3-Cards Per Row Responsive Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8 w-full">
+        {/* Card 1: Nanoreactor (First) */}
         <div 
           onClick={() => window.location.hash = '#pipeline/nanoreactor'}
-          className="w-full max-w-xl mr-0 md:mr-[5%] ml-auto bg-white/90 backdrop-blur-2xl p-10 rounded-3xl border border-white/60 shadow-xl shadow-slate-800/10 pointer-events-auto border-t-[4px] border-t-blue-500 cursor-pointer hover:scale-[1.02] transition-transform relative"
+          className="bg-white/95 backdrop-blur-xl rounded-2xl border border-blue-500/30 shadow-md hover:shadow-xl hover:border-blue-500 transition-all duration-300 flex flex-col overflow-hidden cursor-pointer group"
         >
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-4xl font-extrabold text-slate-900 tracking-tight">Nanoreactor & Catalysis</h2>
-            <span className="px-3 py-1 bg-blue-100 text-blue-700 font-bold rounded-full text-xs animate-pulse">LIVE DEMO</span>
+          <div className="w-full h-52 bg-slate-950 relative overflow-hidden rounded-t-2xl">
+            <Suspense fallback={<div className="w-full h-full bg-slate-900 animate-pulse" />}>
+              <Canvas camera={{ position: [0, 2.5, 7], fov: 45 }} className="w-full h-full">
+                <ambientLight intensity={1.2} />
+                <directionalLight position={[10, 15, 10]} intensity={2.0} color="#ffffff" />
+                <directionalLight position={[-10, 10, -5]} intensity={1.2} color="#93c5fd" />
+                <pointLight position={[0, -2, 3]} intensity={0.8} color="#f97316" />
+                <PESTerrain />
+              </Canvas>
+            </Suspense>
+            <div className="absolute top-3 right-3 px-2.5 py-1 text-[11px] font-bold tracking-wider rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 backdrop-blur-md">
+              LIVE DEMO
+            </div>
           </div>
-          <p className="text-lg text-slate-700 font-medium leading-relaxed mb-6">
-            Map transition states and calculate catalytic turnover frequencies in confined nanoscale environments using our prebuilt pipeline.
-          </p>
-          <div className="border-t border-slate-100 pt-6">
-            <ul className="space-y-4">
-              <li className="flex items-start text-slate-700">
-                <svg className="w-6 h-6 text-blue-500 mr-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
-                <span><strong>Automated Transitions:</strong> Geometry Optimization &rarr; TS Search &rarr; Frequency Calculation executed entirely via graph orchestrator.</span>
-              </li>
-              <li className="flex items-start text-slate-700">
-                <svg className="w-6 h-6 text-blue-500 mr-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
-                <span><strong>No Setup Required:</strong> Click to launch the pre-configured workflow and instantly visualize intermediate results.</span>
-              </li>
-            </ul>
+          <div className="p-6 flex flex-col flex-grow justify-between">
+            <div>
+              <h3 className="text-xl font-bold text-slate-900 tracking-tight group-hover:text-blue-600 transition-colors">
+                Nanoreactor & Catalysis
+              </h3>
+              <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider mt-1">
+                Reaction Networks & Transition State Search
+              </p>
+              <p className="text-sm text-slate-600 font-medium leading-relaxed mt-3">
+                Discover reaction pathways and compute activation barriers ($E_a$) in accelerated reactive molecular environments with xTB and GFN-FF.
+              </p>
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                window.location.hash = '#pipeline/nanoreactor';
+              }}
+              className="w-full mt-6 py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold tracking-wide rounded-xl transition-colors shadow-sm flex items-center justify-center gap-2"
+            >
+              Launch Nanoreactor &rarr;
+            </button>
           </div>
         </div>
-      </section>
 
-      {/* Section 2: Optoelectronics */}
-      <section className="w-full h-screen flex flex-col justify-center px-6 pointer-events-none">
-        <div className="w-full max-w-xl ml-0 md:ml-[5%] mr-auto bg-white/90 backdrop-blur-2xl p-10 rounded-3xl border border-white/60 shadow-xl shadow-slate-800/10 border-t-[4px] border-t-orange-500 relative">
-          <span className="absolute top-4 right-6 px-3 py-1 bg-slate-200 text-slate-700 font-bold rounded-full text-xs">COMING SOON</span>
-          <h2 className="text-4xl font-extrabold text-slate-900 mb-4 tracking-tight">Optoelectronic Properties</h2>
-          <p className="text-lg text-slate-700 font-medium leading-relaxed mb-6">
-            Visualize excited states instantly. Calculate UV-Vis absorption, emission probabilities, and 
-            frontier orbital energy gaps directly from natural language prompts.
-          </p>
-          <div className="border-t border-slate-100 pt-6">
-            <ul className="space-y-4">
-              <li className="flex items-start text-slate-700">
-                <svg className="w-6 h-6 text-orange-500 mr-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
-                <span><strong>No Command-Line Wrangling:</strong> Run high-accuracy TD-DFT calculations directly from the browser without touching an HPC cluster.</span>
-              </li>
-              <li className="flex items-start text-slate-700">
-                <svg className="w-6 h-6 text-orange-500 mr-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
-                <span><strong>Real-Time Insights:</strong> Monitor wave-function convergence and orbital electron densities as they calculate.</span>
-              </li>
-            </ul>
+        {/* Card 2: Optoelectronics (Second) */}
+        <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-200/80 shadow-md hover:shadow-xl hover:border-slate-300 transition-all duration-300 flex flex-col overflow-hidden">
+          <div className="w-full h-52 bg-slate-950 relative overflow-hidden rounded-t-2xl">
+            <Suspense fallback={<div className="w-full h-full bg-slate-900 animate-pulse" />}>
+              <Canvas camera={{ position: [0, 0, 7.5], fov: 45 }} className="w-full h-full">
+                <ambientLight intensity={1.2} />
+                <directionalLight position={[5, 10, 5]} intensity={2.0} color="#ffffff" />
+                <JablonskiDiagram />
+              </Canvas>
+            </Suspense>
+            {/* Crisp HTML State Overlays */}
+            <div className="absolute left-3 bottom-3 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-900/80 text-slate-400 border border-slate-800 pointer-events-none">
+              S₀ Ground
+            </div>
+            <div className="absolute left-3 top-3 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-sky-950/80 text-sky-400 border border-sky-800/50 pointer-events-none">
+              S₁ Singlet
+            </div>
+            <div className="absolute right-3 bottom-14 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-pink-950/80 text-pink-400 border border-pink-800/50 pointer-events-none">
+              T₁ Triplet
+            </div>
+            <div className="absolute top-3 right-3 px-2.5 py-1 text-[11px] font-bold tracking-wider rounded-full bg-slate-800/80 text-slate-400 border border-slate-700/60 backdrop-blur-md">
+              COMING SOON
+            </div>
+          </div>
+          <div className="p-6 flex flex-col flex-grow justify-between">
+            <div>
+              <h3 className="text-xl font-bold text-slate-900 tracking-tight">
+                Optoelectronic Properties
+              </h3>
+              <p className="text-xs font-semibold text-orange-600 uppercase tracking-wider mt-1">
+                TD-DFT Excited States & UV-Vis Spectra
+              </p>
+              <p className="text-sm text-slate-600 font-medium leading-relaxed mt-3">
+                Calculate electronic excited states, fluorescence vs phosphorescence pathways, oscillator strengths, and frontier orbital energies directly in-browser.
+              </p>
+            </div>
+            <div className="mt-6 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400 font-mono">
+              <span>Status: Roadmap</span>
+              <span>Engine: TD-DFT</span>
+            </div>
           </div>
         </div>
-      </section>
 
-      {/* Section 3: Polymers */}
-      <section className="w-full h-screen flex flex-col justify-center px-6 pointer-events-none">
-        <div className="w-full max-w-xl mr-0 md:mr-[5%] ml-auto bg-white/90 backdrop-blur-2xl p-10 rounded-3xl border border-white/60 shadow-xl shadow-slate-800/10 border-t-[4px] border-t-orange-500 relative">
-          <span className="absolute top-4 right-6 px-3 py-1 bg-slate-200 text-slate-700 font-bold rounded-full text-xs">COMING SOON</span>
-          <h2 className="text-4xl font-extrabold text-slate-900 mb-4 tracking-tight">Polymer Chain Dynamics</h2>
-          <p className="text-lg text-slate-700 font-medium leading-relaxed mb-6">
-            Map entanglement and thermophysical properties. Simulate glass transitions, molecular weight distributions, 
-            and complex rheology with uncompromised precision.
-          </p>
-          <div className="border-t border-slate-100 pt-6">
-            <ul className="space-y-4">
-              <li className="flex items-start text-slate-700">
-                <svg className="w-6 h-6 text-orange-500 mr-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
-                <span><strong>Democratized Simulation:</strong> Build complex, million-atom polymer topologies without writing a single line of input script.</span>
-              </li>
-              <li className="flex items-start text-slate-700">
-                <svg className="w-6 h-6 text-orange-500 mr-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
-                <span><strong>Publication-Ready Visualization:</strong> Hardware-accelerated graphics render physical stress-strain curves and scission events flawlessly.</span>
-              </li>
-            </ul>
+        {/* Card 3: Solid State (Third) */}
+        <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-200/80 shadow-md hover:shadow-xl hover:border-slate-300 transition-all duration-300 flex flex-col overflow-hidden">
+          <div className="w-full h-52 bg-slate-950 relative overflow-hidden rounded-t-2xl">
+            <Suspense fallback={<div className="w-full h-full bg-slate-900 animate-pulse" />}>
+              <Canvas camera={{ position: [0, 0, 8.5], fov: 45 }} className="w-full h-full">
+                <ambientLight intensity={1.2} />
+                <directionalLight position={[10, 10, 10]} intensity={2.0} color="#ffffff" />
+                <IonLattice />
+              </Canvas>
+            </Suspense>
+            <div className="absolute top-3 right-3 px-2.5 py-1 text-[11px] font-bold tracking-wider rounded-full bg-slate-800/80 text-slate-400 border border-slate-700/60 backdrop-blur-md">
+              COMING SOON
+            </div>
+          </div>
+          <div className="p-6 flex flex-col flex-grow justify-between">
+            <div>
+              <h3 className="text-xl font-bold text-slate-900 tracking-tight">
+                Solid State & Lattices
+              </h3>
+              <p className="text-xs font-semibold text-purple-600 uppercase tracking-wider mt-1">
+                Periodic DFT & Ion Transport Dynamics
+              </p>
+              <p className="text-sm text-slate-600 font-medium leading-relaxed mt-3">
+                Model infinite crystal structures, phonon dispersions, and interstitial ion migration pathways in solid electrolytes and battery cathode materials.
+              </p>
+            </div>
+            <div className="mt-6 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400 font-mono">
+              <span>Status: Roadmap</span>
+              <span>Engine: Plane-Wave DFT</span>
+            </div>
           </div>
         </div>
-      </section>
 
-      {/* Section 4: Solid State */}
-      <section className="w-full h-screen flex flex-col justify-center px-6 pointer-events-none">
-        <div className="w-full max-w-xl ml-0 md:ml-[5%] mr-auto bg-white/90 backdrop-blur-2xl p-10 rounded-3xl border border-white/60 shadow-xl shadow-slate-800/10 border-t-[4px] border-t-orange-500 relative">
-          <span className="absolute top-4 right-6 px-3 py-1 bg-slate-200 text-slate-700 font-bold rounded-full text-xs">COMING SOON</span>
-          <h2 className="text-4xl font-extrabold text-slate-900 mb-4 tracking-tight">Solid State & Lattices</h2>
-          <p className="text-lg text-slate-700 font-medium leading-relaxed mb-6">
-            From perovskites to battery electrolytes. Model infinite periodic systems, energy band structures, 
-            state densities, and catalytic surface reactivity.
-          </p>
-          <div className="border-t border-slate-100 pt-6">
-            <ul className="space-y-4">
-              <li className="flex items-start text-slate-700">
-                <svg className="w-6 h-6 text-orange-500 mr-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
-                <span><strong>Physics & AI Integration:</strong> Interlace highly accurate Density Functional Theory (DFT) with lightning-fast machine-learned interatomic potentials.</span>
-              </li>
-              <li className="flex items-start text-slate-700">
-                <svg className="w-6 h-6 text-orange-500 mr-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
-                <span><strong>Fully Integrated Workflows:</strong> Stop managing separate file formats. Our cloud-native architecture natively handles structure generation, calculation, and analysis.</span>
-              </li>
-            </ul>
+        {/* Card 4: Polymers (Fourth) */}
+        <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-200/80 shadow-md hover:shadow-xl hover:border-slate-300 transition-all duration-300 flex flex-col overflow-hidden">
+          <div className="w-full h-52 bg-slate-950 relative overflow-hidden rounded-t-2xl">
+            <Suspense fallback={<div className="w-full h-full bg-slate-900 animate-pulse" />}>
+              <Canvas camera={{ position: [0, 0, 10], fov: 45 }} className="w-full h-full">
+                <ambientLight intensity={1.2} />
+                <directionalLight position={[5, 10, 5]} intensity={2.0} color="#ffffff" />
+                <pointLight position={[0, 0, 3]} intensity={1.0} color="#ef4444" />
+                <PolymerMelt />
+              </Canvas>
+            </Suspense>
+            <div className="absolute top-3 right-3 px-2.5 py-1 text-[11px] font-bold tracking-wider rounded-full bg-slate-800/80 text-slate-400 border border-slate-700/60 backdrop-blur-md">
+              COMING SOON
+            </div>
+          </div>
+          <div className="p-6 flex flex-col flex-grow justify-between">
+            <div>
+              <h3 className="text-xl font-bold text-slate-900 tracking-tight">
+                Polymer Chain Dynamics
+              </h3>
+              <p className="text-xs font-semibold text-rose-600 uppercase tracking-wider mt-1">
+                Chain Entanglement & Rheology
+              </p>
+              <p className="text-sm text-slate-600 font-medium leading-relaxed mt-3">
+                Simulate macromolecular entanglement, stress-strain curves, glass transition temperatures ($T_g$), and mechanical bond scission events.
+              </p>
+            </div>
+            <div className="mt-6 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400 font-mono">
+              <span>Status: Roadmap</span>
+              <span>Engine: MD / GROMACS</span>
+            </div>
           </div>
         </div>
-      </section>
 
-      {/* Section 5: The Orchestrator CTA */}
-      <section className="w-full h-screen flex flex-col justify-center items-center px-6 text-center pointer-events-none">
-        <div className="bg-white/90 backdrop-blur-2xl p-12 rounded-[2rem] border border-white/60 shadow-xl shadow-slate-800/10 max-w-3xl w-full flex flex-col items-center pointer-events-auto border-t-[8px] border-t-orange-500">
-          <h2 className="text-5xl font-extrabold text-slate-900 mb-6 tracking-tight">Enter the Orchestrator.</h2>
-          <p className="text-xl text-slate-600 mb-8 max-w-2xl leading-relaxed font-medium">
-            The blank canvas where LLM-driven science happens. No cluttered toolbars. 
-            Just pure intent, compiled into executing physics pipelines.
-          </p>
-          <div className="flex flex-wrap justify-center gap-3 mb-10">
-            <span className="px-5 py-2 bg-slate-50 text-slate-700 rounded-full text-sm font-bold border border-slate-200">Natural Language Dispatch</span>
-            <span className="px-5 py-2 bg-slate-50 text-slate-700 rounded-full text-sm font-bold border border-slate-200">Model Context Protocol (MCP)</span>
-            <span className="px-5 py-2 bg-slate-50 text-slate-700 rounded-full text-sm font-bold border border-slate-200">Autonomous Agent Workflows</span>
+        {/* Platform Orchestrator Card (Spanning 2 columns to complete row 2) */}
+        <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 text-white rounded-2xl p-7 border border-slate-800 shadow-md flex flex-col justify-between lg:col-span-2 relative overflow-hidden">
+          <div className="relative z-10">
+            <div className="flex items-center justify-between mb-4">
+              <span className="px-3 py-1 bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded-full text-xs font-bold tracking-wider">
+                CORE PLATFORM
+              </span>
+              <span className="text-xs font-mono text-slate-400">DAG Execution Engine</span>
+            </div>
+            <h3 className="text-2xl font-extrabold tracking-tight text-white mb-2">
+              Modular Pipeline Orchestrator
+            </h3>
+            <p className="text-slate-300 text-sm leading-relaxed max-w-xl">
+              The blank canvas where LLM-driven science happens. Chain geometry optimization, transition state searches, and property evaluations into executing physics pipelines.
+            </p>
+            <div className="flex flex-wrap gap-2 mt-4">
+              <span className="px-3 py-1 bg-slate-800/80 text-slate-300 rounded-lg text-xs font-medium border border-slate-700/50">Natural Language Dispatch</span>
+              <span className="px-3 py-1 bg-slate-800/80 text-slate-300 rounded-lg text-xs font-medium border border-slate-700/50">Model Context Protocol</span>
+              <span className="px-3 py-1 bg-slate-800/80 text-slate-300 rounded-lg text-xs font-medium border border-slate-700/50">Real-time DAG Execution</span>
+            </div>
+          </div>
+          <div className="relative z-10 mt-6 pt-4 border-t border-slate-800/80 flex items-center justify-between">
+            <span className="text-xs text-slate-400 font-mono">Ready for custom workflows</span>
+            <button
+              onClick={() => window.location.hash = '#pipeline/new'}
+              className="px-5 py-2.5 bg-orange-600 hover:bg-orange-500 text-white font-semibold text-xs tracking-wide rounded-xl transition-colors shadow-sm"
+            >
+              Open Pipeline Canvas &rarr;
+            </button>
           </div>
         </div>
-      </section>
-    </>
+      </div>
+    </section>
   )
 }

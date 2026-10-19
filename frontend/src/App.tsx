@@ -1,15 +1,7 @@
-import { Canvas } from '@react-three/fiber'
-import { ScrollControls, Scroll } from '@react-three/drei'
-import { Suspense, useState, useEffect, Component, type ReactNode } from 'react'
+import { useState, useEffect, Component, type ReactNode } from 'react'
 
-// ... existing imports ...
-import PESTerrain from './animations/PESTerrain'
-import JablonskiDiagram from './animations/JablonskiDiagram'
-import PolymerMelt from './animations/PolymerMelt'
-import IonLattice from './animations/IonLattice'
 import HeroSection from './components/HeroSection'
 import SectionsContainer from './components/SectionsContainer'
-import ScrollSnapper from './components/ScrollSnapper'
 import Navbar from './components/Navbar'
 import SessionsDashboard from './components/dashboard/SessionsDashboard'
 import AdminDashboard from './components/admin/AdminDashboard'
@@ -30,23 +22,6 @@ class ErrorBoundary extends Component<{children: ReactNode}, ErrorBoundaryState>
   }
 }
 
-function Scene() {
-  return (
-    <>
-      <ScrollSnapper />
-      <ambientLight intensity={1.0} />
-      <directionalLight position={[10, 15, 10]} intensity={2.0} color="#ffffff" />
-      <directionalLight position={[-10, 10, -5]} intensity={1.2} color="#93c5fd" />
-      <pointLight position={[0, -5, 5]} intensity={0.8} color="#f97316" />
-      
-      <PESTerrain />
-      <JablonskiDiagram />
-      <PolymerMelt />
-      <IonLattice />
-    </>
-  )
-}
-
 function App() {
   const [hash, setHash] = useState(window.location.hash);
 
@@ -62,7 +37,7 @@ function App() {
         
         {!hash.startsWith('#pipeline') && <Navbar />}
 
-        {/* Dynamic Views over the Canvas */}
+        {/* Dynamic Views */}
         {hash.startsWith('#admin') ? (
           <div className="absolute inset-0 z-40 overflow-y-auto bg-slate-50">
             <AdminDashboard />
@@ -80,17 +55,10 @@ function App() {
             <PipelineEditor sessionId={hash.replace('#pipeline/', '')} />
           </div>
         ) : (
-          <Canvas camera={{ position: [0, 2, 10], fov: 45 }}>
-            <Suspense fallback={null}>
-              <ScrollControls pages={6} damping={0.2}>
-                <Scene />
-                <Scroll html style={{ width: '100%' }}>
-                  <HeroSection />
-                  <SectionsContainer />
-                </Scroll>
-              </ScrollControls>
-            </Suspense>
-          </Canvas>
+          <div className="absolute inset-0 z-10 overflow-y-auto bg-slate-50 selection:bg-orange-100 selection:text-orange-900">
+            <HeroSection />
+            <SectionsContainer />
+          </div>
         )}
 
       </main>

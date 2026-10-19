@@ -1,6 +1,5 @@
 import { useRef, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { useScroll } from '@react-three/drei'
 import * as THREE from 'three'
 
 const GRID = 4
@@ -15,7 +14,6 @@ export default function IonLattice() {
   const ionMeshRef = useRef<THREE.Mesh>(null)
   const pathGeoRef = useRef<THREE.BufferGeometry>(null)
   
-  const scroll = useScroll()
 
   // Base crystalline lattice structure
   const { atomPositions, dynamicAtomPositions, bondIndices } = useMemo(() => {
@@ -102,29 +100,17 @@ export default function IonLattice() {
   const pathPositions = useMemo(() => new Float32Array(MAX_PATH * 3), [])
 
   useFrame(({ clock }, delta) => {
-    const offset = scroll.offset
-    const distance = Math.abs(offset - 0.80)
-    
-    // 2.5 instead of 4 means the animation stays visible longer during scroll transitions,
-    // allowing it to crossfade beautifully with the other sections rather than leaving empty dead zones.
-    const fadeOpacity = Math.max(0, (1 - distance * 2.5) * 0.8)
-    const isVisible = fadeOpacity > 0.01
-
     if (groupRef.current) {
-      groupRef.current.visible = isVisible
-      const pageOffset = (offset - 0.80) / 0.20
-      // Shifted slightly towards top-right corner (X from 4.5 to 5.5, Y from -2.5 to -1.0)
-      groupRef.current.position.set(5.5, -1.0 + pageOffset * 25, -6)
-      groupRef.current.rotation.y = clock.getElapsedTime() * 0.1
-      groupRef.current.rotation.x = clock.getElapsedTime() * 0.05
+      groupRef.current.visible = true
+      groupRef.current.position.set(0, 0, 0)
+      groupRef.current.rotation.y = clock.getElapsedTime() * 0.12
+      groupRef.current.rotation.x = clock.getElapsedTime() * 0.06
     }
 
-    if (!isVisible) return
-
     // Update statically allocated materials
-    hostMat.opacity = fadeOpacity * 0.9
-    cloudMat.opacity = fadeOpacity * 0.15 // Lighter, more faint opacity
-    bondsMat.opacity = fadeOpacity * 0.35
+    hostMat.opacity = 0.9
+    cloudMat.opacity = 0.22
+    bondsMat.opacity = 0.4
 
     const s = state.current
     
@@ -182,7 +168,7 @@ export default function IonLattice() {
     }
 
     if (ionMeshRef.current?.material) {
-       (ionMeshRef.current.material as THREE.Material).opacity = fadeOpacity
+       (ionMeshRef.current.material as THREE.Material).opacity = 0.95
     }
 
     // --- 2. HOST LATTICE PHYSICS (Phonons, Polarons, & Electron Clouds) ---
@@ -273,7 +259,7 @@ export default function IonLattice() {
   })
 
   return (
-    <group ref={groupRef} visible={false}>
+    <group ref={groupRef}>
       
       {/* Dynamic Lattice Bonds */}
       <lineSegments geometry={bondsGeo} material={bondsMat} />

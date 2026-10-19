@@ -8,12 +8,12 @@ import tempfile
 from pathlib import Path
 
 from afscripts.utilities.fileutils import find_upstream_files
+
 from app.worker.tasks import (
     _build_chemistry_command,
     _is_chemistry_task,
     _link_upstream_workspaces,
 )
-
 
 
 def test_is_chemistry_task():

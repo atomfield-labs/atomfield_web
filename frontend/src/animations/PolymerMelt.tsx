@@ -1,6 +1,5 @@
 import { useRef, useMemo } from 'react'
-import { useFrame, useThree } from '@react-three/fiber'
-import { useScroll } from '@react-three/drei'
+import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 
 const NUM_CHAINS = 15
@@ -12,71 +11,41 @@ export default function PolymerMelt() {
   const meshRef = useRef<THREE.InstancedMesh>(null)
   const lineGeoRef = useRef<THREE.BufferGeometry>(null)
   const lineMatRef = useRef<THREE.LineBasicMaterial>(null)
-  const scroll = useScroll()
-  
-  // Dynamically fetch the user's screen dimensions to calculate perfect physical boundaries
-  const { viewport } = useThree()
-
   // Precompute relaxed and stretched states, and chain physics metadata
-  // We add viewport.width to dependencies so it recalculates perfect bounds on extreme window resizes
   const { relaxed, stretched, baseIndices, chainData } = useMemo(() => {
     const rel = new Float32Array(TOTAL_BEADS * 3)
     const str = new Float32Array(TOTAL_BEADS * 3)
-
-    // Mathematically calculate the absolute left edge of the screen at the group's depth (Z = -5)
-    // Camera is at Z = 10. Distance = 15. Standard z=0 distance = 10.
-    const frustumScale = 15 / 10 
-    const planeWidth = viewport.width * frustumScale
-    
-    // The absolute left edge of the monitor. We add a +0.5 safety margin so it doesn't touch the bezel.
-    const absoluteLeftEdge = -(planeWidth / 2) + 0.5 
-    
-    // The group itself is shifted to X = -4.5. Calculate the relative local X for the left edge.
-    const maxRelativeLeft = absoluteLeftEdge - (-4.5)
-    
-    // The text card starts on the right half of the screen. Max absolute X = 0.0.
-    const maxRelativeRight = 0.0 - (-4.5) // Which is exactly +4.5
-
     const ind = new Uint16Array(NUM_CHAINS * (BEADS_PER_CHAIN - 1) * 2)
     const data = []
-
     let indexPtr = 0
 
     for (let c = 0; c < NUM_CHAINS; c++) {
-      // Restrict Z-depth variation slightly to prevent wide camera frustum clipping differences
-      const yBase = (Math.random() - 0.5) * 8
-      const zBase = (Math.random() - 0.5) * 3
-      
+      const yBase = (Math.random() - 0.5) * 4.5
+      const zBase = (Math.random() - 0.5) * 2.0
       let currRel = new THREE.Vector3(0, yBase, zBase)
-      
-      // Scientifically accurate: Assign a unique weak point (scission locus) for each chain
       data.push({
-        breakBead: Math.floor(BEADS_PER_CHAIN * (0.3 + 0.4 * Math.random())), // Breaks near the middle
+        breakBead: Math.floor(BEADS_PER_CHAIN * (0.3 + 0.4 * Math.random())),
       })
-      
-      // PERFECTION: Start exactly at the screen's left edge, and stretch exactly to the center!
-      const startX = maxRelativeLeft + Math.random() * 1.0 
-      const endX = maxRelativeRight - Math.random() * 3.0 
+      const startX = -3.8 + Math.random() * 0.4
+      const endX = 3.8 - Math.random() * 0.4
       const stretchSpan = endX - startX
 
       for (let b = 0; b < BEADS_PER_CHAIN; b++) {
         const i = c * BEADS_PER_CHAIN + b
-        
         if (b > 0) {
-           const dir = new THREE.Vector3(
-             Math.random() - 0.5, 
-             Math.random() - 0.5, 
-             Math.random() - 0.5
-           ).normalize().multiplyScalar(0.7)
-           currRel.add(dir)
+          const dir = new THREE.Vector3(
+            Math.random() - 0.5, 
+            Math.random() - 0.5, 
+            Math.random() - 0.5
+          ).normalize().multiplyScalar(0.7)
+          currRel.add(dir)
         }
-        
         rel[i * 3] = currRel.x
         rel[i * 3 + 1] = currRel.y
         rel[i * 3 + 2] = currRel.z
-        
-        const noiseY = (Math.random() - 0.5) * 0.3
-        const noiseZ = (Math.random() - 0.5) * 0.3
+
+        const noiseY = (Math.random() - 0.5) * 0.2
+        const noiseZ = (Math.random() - 0.5) * 0.2
         str[i * 3] = startX + b * (stretchSpan / (BEADS_PER_CHAIN - 1))
         str[i * 3 + 1] = yBase + noiseY
         str[i * 3 + 2] = zBase + noiseZ
@@ -88,7 +57,7 @@ export default function PolymerMelt() {
       }
     }
     return { relaxed: rel, stretched: str, baseIndices: ind, chainData: data }
-  }, [viewport.width])
+  }, [])
 
   const linePositions = useMemo(() => new Float32Array(TOTAL_BEADS * 3), [])
   const activeIndices = useMemo(() => new Uint16Array(baseIndices.length), [baseIndices])
@@ -99,19 +68,12 @@ export default function PolymerMelt() {
   const tempColor = useMemo(() => new THREE.Color(), [])
 
   useFrame(({ clock }) => {
-    const offset = scroll.offset
-    const distance = Math.abs(offset - 0.60)
-    const fadeOpacity = Math.max(0, (1 - distance * 2.5) * 1.0)
-    const isVisible = fadeOpacity > 0.01
-
     if (groupRef.current) {
-        groupRef.current.visible = isVisible
-        const pageOffset = (offset - 0.60) / 0.20
-        // Shifted vertically up (-1.5) to balance text
-        groupRef.current.position.y = -1.5 + (pageOffset * 25)
+      groupRef.current.visible = true
+      groupRef.current.position.set(0, 0, 0)
     }
 
-    if (!isVisible || !meshRef.current || !lineGeoRef.current) return
+    if (!meshRef.current || !lineGeoRef.current) return
 
     // Global strain cycle (1.3 seconds mapped)
     // 0.0 -> 0.8 : Pulling phase (elastic stretching)
@@ -230,16 +192,15 @@ export default function PolymerMelt() {
     }
     
     if (meshRef.current.material) {
-        (meshRef.current.material as THREE.Material).opacity = fadeOpacity
+      (meshRef.current.material as THREE.Material).opacity = 0.9
     }
     if (lineMatRef.current) {
-        lineMatRef.current.opacity = fadeOpacity * 0.3
+      lineMatRef.current.opacity = 0.35
     }
   })
 
   return (
-    // Anchored at X = -4.5 (left side) to perfectly balance the right text card
-    <group ref={groupRef} position={[-4.5, -1.5, -5]} visible={false}>
+    <group ref={groupRef} position={[0, 0, 0]}>
       
       {/* Dynamic Polymer Bonds */}
       <lineSegments>
@@ -256,7 +217,7 @@ export default function PolymerMelt() {
           ref={lineMatRef} 
           color="#94a3b8" 
           transparent 
-          opacity={0} 
+          opacity={0.9} 
         />
       </lineSegments>
 
@@ -265,7 +226,7 @@ export default function PolymerMelt() {
         ref={meshRef} 
         args={[undefined, undefined, TOTAL_BEADS]}
       >
-        <sphereGeometry args={[0.15, 16, 16]} />
+        <sphereGeometry args={[0.18, 16, 16]} />
         <meshPhysicalMaterial 
             color="#ffffff"       
             roughness={0.1}
