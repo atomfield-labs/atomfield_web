@@ -15,7 +15,7 @@ payload = {
 }
 
 print("Submitting Pipeline...")
-res = requests.post("http://localhost:8000/jobs/pipeline/submit", json=payload)
+res = requests.post("http://localhost:8000/api/jobs/pipeline/submit", json=payload)
 print(res.status_code)
 print(json.dumps(res.json(), indent=2))
 
@@ -23,5 +23,5 @@ print("\nWaiting for 25 seconds for nodes to process...")
 time.sleep(25)
 
 print("\nFetching all jobs:")
-res_list = requests.get("http://localhost:8000/jobs?limit=10")
+res_list = requests.get("http://localhost:8000/api/jobs?limit=10")
 print(json.dumps(res_list.json(), indent=2))

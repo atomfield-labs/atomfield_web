@@ -1,0 +1,3 @@
+[submodule "scripts_repo"]
+	path = scripts_repo
+	url = /Users/ujjawalm/afscripts

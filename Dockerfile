@@ -1,22 +1,21 @@
 FROM python:3.11-slim
 
-# Industry standard: ensure Python prints to stdout immediately and doesn't write .pyc files
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# Install docker CLI for the worker socket and curl for healthchecks
+# Install Docker CLI for container management and curl for health checks
 RUN apt-get update && \
     apt-get install -y --no-install-recommends docker.io curl && \
     rm -rf /var/lib/apt/lists/*
 
-# Install uv directly from astral
+# Install uv binary
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
-# Sync dependencies using uv (leverages Docker layer caching)
+# Install project dependencies
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project
+RUN uv sync --no-install-project --python 3.11
 
-# Copy application code
+# Copy application source
 COPY . .

@@ -10,3 +10,10 @@ wheels/
 .venv
 .env
 __pycache__/
+
+# Logs and runtime artifacts
+*.log
+artifacts/
+node_modules/
+.DS_Store
+.vscode/

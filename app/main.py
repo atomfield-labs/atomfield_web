@@ -1,135 +1,99 @@
 """
-AtomField — Application Entrypoint (Enterprise Architecture)
-
-📚 LESSON: The Composition Root
-
-    In a DDD/layered architecture, main.py is the "Composition Root" —
-    the one place where you WIRE everything together:
-    • Create the FastAPI app
-    • Attach the lifespan (startup/shutdown hooks)
-    • Include the routers (modular route sets)
-    • Register middleware (CORS, logging, etc.)
-
-    It imports FROM every layer but no layer imports FROM it.
-    This prevents circular dependencies and keeps the dependency
-    graph as a clean tree (not a web).
-
-Architecture:
-
-    app/main.py   (this file — composition root)
-        ├── app/core/config.py          (settings singleton)
-        ├── app/db/base.py              (ORM base registry)
-        ├── app/db/session.py           (engine + session factory)
-        ├── app/models/job.py           (Job ORM entity)
-        ├── app/schemas/job.py          (Pydantic I/O contracts)
-        ├── app/services/job_service.py (business logic)
-        ├── app/api/routes/jobs.py      (HTTP controllers)
-        ├── app/api/dependencies.py     (DI utilities)
-        └── app/worker/
-            ├── tasks.py                (ARQ background tasks)
-            └── settings.py             (ARQ worker config)
+AtomField application entrypoint and composition root.
+Configures FastAPI, lifespan hooks, middleware, and route mounting.
 """
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+
 from arq import create_pool
 from arq.connections import RedisSettings
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 
+from app.api.router import api_router
 from app.core.config import settings
-from app.db.session import engine
+from app.core.security import hash_api_key
 from app.db.base import Base
-
-# 📚 LESSON: This import has a side effect — it registers the Job model
-# with Base.metadata. Without it, create_all() would create zero tables.
-# This is a common "gotcha" with SQLAlchemy: unused imports that are critical.
-from app.models.job import Job  # noqa: F401 — registers the model
-
-from app.api.routes import jobs as jobs_router
+from app.db.session import AsyncSessionLocal, engine
+from app.models.api_key import ApiKey
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
-    Application lifecycle manager.
+    Manage application startup lifecycle and graceful shutdown resources.
 
-    📚 LESSON: Lifespan vs @app.on_event
-        @app.on_event("startup") is deprecated in FastAPI ≥ 0.93.
-        The lifespan pattern is the modern replacement:
-        • Startup code BEFORE yield
-        • Shutdown code AFTER yield
-        • The app serves requests BETWEEN them
-        • Resources can be shared via app.state
+    :param app: FastAPI application instance.
+    :type app: FastAPI
+    :return: Async generator yielding control to the application context.
+    :rtype: AsyncGenerator[None, None]
     """
-    # === STARTUP ===
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
 
-    # Create database tables (Phase 1-3 convenience)
-    # 📚 In production Phase 4+, replace with Alembic migrations:
-    #   alembic upgrade head
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # Auto-provision cluster administrator key if configured
+    if settings.ADMIN_API_KEY:
+        admin_hash = hash_api_key(settings.ADMIN_API_KEY)
+        async with AsyncSessionLocal() as session:
+            stmt = select(ApiKey).where(ApiKey.key_hash == admin_hash)
+            res = await session.execute(stmt)
+            if not res.scalars().first():
+                prefix = settings.ADMIN_API_KEY[:8] + "..."
+                admin_key = ApiKey(
+                    key_hash=admin_hash,
+                    key_prefix=prefix,
+                    label="Cluster Administrator",
+                    quota_limit=999999,
+                    quota_used=0,
+                    is_active=True,
+                )
+                session.add(admin_key)
+                await session.commit()
 
-    # Initialize Redis connection pool for the message broker
     app.state.redis = await create_pool(
         RedisSettings(host=settings.REDIS_HOST, port=settings.REDIS_PORT)
     )
+    try:
+        yield
+    finally:
+        await app.state.redis.aclose()
+        await engine.dispose()
 
-    yield  # ← Application serves requests here
 
-    # === SHUTDOWN ===
-    app.state.redis.close()
-    await app.state.redis.wait_closed()
-
-
-# -----------------------------------------------------------------------
-# Application Factory
-# -----------------------------------------------------------------------
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    description="A distributed job scheduler & DAG executor for materials science simulations.",
+    description=(
+        "Distributed job scheduler and DAG execution engine for "
+        "computational chemistry."
+    ),
     lifespan=lifespan,
 )
 
-# -----------------------------------------------------------------------
-# 📚 LESSON: CORS Middleware (Cross-Origin Resource Sharing)
-#   When the React frontend (Phase 5, e.g. localhost:3000) calls
-#   the API (localhost:8000), the browser blocks it by default —
-#   this is the Same-Origin Policy.
-#   CORS middleware tells the browser: "requests from these origins are OK".
-#   In production, replace "*" with your actual domain(s).
-# -----------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: Lock down in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# -----------------------------------------------------------------------
-# Register Routers
-# -----------------------------------------------------------------------
-app.include_router(jobs_router.router)
+# Standard API Gateway
+app.include_router(api_router)
 
 
-# -----------------------------------------------------------------------
-# System Endpoints (not in a router — they're app-level)
-# -----------------------------------------------------------------------
 @app.get("/health", tags=["System"])
-async def health_check():
+async def health_check() -> dict[str, str]:
     """
-    Liveness probe for load balancers and monitoring.
+    Service liveness probe returning system identity and runtime status.
 
-    📚 LESSON: Health checks in production
-        Kubernetes readinessProbe / livenessProbe hit this endpoint.
-        • 200 → container is healthy, send it traffic
-        • 503 → container is sick, restart it
-        A more advanced version would also ping Redis and PostgreSQL
-        to verify dependencies are reachable (a "deep health check").
+    :return: Dictionary containing service status, version, and environment.
+    :rtype: dict[str, str]
     """
     return {
-        "status": "AtomField Enterprise Core Online",
+        "status": "AtomField Core Online",
         "version": settings.VERSION,
         "environment": settings.ENVIRONMENT,
     }

@@ -1,19 +1,6 @@
 """
-AtomField Sample Simulation Script
-===================================
-📚 LESSON: The Container Contract
-    Every script that runs inside the AtomField Docker sandbox MUST:
-
-    1. Accept parameters via environment variables or stdin (Phase 3 detail)
-    2. Print its final result as a single JSON object to STDOUT
-    3. Exit with code 0 on success, non-zero on failure
-
-    This "contract" is what makes the system composable:
-    the worker captures stdout, parses JSON, stores it as output_data (XCom),
-    and the next node in the DAG reads it as its input parameters.
-
-    This pattern is inspired by how Kubernetes sidecar containers communicate
-    and how Apache Airflow's XCom system works.
+Sample simulation script demonstrating worker execution contract.
+Accepts parameters via stdin and returns a JSON payload to stdout.
 """
 
 import json
@@ -23,16 +10,13 @@ import sys
 
 def run_band_structure_mock(parameters: dict) -> dict:
     """
-    Mock a band structure calculation.
-    In production this would call ASE, VASP, Quantum ESPRESSO, etc.
+    Simulates a band structure calculation.
     """
-    lattice_constant = parameters.get("lattice_constant_angstrom", 5.43)  # Silicon default
+    lattice_constant = parameters.get("lattice_constant_angstrom", 5.43)
     temperature_k = parameters.get("temperature_k", 300)
 
-    # Mock physics: simplified Kronig-Penney model approximation
-    # (real DFT would take hours on a GPU cluster)
-    band_gap = 1.12 * math.exp(-0.0005 * (temperature_k - 300))  # eV, temp-dependent
-    total_energy = -8.94 * (5.43 / lattice_constant) ** 2  # eV/atom
+    band_gap = 1.12 * math.exp(-0.0005 * (temperature_k - 300))
+    total_energy = -8.94 * (5.43 / lattice_constant) ** 2
 
     return {
         "result": "success",
@@ -49,7 +33,6 @@ def run_band_structure_mock(parameters: dict) -> dict:
 
 
 if __name__ == "__main__":
-    # In Phase 3, parameters arrive via stdin as JSON from the worker
     try:
         raw = sys.stdin.read()
         params = json.loads(raw) if raw.strip() else {}
@@ -57,7 +40,4 @@ if __name__ == "__main__":
         params = {}
 
     result = run_band_structure_mock(params)
-
-    # CRITICAL: Print ONLY valid JSON to stdout. No debug prints!
-    # The worker reads stdout and parses it as the output_data.
     print(json.dumps(result))

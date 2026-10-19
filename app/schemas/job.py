@@ -1,38 +1,18 @@
 """
-app/schemas/job.py — Pydantic Validation Schemas
-
-📚 LESSON: The Schema Layer (API Contract)
-
-    Schemas define the SHAPE of data crossing the API boundary.
-    They are your firewall between the outside world and your database.
-
-    Key principle: Input schema ≠ Output schema.
-    • Input (JobSubmitRequest): only what the client SHOULD provide.
-    • Output (JobResponse): only what the client SHOULD see.
-
-    If you later add an internal field (e.g., retry_count), you add it
-    to the Model but NOT to the output schema — the client never sees it.
-
-📚 LESSON: Why ConfigDict over class Config?
-    Pydantic v1 used `class Config` (inner class). Pydantic v2 uses
-    `model_config = ConfigDict(...)` — a typed dict that gives IDE
-    autocomplete and catches typos at import time.
-    `class Config` still works (backward compat) but is deprecated.
+Pydantic schemas for job and pipeline requests and responses.
 """
 
 from datetime import datetime
-from typing import Dict, Any, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-# -----------------------------------------------------------------------
-# Request Schemas (what comes IN)
-# -----------------------------------------------------------------------
-
 class JobSubmitRequest(BaseModel):
-    """Client submits this to create a new simulation job."""
+    """
+    Payload specification for submitting a standalone simulation job.
+    """
+
     script_name: str = Field(
         ...,
         min_length=1,
@@ -40,54 +20,90 @@ class JobSubmitRequest(BaseModel):
         examples=["band_structure.py"],
         description="Name of the simulation script to execute.",
     )
-    parameters: Optional[Dict[str, Any]] = Field(
+    parameters: dict[str, object] | None = Field(
         default=None,
         examples=[{"lattice_constant_angstrom": 5.43, "temperature_k": 300}],
-        description="Input parameters passed to the script (XCom input).",
+        description="Input parameters passed to the script.",
     )
 
 
-# -----------------------------------------------------------------------
-# Response Schemas (what goes OUT)
-# -----------------------------------------------------------------------
-
 class JobResponse(BaseModel):
-    """Returned to the client after submission or polling."""
+    """
+    Job status and metadata representation model.
+    """
+
     id: UUID
     script_name: str
     status: str
-    parameters: Optional[Dict[str, Any]] = None
-    output_data: Optional[Dict[str, Any]] = None
-    error_message: Optional[str] = None
-    created_at: Optional[datetime] = None
+    parameters: dict[str, object] | None = None
+    output_data: dict[str, object] | None = None
+    error_message: str | None = None
+    execution_time_seconds: float | None = None
+    created_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class JobListResponse(BaseModel):
-    """Paginated list of jobs — used by GET /jobs."""
+    """
+    Paginated collection of simulation jobs.
+    """
+
     jobs: list[JobResponse]
     total: int
 
-# -----------------------------------------------------------------------
-# Pipeline / DAG Schemas
-# -----------------------------------------------------------------------
 
 class JobNode(BaseModel):
-    ui_id: str = Field(..., description="Temporary frontend ID to link edges before DB creation")
+    """
+    Frontend DAG node definition schema.
+    """
+
+    ui_id: str = Field(
+        ...,
+        description=(
+            "Temporary frontend node ID linking edges before DB insertion."
+        ),
+    )
     script_name: str = Field(..., min_length=1, max_length=255)
-    parameters: Dict[str, Any] = Field(default_factory=dict)
+    parameters: dict[str, object] = Field(default_factory=dict)
+
 
 class JobEdge(BaseModel):
+    """
+    Directed dependency link connecting upstream to downstream node.
+    """
+
     upstream_ui_id: str
     downstream_ui_id: str
 
+
+class PipelineFile(BaseModel):
+    """
+    File attachment uploaded alongside a DAG pipeline submission.
+    """
+
+    filename: str
+    content: str
+
+
 class PipelineSubmitRequest(BaseModel):
-    """Client submits this to create a full DAG pipeline of jobs."""
+    """
+    Request payload specification for submitting a DAG pipeline.
+    """
+
+    session_id: str | None = None
     nodes: list[JobNode]
     edges: list[JobEdge]
+    files: list[PipelineFile] | None = None
+
 
 class PipelineSubmitResponse(BaseModel):
+    """
+    Response payload returned upon DAG pipeline submission.
+    """
+
     status: str
     total_nodes: int
     roots_started: int
+    pipeline_id: str | None = None
+    job_ids: dict[str, str] = Field(default_factory=dict)
