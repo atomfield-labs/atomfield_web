@@ -36,7 +36,15 @@ export function useJobPolling({
       for (const [uiId, jobId] of Object.entries(activeJobMap)) {
         if (!isSubscribed) return;
         try {
-          const { status, logs, artifacts } = await jobsService.getJobLogs(jobId);
+          const { status: rawStatus, logs, artifacts } = await jobsService.getJobLogs(jobId);
+          const lower = (rawStatus || '').toLowerCase();
+          const status = (lower === 'success' || lower === 'completed')
+            ? 'Success'
+            : (lower === 'running')
+            ? 'Running'
+            : (lower === 'failed')
+            ? 'Failed'
+            : (rawStatus || 'Pending');
 
           if (isSubscribed) {
             onUpdateExecution(uiId, status, logs, artifacts, jobId);

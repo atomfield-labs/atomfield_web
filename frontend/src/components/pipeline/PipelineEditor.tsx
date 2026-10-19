@@ -1,10 +1,9 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { ReactFlowProvider, type Node, type Edge } from '@xyflow/react';
 import LeftSidebar from './LeftSidebar';
 import GraphCanvas from './GraphCanvas';
 import InspectorDrawer from './InspectorDrawer';
 import EditorHeader from './EditorHeader';
-import ReactionNetworkModal from './ReactionNetworkModal';
 import { jobsService, pipelineService } from '../../api/services';
 import { useQuota } from '../../hooks/useQuota';
 import { useBlueprint } from '../../hooks/useBlueprint';
@@ -30,8 +29,6 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
   const [isDeploying, setIsDeploying] = useState(false);
   const [activeJobMap, setActiveJobMap] = useState<Record<string, string>>({});
   const [activePipelineId, setActivePipelineId] = useState<string | null>(null);
-  const [isPipelineCompleted, setIsPipelineCompleted] = useState(false);
-  const [isResultsModalOpen, setIsResultsModalOpen] = useState(false);
 
   const currentGraphRef = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] });
   const deleteNodeRef = useRef<((nodeId: string) => void) | null>(null);
@@ -43,44 +40,6 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
   const { quota, decrementQuota } = useQuota();
   const { blueprint, isLoading: isLoadingBlueprint, setBlueprint } = useBlueprint(activeSessionId);
   const { saveStatus, setSaveStatus, autosaveGraph, markSessionRunning } = useSessionDraft(activeSessionId);
-
-  // Check if current pipeline is a Nanoreactor workflow
-  const isNanoreactor = useMemo(() => {
-    return (
-      activeSessionId.includes('nanoreactor') ||
-      activeSessionId === 'nanoreactor' ||
-      Boolean(
-        blueprint?.nodes &&
-          blueprint.nodes.some(
-            (n: any) =>
-              n.id === 'xtb_nanoreactor' ||
-              n.script_name === 'xtb_nanoreactor.py' ||
-              n.id === 'rxn_network_1' ||
-              n.script_name === 'rxn_network_driver.py'
-          )
-      )
-    );
-  }, [activeSessionId, blueprint]);
-
-  // Check if session already completed in localStorage
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem('atomfield_sessions');
-      if (raw) {
-        const list = JSON.parse(raw);
-        const session = list.find((s: any) =>
-          typeof s === 'string' ? s === activeSessionId : s.id === activeSessionId
-        );
-        if (session && (session.status === 'Success' || session.status === 'Completed')) {
-          setIsPipelineCompleted(true);
-          return;
-        }
-      }
-    } catch (e) {
-      // ignore
-    }
-    setIsPipelineCompleted(false);
-  }, [activeSessionId]);
 
   // Route hash sync
   useEffect(() => {
@@ -162,7 +121,6 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
     activePipelineId,
     onUpdateExecution: handleUpdateExecution,
     onUpdateSelectedNode: setSelectedNode,
-    onAllFinished: () => setIsPipelineCompleted(true),
   });
 
   const handleGraphChange = useCallback(
@@ -244,19 +202,13 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
         } catch (e) {
           console.error('Failed to register session metadata for prebuilt run', e);
         }
-
-        // 3. Switch activeSessionId and route hash to the newly created run session
-        setActiveSessionId(targetSessionId);
-        window.location.hash = `#pipeline/${targetSessionId}`;
       }
 
+      // SUBMIT TO CLUSTER FIRST
       const response = await jobsService.submitPipeline(payload);
 
       if (response.job_ids) {
-        setActiveJobMap(response.job_ids);
-        if (response.pipeline_id) {
-          setActivePipelineId(response.pipeline_id);
-        }
+        // Cache job mapping in localStorage IMMEDIATELY so any remount reads it
         try {
           localStorage.setItem(
             `atomfield_jobs_${targetSessionId}`,
@@ -268,6 +220,11 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
         } catch (e) {
           console.error('Failed to cache job mapping', e);
         }
+
+        setActiveJobMap(response.job_ids);
+        if (response.pipeline_id) {
+          setActivePipelineId(response.pipeline_id);
+        }
         Object.entries(response.job_ids).forEach(([uiId, jobId]) => {
           if (updateNodeExecutionRef.current) {
             updateNodeExecutionRef.current(uiId, 'Running', 'Job queued in cluster...', [], jobId);
@@ -275,9 +232,13 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
         });
       }
 
-      if (!isPrebuilt) {
+      if (isPrebuilt) {
+        setActiveSessionId(targetSessionId);
+        window.history.replaceState(null, '', `#pipeline/${targetSessionId}`);
+      } else {
         markSessionRunning();
       }
+
       setSaveStatus('deployed');
       decrementQuota();
 
@@ -295,7 +256,6 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
 
   const handleLoadFlashWorkflow = useCallback(async () => {
     try {
-      setIsPipelineCompleted(false);
       const flashBp = await pipelineService.getNanoreactorBlueprint();
       setBlueprint(flashBp);
       localStorage.setItem(
@@ -309,7 +269,6 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
 
   const handleLoadModularWorkflow = useCallback(async () => {
     try {
-      setIsPipelineCompleted(false);
       const modularBp = await pipelineService.getModularNanoreactorBlueprint();
       setBlueprint(modularBp);
       localStorage.setItem(
@@ -338,7 +297,6 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
             onLoadFlashWorkflow={handleLoadFlashWorkflow}
           />
 
-
           <div className="flex-1 h-full relative">
             {isLoadingBlueprint ? (
               <div className="absolute inset-0 flex items-center justify-center text-slate-400 font-bold">
@@ -351,8 +309,6 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
                 selectedNodeId={selectedNode?.id}
                 isEditable={true}
                 sessionId={activeSessionId}
-                showResultsNode={isNanoreactor && isPipelineCompleted}
-                onOpenResults={() => setIsResultsModalOpen(true)}
                 onRegisterDeleteHandler={(handler) => { deleteNodeRef.current = handler; }}
                 onRegisterUpdateParamsHandler={(handler) => { updateNodeParamsRef.current = handler; }}
                 onRegisterUpdateExecutionHandler={(handler) => { updateNodeExecutionRef.current = handler; }}
@@ -372,13 +328,6 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
             onClose={() => setSelectedNode(null)}
             onDelete={handleDeleteNode}
             onUpdateParameters={handleUpdateParameters}
-          />
-
-          <ReactionNetworkModal
-            isOpen={isResultsModalOpen}
-            onClose={() => setIsResultsModalOpen(false)}
-            sessionId={activeSessionId}
-            jobId={Object.values(activeJobMap)[0]}
           />
         </ReactFlowProvider>
       </div>

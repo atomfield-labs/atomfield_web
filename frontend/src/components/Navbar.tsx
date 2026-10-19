@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Key, Shield } from 'lucide-react';
+import { Key } from 'lucide-react';
 import { authService } from '../api/services/authService';
 import ApiKeyModal from './auth/ApiKeyModal';
 
@@ -60,23 +60,19 @@ export default function Navbar() {
             </a>
 
             {/* Sessions & Admin Navigation Links */}
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-6">
               <a
                 href="#dashboard"
-                className="text-sm font-semibold tracking-wide text-slate-300 hover:text-orange-400 transition-colors flex items-center gap-1.5"
+                className="text-sm font-semibold tracking-wide text-slate-300 hover:text-orange-400 transition-colors"
               >
-                <svg className="w-4 h-4 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-                </svg>
                 Sessions
               </a>
 
               {isAdmin && (
                 <a
                   href="#admin"
-                  className="text-xs font-bold uppercase tracking-wider text-orange-400 hover:text-orange-300 bg-orange-950/60 hover:bg-orange-900/60 border border-orange-500/40 px-2.5 py-1 rounded-md transition-colors flex items-center gap-1.5"
+                  className="text-sm font-semibold tracking-wide text-slate-300 hover:text-orange-400 transition-colors"
                 >
-                  <Shield className="w-3.5 h-3.5 text-orange-400" />
                   Admin
                 </a>
               )}

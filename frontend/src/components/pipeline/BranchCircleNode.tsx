@@ -16,15 +16,18 @@ const statusStyles: Record<string, { bg: string; border: string; text: string }>
   Draft: { bg: 'bg-white hover:bg-orange-50/90', border: 'border-slate-300 hover:border-orange-500', text: 'text-slate-700' },
   Ready: { bg: 'bg-white hover:bg-orange-50/90', border: 'border-slate-300 hover:border-orange-500', text: 'text-slate-700' },
   Pending: { bg: 'bg-amber-50 hover:bg-orange-50/90', border: 'border-amber-400 hover:border-orange-500', text: 'text-amber-800' },
-  Running: { bg: 'bg-blue-50 hover:bg-orange-50/90', border: 'border-blue-500 animate-pulse hover:border-orange-500', text: 'text-blue-700' },
-  Success: { bg: 'bg-emerald-50 hover:bg-orange-50/90', border: 'border-emerald-500 hover:border-orange-500', text: 'text-emerald-700' },
-  Failed: { bg: 'bg-rose-50 hover:bg-orange-50/90', border: 'border-rose-500 hover:border-orange-500', text: 'text-rose-700' },
+  Running: { bg: 'bg-blue-500 hover:bg-blue-600', border: 'border-blue-600 ring-2 ring-blue-300 animate-pulse', text: 'text-white' },
+  Success: { bg: 'bg-emerald-500 hover:bg-emerald-600', border: 'border-emerald-600 ring-2 ring-emerald-300', text: 'text-white' },
+  Completed: { bg: 'bg-emerald-500 hover:bg-emerald-600', border: 'border-emerald-600 ring-2 ring-emerald-300', text: 'text-white' },
+  Failed: { bg: 'bg-rose-500 hover:bg-rose-600', border: 'border-rose-600 ring-2 ring-rose-300', text: 'text-white' },
   Blocked: { bg: 'bg-slate-100 hover:bg-orange-50/90', border: 'border-slate-400 hover:border-orange-500', text: 'text-slate-500' },
 };
 
 export default function BranchCircleNode({ data }: { data: BranchCircleData }) {
-  const status = data.status || 'Draft';
-  const style = statusStyles[status] || statusStyles['Draft'];
+  const rawStatus = data.status || 'Draft';
+  const lower = rawStatus.toLowerCase();
+  const normalized = (lower === 'success' || lower === 'completed') ? 'Success' : rawStatus;
+  const style = statusStyles[normalized] || statusStyles['Draft'];
   const displayIndex = data.index || 1;
 
   return (

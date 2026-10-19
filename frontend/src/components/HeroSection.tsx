@@ -6,7 +6,7 @@ export default function HeroSection() {
         {/* Brand Label */}
         <div className="inline-flex items-center mb-8 px-4 py-1.5 rounded-full bg-white/70 backdrop-blur-md border border-orange-500/20 shadow-sm">
           <span className="text-[11px] font-bold tracking-widest text-orange-700 uppercase">
-            The New Standard in Simulation
+            The Modern Standard in Simulation
           </span>
         </div>
 
@@ -18,14 +18,14 @@ export default function HeroSection() {
         {/* Value Proposition */}
         <div className="mb-8 md:mb-10 flex items-center justify-center">
           <h2 className="text-2xl md:text-4xl font-extrabold text-slate-700 tracking-tight max-w-3xl mx-auto">
-            The AI orchestrator for <span className="text-orange-600">materials discovery.</span>
+            The computational orchestrator for <span className="text-orange-600">materials discovery.</span>
           </h2>
         </div>
 
         {/* Paragraph */}
         <p className="text-lg md:text-xl text-slate-600 mb-10 max-w-2xl mx-auto leading-relaxed text-center font-medium">
-          Replace fragmented calculation tools with a unified, AI-driven physics pipeline. 
-          AtomField accelerates hypothesis testing and theoretical discovery from single molecules to infinite crystal lattices.
+          Replace fragmented scripts and manual workflows with an automated, high-throughput simulation pipeline. 
+          AtomField orchestrates quantum chemistry, reaction network discovery, and molecular dynamics from single molecules to infinite crystal lattices.
         </p>
 
         {/* CTA Buttons */}
