@@ -215,9 +215,9 @@ export default function PolymerMelt() {
         </bufferGeometry>
         <lineBasicMaterial 
           ref={lineMatRef} 
-          color="#94a3b8" 
+          color="#64748b" 
           transparent 
-          opacity={0.9} 
+          opacity={0.45} 
         />
       </lineSegments>
 
@@ -226,15 +226,14 @@ export default function PolymerMelt() {
         ref={meshRef} 
         args={[undefined, undefined, TOTAL_BEADS]}
       >
-        <sphereGeometry args={[0.18, 16, 16]} />
+        <sphereGeometry args={[0.2, 16, 16]} />
         <meshPhysicalMaterial 
             color="#ffffff"       
-            roughness={0.1}
-            transmission={0.8}    
-            thickness={1.5}
-            clearcoat={1.0}
+            roughness={0.2}
+            metalness={0.1}
+            clearcoat={0.8}
             transparent={true}
-            opacity={0}
+            opacity={0.95}
         />
       </instancedMesh>
       

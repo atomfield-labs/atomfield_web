@@ -26,27 +26,27 @@ const MOLECULES: Record<string, MoleculeTemplate> = {
   CH4: {
     atoms: [
       { id: 'C', color: '#1e293b', radius: 0.45, pos: [0, 0, 0] },
-      { id: 'H1', color: '#ffffff', radius: 0.28, pos: [0.65, 0.65, 0.65] },
-      { id: 'H2', color: '#ffffff', radius: 0.28, pos: [-0.65, -0.65, 0.65] },
-      { id: 'H3', color: '#ffffff', radius: 0.28, pos: [-0.65, 0.65, -0.65] },
-      { id: 'H4', color: '#ffffff', radius: 0.28, pos: [0.65, -0.65, -0.65], isLeaving: true }, 
+      { id: 'H1', color: '#e2e8f0', radius: 0.28, pos: [0.65, 0.65, 0.65] },
+      { id: 'H2', color: '#e2e8f0', radius: 0.28, pos: [-0.65, -0.65, 0.65] },
+      { id: 'H3', color: '#e2e8f0', radius: 0.28, pos: [-0.65, 0.65, -0.65] },
+      { id: 'H4', color: '#e2e8f0', radius: 0.28, pos: [0.65, -0.65, -0.65], isLeaving: true }, 
     ],
     bonds: [{ source: 0, target: 1 }, { source: 0, target: 2 }, { source: 0, target: 3 }, { source: 0, target: 4 }]
   },
   NH3: {
     atoms: [
       { id: 'N', color: '#2563eb', radius: 0.42, pos: [0, 0.2, 0] },
-      { id: 'H1', color: '#ffffff', radius: 0.28, pos: [0.65, -0.3, 0.4] },
-      { id: 'H2', color: '#ffffff', radius: 0.28, pos: [-0.65, -0.3, 0.4] },
-      { id: 'H3', color: '#ffffff', radius: 0.28, pos: [0, -0.3, -0.7], isLeaving: true },
+      { id: 'H1', color: '#e2e8f0', radius: 0.28, pos: [0.65, -0.3, 0.4] },
+      { id: 'H2', color: '#e2e8f0', radius: 0.28, pos: [-0.65, -0.3, 0.4] },
+      { id: 'H3', color: '#e2e8f0', radius: 0.28, pos: [0, -0.3, -0.7], isLeaving: true },
     ],
     bonds: [{ source: 0, target: 1 }, { source: 0, target: 2 }, { source: 0, target: 3 }]
   },
   H2O: {
     atoms: [
       { id: 'O', color: '#ef4444', radius: 0.35, pos: [0, 0.2, 0] },
-      { id: 'H1', color: '#f8fafc', radius: 0.25, pos: [0.6, -0.4, 0] },
-      { id: 'H2', color: '#f8fafc', radius: 0.25, pos: [-0.6, -0.4, 0], isLeaving: true }, 
+      { id: 'H1', color: '#e2e8f0', radius: 0.25, pos: [0.6, -0.4, 0] },
+      { id: 'H2', color: '#e2e8f0', radius: 0.25, pos: [-0.6, -0.4, 0], isLeaving: true }, 
     ],
     bonds: [{ source: 0, target: 1 }, { source: 0, target: 2 }]
   },
@@ -54,8 +54,8 @@ const MOLECULES: Record<string, MoleculeTemplate> = {
     atoms: [
       { id: 'C', color: '#334155', radius: 0.4, pos: [0, 0, 0] },
       { id: 'O', color: '#ef4444', radius: 0.35, pos: [0, 0.7, 0] },
-      { id: 'H1', color: '#f8fafc', radius: 0.25, pos: [0.6, -0.5, 0] },
-      { id: 'H2', color: '#f8fafc', radius: 0.25, pos: [-0.6, -0.5, 0], isLeaving: true }, 
+      { id: 'H1', color: '#e2e8f0', radius: 0.25, pos: [0.6, -0.5, 0] },
+      { id: 'H2', color: '#e2e8f0', radius: 0.25, pos: [-0.6, -0.5, 0], isLeaving: true }, 
     ],
     bonds: [{ source: 0, target: 1 }, { source: 0, target: 2 }, { source: 0, target: 3 }]
   }
@@ -259,10 +259,10 @@ export default function PESTerrain() {
       
       <mesh geometry={geometry}>
         <meshBasicMaterial 
-          color="#ffffff" 
+          color="#334155" 
           wireframe={true} 
           transparent={true} 
-          opacity={0.15} 
+          opacity={0.07} 
         />
       </mesh>
 

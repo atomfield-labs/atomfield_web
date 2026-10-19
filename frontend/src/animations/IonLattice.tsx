@@ -49,23 +49,26 @@ export default function IonLattice() {
   // Pre-create all geometry and materials to bypass any React wrapper bugs
   const hostGeo = useMemo(() => new THREE.SphereGeometry(0.2, 16, 16), [])
   const hostMat = useMemo(() => new THREE.MeshPhysicalMaterial({ 
-      color: new THREE.Color("#8b5cf6"), // Vibrant Violet
+      color: new THREE.Color("#7c3aed"), // Vibrant Violet
       roughness: 0.2, 
-      transmission: 0.4, 
-      thickness: 1.0, 
-      transparent: true 
+      metalness: 0.1,
+      clearcoat: 0.8, 
+      transparent: true,
+      opacity: 0.95
   }), [])
 
   const cloudGeo = useMemo(() => new THREE.SphereGeometry(0.65, 16, 16), []) // Spread the clouds out
   const cloudMat = useMemo(() => new THREE.MeshBasicMaterial({ 
-      color: new THREE.Color("#86efac"), // Lighter, more ethereal pastel green
+      color: new THREE.Color("#86efac"), // Ethereal pastel green
       transparent: true, 
+      opacity: 0.22,
       depthWrite: false 
   }), [])
 
   const bondsMat = useMemo(() => new THREE.LineBasicMaterial({
-      color: new THREE.Color("#d8b4fe"),
+      color: new THREE.Color("#a855f7"),
       transparent: true,
+      opacity: 0.5
   }), [])
 
   // Statically initialized buffer geometry for bonds
@@ -273,13 +276,13 @@ export default function IonLattice() {
       {/* Lithium Ion */}
       <mesh ref={ionMeshRef}>
         <sphereGeometry args={[0.3, 32, 32]} />
-        <meshBasicMaterial color="#fde047" transparent /> 
+        <meshBasicMaterial color="#f59e0b" transparent /> 
       </mesh>
 
       {/* Diffusion Trail */}
       <line>
          <bufferGeometry ref={pathGeoRef} />
-         <lineBasicMaterial color="#fde047" linewidth={2} transparent opacity={0.8} />
+         <lineBasicMaterial color="#f59e0b" linewidth={2} transparent opacity={0.85} />
       </line>
 
     </group>

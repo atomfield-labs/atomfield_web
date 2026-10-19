@@ -84,8 +84,8 @@ export default function JablonskiDiagram() {
     opacity: 0.95
   }), [])
 
-  const colorGreen = useMemo(() => new THREE.Color('#22c55e'), []) // Fluorescent singlet
-  const colorYellow = useMemo(() => new THREE.Color('#eab308'), []) // Phosphorescent triplet
+  const colorGreen = useMemo(() => new THREE.Color('#16a34a'), []) // Fluorescent singlet
+  const colorYellow = useMemo(() => new THREE.Color('#d97706'), []) // Phosphorescent triplet
 
   useFrame((_, delta) => {
     if (groupRef.current) {
@@ -151,13 +151,13 @@ export default function JablonskiDiagram() {
   return (
     <group ref={groupRef} position={[0, 0, 0]} rotation={[0, 0, 0]}>
       {/* S0: Ground State Bands */}
-      <EnergyBand baseY={Y_S0} minX={S0_X[0]} maxX={S0_X[1]} levels={5} color="#94a3b8" />
+      <EnergyBand baseY={Y_S0} minX={S0_X[0]} maxX={S0_X[1]} levels={5} color="#475569" />
 
       {/* S1: Singlet Excited State Bands */}
-      <EnergyBand baseY={Y_S1} minX={S1_X[0]} maxX={S1_X[1]} levels={4} color="#38bdf8" />
+      <EnergyBand baseY={Y_S1} minX={S1_X[0]} maxX={S1_X[1]} levels={4} color="#0284c7" />
 
       {/* T1: Triplet Excited State Bands */}
-      <EnergyBand baseY={Y_T1} minX={T1_X[0]} maxX={T1_X[1]} levels={3} color="#f472b6" />
+      <EnergyBand baseY={Y_T1} minX={T1_X[0]} maxX={T1_X[1]} levels={3} color="#e11d48" />
 
       {/* Electron Clouds */}
       <instancedMesh 
