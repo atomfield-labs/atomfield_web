@@ -23,7 +23,7 @@ export default function SectionsContainer() {
         {/* Card 1: Nanoreactor (First) */}
         <div 
           onClick={() => window.location.hash = '#pipeline/nanoreactor'}
-          className="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-xl hover:border-blue-400 transition-all duration-300 flex flex-col overflow-hidden cursor-pointer group"
+          className="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-xl hover:border-orange-500 transition-all duration-300 flex flex-col overflow-hidden cursor-pointer group"
         >
           {/* Dominant 3D Animation Header (Zoomed Out for Full Framing) */}
           <div className="w-full h-88 sm:h-96 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
@@ -41,15 +41,12 @@ export default function SectionsContainer() {
             </div>
           </div>
 
-          {/* Shaded Text Section */}
-          <div className="p-6 flex flex-col justify-between flex-grow bg-slate-50/80 border-t border-slate-100 rounded-b-2xl">
+          {/* Light Orange Text Section */}
+          <div className="p-6 flex flex-col justify-between flex-grow bg-orange-50/70 border-t border-orange-100/80 rounded-b-2xl">
             <div>
-              <h3 className="text-xl font-bold text-slate-900 tracking-tight group-hover:text-blue-600 transition-colors">
+              <h3 className="text-xl font-bold text-slate-900 tracking-tight group-hover:text-orange-600 transition-colors">
                 Nanoreactor & Catalysis
               </h3>
-              <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider mt-1">
-                Reaction Networks & Transition State Search
-              </p>
               <p className="text-xs text-slate-600 font-medium leading-relaxed mt-2.5">
                 Discover reaction pathways and compute activation barriers ($E_a$) in accelerated reactive molecular environments with xTB and GFN-FF.
               </p>
@@ -59,7 +56,7 @@ export default function SectionsContainer() {
                 e.stopPropagation();
                 window.location.hash = '#pipeline/nanoreactor';
               }}
-              className="w-full mt-5 py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold tracking-wide rounded-xl transition-colors shadow-sm flex items-center justify-center gap-2"
+              className="w-full mt-5 py-2.5 px-4 bg-slate-900 hover:bg-orange-600 text-white text-xs font-semibold tracking-wide rounded-xl transition-colors shadow-sm flex items-center justify-center gap-2"
             >
               Launch Nanoreactor &rarr;
             </button>
@@ -67,15 +64,14 @@ export default function SectionsContainer() {
         </div>
 
         {/* Card 2: Optoelectronics (Second) */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-xl hover:border-slate-300 transition-all duration-300 flex flex-col overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-xl hover:border-orange-500 transition-all duration-300 flex flex-col overflow-hidden">
           {/* Dominant 3D Animation Header */}
           <div className="w-full h-88 sm:h-96 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
             <Suspense fallback={<div className="w-full h-full bg-slate-50 animate-pulse" />}>
-              <Canvas camera={{ position: [0, 0.15, 7.6], fov: 45 }} className="w-full h-full">
-                <ambientLight intensity={1.1} />
-                <directionalLight position={[6, 8, 6]} intensity={1.8} color="#ffffff" />
-                <directionalLight position={[-6, 4, 3]} intensity={0.8} color="#93c5fd" />
-                <pointLight position={[0, 0, 3]} intensity={0.5} color="#38bdf8" />
+              <Canvas camera={{ position: [0, 0, 7.5], fov: 45 }} className="w-full h-full">
+                <ambientLight intensity={1.2} />
+                <directionalLight position={[5, 10, 5]} intensity={1.8} color="#ffffff" />
+                <pointLight position={[0, 0, 4]} intensity={0.6} color="#ffffff" />
                 <JablonskiDiagram />
               </Canvas>
             </Suspense>
@@ -94,28 +90,21 @@ export default function SectionsContainer() {
             </div>
           </div>
 
-          {/* Shaded Text Section */}
-          <div className="p-6 flex flex-col justify-between flex-grow bg-slate-50/80 border-t border-slate-100 rounded-b-2xl">
+          {/* Light Orange Text Section */}
+          <div className="p-6 flex flex-col justify-between flex-grow bg-orange-50/70 border-t border-orange-100/80 rounded-b-2xl">
             <div>
               <h3 className="text-xl font-bold text-slate-900 tracking-tight">
                 Optoelectronic Properties
               </h3>
-              <p className="text-xs font-semibold text-orange-600 uppercase tracking-wider mt-1">
-                TD-DFT Excited States & UV-Vis Spectra
-              </p>
               <p className="text-xs text-slate-600 font-medium leading-relaxed mt-2.5">
                 Calculate electronic excited states, fluorescence vs phosphorescence pathways, oscillator strengths, and frontier orbital energies directly in-browser.
               </p>
-            </div>
-            <div className="mt-5 pt-3 border-t border-slate-200/60 flex items-center justify-between text-xs text-slate-400 font-mono">
-              <span>Status: Roadmap</span>
-              <span>Engine: TD-DFT</span>
             </div>
           </div>
         </div>
 
         {/* Card 3: Solid State (Third - Zoomed Out) */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-xl hover:border-slate-300 transition-all duration-300 flex flex-col overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-xl hover:border-orange-500 transition-all duration-300 flex flex-col overflow-hidden">
           {/* Dominant 3D Animation Header (Zoomed Out for Full Framing) */}
           <div className="w-full h-88 sm:h-96 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
             <Suspense fallback={<div className="w-full h-full bg-slate-50 animate-pulse" />}>
@@ -130,28 +119,21 @@ export default function SectionsContainer() {
             </div>
           </div>
 
-          {/* Shaded Text Section */}
-          <div className="p-6 flex flex-col justify-between flex-grow bg-slate-50/80 border-t border-slate-100 rounded-b-2xl">
+          {/* Light Orange Text Section */}
+          <div className="p-6 flex flex-col justify-between flex-grow bg-orange-50/70 border-t border-orange-100/80 rounded-b-2xl">
             <div>
               <h3 className="text-xl font-bold text-slate-900 tracking-tight">
                 Solid State & Lattices
               </h3>
-              <p className="text-xs font-semibold text-purple-600 uppercase tracking-wider mt-1">
-                Periodic DFT & Ion Transport Dynamics
-              </p>
               <p className="text-xs text-slate-600 font-medium leading-relaxed mt-2.5">
                 Model infinite crystal structures, phonon dispersions, and interstitial ion migration pathways in solid electrolytes and battery cathode materials.
               </p>
-            </div>
-            <div className="mt-5 pt-3 border-t border-slate-200/60 flex items-center justify-between text-xs text-slate-400 font-mono">
-              <span>Status: Roadmap</span>
-              <span>Engine: Plane-Wave DFT</span>
             </div>
           </div>
         </div>
 
         {/* Card 4: Polymers (Fourth - Standalone in Row 2) */}
-        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-xl hover:border-slate-300 transition-all duration-300 flex flex-col overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-xl hover:border-orange-500 transition-all duration-300 flex flex-col overflow-hidden">
           {/* Dominant 3D Animation Header with White Background */}
           <div className="w-full h-88 sm:h-96 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
             <Suspense fallback={<div className="w-full h-full bg-slate-50 animate-pulse" />}>
@@ -167,22 +149,15 @@ export default function SectionsContainer() {
             </div>
           </div>
 
-          {/* Shaded Text Section */}
-          <div className="p-6 flex flex-col justify-between flex-grow bg-slate-50/80 border-t border-slate-100 rounded-b-2xl">
+          {/* Light Orange Text Section */}
+          <div className="p-6 flex flex-col justify-between flex-grow bg-orange-50/70 border-t border-orange-100/80 rounded-b-2xl">
             <div>
               <h3 className="text-xl font-bold text-slate-900 tracking-tight">
                 Polymer Chain Dynamics
               </h3>
-              <p className="text-xs font-semibold text-rose-600 uppercase tracking-wider mt-1">
-                Chain Entanglement & Rheology
-              </p>
               <p className="text-xs text-slate-600 font-medium leading-relaxed mt-2.5">
                 Simulate macromolecular entanglement, stress-strain curves, glass transition temperatures ($T_g$), and mechanical bond scission events.
               </p>
-            </div>
-            <div className="mt-5 pt-3 border-t border-slate-200/60 flex items-center justify-between text-xs text-slate-400 font-mono">
-              <span>Status: Roadmap</span>
-              <span>Engine: MD / GROMACS</span>
             </div>
           </div>
         </div>
