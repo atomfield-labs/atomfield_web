@@ -21,6 +21,7 @@ import CalculationNode from './CalculationNode';
 import BranchExpanderNode from './BranchExpanderNode';
 import BranchCircleNode from './BranchCircleNode';
 import BranchDotsNode from './BranchDotsNode';
+import ResultViewerNode from './ResultViewerNode';
 import { parseStructureFile } from '../../utils/structureParser';
 
 const edgeTypes = {
@@ -33,6 +34,7 @@ const nodeTypes: any = {
   branchExpander: BranchExpanderNode,
   branchCircle: BranchCircleNode,
   branchDots: BranchDotsNode,
+  resultViewer: ResultViewerNode,
 };
 
 interface GraphCanvasProps {
@@ -42,6 +44,8 @@ interface GraphCanvasProps {
   selectedNodeId?: string | null;
   isEditable?: boolean;
   sessionId?: string;
+  showResultsNode?: boolean;
+  onOpenResults?: () => void;
   onRegisterDeleteHandler?: (handler: (nodeId: string) => void) => void;
   onRegisterUpdateParamsHandler?: (handler: (nodeId: string, newParams: Record<string, any>) => void) => void;
   onRegisterUpdateExecutionHandler?: (handler: (nodeId: string, status: string, logs?: string, artifacts?: string[], jobId?: string) => void) => void;
@@ -80,6 +84,9 @@ export default function GraphCanvas({
   onNodeDoubleClick,
   selectedNodeId: _selectedNodeId,
   isEditable = false,
+  sessionId: _sessionId,
+  showResultsNode = false,
+  onOpenResults,
   onRegisterDeleteHandler,
   onRegisterUpdateParamsHandler,
   onRegisterUpdateExecutionHandler,
@@ -1048,6 +1055,78 @@ export default function GraphCanvas({
     }
   }, [blueprint, rfFitView]);
 
+  // Dynamic End-of-Job Results Viewer Node (Nanoreactor Discovery)
+  useEffect(() => {
+    if (showResultsNode) {
+      setNodes((currentNodes) => {
+        if (currentNodes.some((n) => n.id === 'result_viewer_node')) {
+          return currentNodes;
+        }
+
+        const terminalNode =
+          currentNodes.find((n) => n.id === 'xtb_nanoreactor') ||
+          currentNodes.find((n) => n.id === 'ts_search_1') ||
+          currentNodes.find(
+            (n) => n.type !== 'structure' && !edgesRef.current.some((e) => e.source === n.id)
+          );
+
+        if (!terminalNode) return currentNodes;
+
+        const resultNode: Node = {
+          id: 'result_viewer_node',
+          type: 'resultViewer',
+          position: {
+            x: (terminalNode.position?.x || 380) + 280,
+            y: terminalNode.position?.y || 220,
+          },
+          data: {
+            label: 'Reaction Network Explorer',
+            subtitle: '3D force graph & text artifacts',
+            speciesCount: 7,
+            pathwayCount: 6,
+            onOpenResults,
+          },
+        };
+
+        return [...currentNodes, resultNode];
+      });
+
+      setEdges((currentEdges) => {
+        if (currentEdges.some((e) => e.target === 'result_viewer_node')) {
+          return currentEdges;
+        }
+
+        const terminalNode =
+          nodesRef.current.find((n) => n.id === 'xtb_nanoreactor') ||
+          nodesRef.current.find((n) => n.id === 'ts_search_1') ||
+          nodesRef.current.find(
+            (n) => n.type !== 'structure' && !currentEdges.some((e) => e.source === n.id)
+          );
+
+        if (!terminalNode) return currentEdges;
+
+        const resultEdge: Edge = {
+          id: `e-${terminalNode.id}-result_viewer_node`,
+          source: terminalNode.id,
+          target: 'result_viewer_node',
+          sourceHandle: 'source-right',
+          targetHandle: 'target-left',
+          animated: true,
+          style: { stroke: '#ea580c', strokeWidth: 2, strokeDasharray: '4 4' },
+        };
+
+        return [...currentEdges, resultEdge];
+      });
+    } else {
+      setNodes((currentNodes) =>
+        currentNodes.filter((n) => n.id !== 'result_viewer_node')
+      );
+      setEdges((currentEdges) =>
+        currentEdges.filter((e) => e.target !== 'result_viewer_node')
+      );
+    }
+  }, [showResultsNode, onOpenResults]);
+
   const onNodesChange = useCallback(
     (changes: any[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
     []
@@ -1344,6 +1423,12 @@ export default function GraphCanvas({
     setClickedNodeId(null);
 
     if (node.type === 'branchExpander' || node.type === 'branchDots') return;
+    if (node.type === 'resultViewer' || node.id === 'result_viewer_node') {
+      if (onOpenResults) {
+        onOpenResults();
+      }
+      return;
+    }
     if (!onNodeDoubleClick) return;
 
     const nodeData = node.data as any;

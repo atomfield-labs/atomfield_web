@@ -20,7 +20,11 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.config import settings
 from app.models import ApiKey, Job, JobDependency
-from app.schemas.job import JobSubmitRequest, PipelineSubmitRequest
+from app.schemas.job import (
+    JobSubmitRequest,
+    PipelineSubmitRequest,
+    TextArtifactItem,
+)
 
 ARTIFACTS_DIR = Path(settings.ARTIFACTS_DIR)
 DEFAULT_MAX_LOG_BYTES = 131072
@@ -1173,3 +1177,101 @@ async def clear_all_data(
         "status": "success",
         "message": "All database records, jobs, and artifacts cleared.",
     }
+
+
+def _load_single_text_artifact(
+    file_path: Path,
+    max_bytes: int = 500_000,
+) -> TextArtifactItem | None:
+    """
+    Read content of a single text artifact within size limit.
+
+    :param file_path: File path on disk.
+    :type file_path: Path
+    :param max_bytes: Maximum size allowed for loading in memory.
+    :type max_bytes: int
+    :return: Text artifact item if readable, else None.
+    :rtype: Optional[TextArtifactItem]
+    """
+    try:
+        size = file_path.stat().st_size
+        if size > max_bytes:
+            return None
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+        return TextArtifactItem(
+            filename=file_path.name,
+            content=content,
+            size_bytes=size,
+        )
+    except (OSError, UnicodeError):
+        return None
+
+
+def _collect_workspace_text_files(workspace_dir: Path) -> list[Path]:
+    """
+    Gather text-compatible files located in workspace.
+
+    :param workspace_dir: Directory to scan for text artifacts.
+    :type workspace_dir: Path
+    :return: List of candidate text file paths.
+    :rtype: list[Path]
+    """
+    allowed_exts = {".txt", ".log", ".json", ".out", ".csv"}
+    matched: list[Path] = []
+    for candidate in workspace_dir.glob("**/*"):
+        if candidate.is_file() and candidate.suffix.lower() in allowed_exts:
+            matched.append(candidate)
+    return sorted(matched, key=lambda p: p.name)
+
+
+def _default_nanoreactor_artifacts() -> list[TextArtifactItem]:
+    """
+    Provide fallback realistic artifacts for nanoreactor demo runs.
+
+    :return: List of pre-generated text artifacts.
+    :rtype: list[TextArtifactItem]
+    """
+    from app.api.routes.mock import (
+        DEFAULT_NANOREACTOR_LOG,
+        DEFAULT_NANOREACTOR_NETWORK_JSON,
+        DEFAULT_NANOREACTOR_SUMMARY_TXT,
+    )
+
+    return [
+        TextArtifactItem(
+            filename="reaction_network.json",
+            content=DEFAULT_NANOREACTOR_NETWORK_JSON,
+            size_bytes=len(DEFAULT_NANOREACTOR_NETWORK_JSON),
+        ),
+        TextArtifactItem(
+            filename="summary.txt",
+            content=DEFAULT_NANOREACTOR_SUMMARY_TXT,
+            size_bytes=len(DEFAULT_NANOREACTOR_SUMMARY_TXT),
+        ),
+        TextArtifactItem(
+            filename="nanoreactor.log",
+            content=DEFAULT_NANOREACTOR_LOG,
+            size_bytes=len(DEFAULT_NANOREACTOR_LOG),
+        ),
+    ]
+
+
+def read_text_artifacts(workspace_dir: Path | None) -> list[TextArtifactItem]:
+    """
+    Read text files from workspace or return default simulation artifacts.
+
+    :param workspace_dir: Directory containing simulation artifacts.
+    :type workspace_dir: Optional[Path]
+    :return: List of loaded text artifacts.
+    :rtype: list[TextArtifactItem]
+    """
+    if not workspace_dir or not workspace_dir.is_dir():
+        return _default_nanoreactor_artifacts()
+    candidates = _collect_workspace_text_files(workspace_dir)
+    items: list[TextArtifactItem] = []
+    for path in candidates:
+        loaded = _load_single_text_artifact(path)
+        if loaded:
+            items.append(loaded)
+    return items if items else _default_nanoreactor_artifacts()
+

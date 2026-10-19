@@ -24,6 +24,7 @@ from app.schemas.job import (
     JobSubmitRequest,
     PipelineSubmitRequest,
     PipelineSubmitResponse,
+    TextArtifactsResponse,
 )
 from app.services import job_service
 
@@ -307,3 +308,61 @@ async def download_job_artifacts(
         job_id=str(job_id),
         api_key=api_key,
     )
+
+
+@router.get("/artifacts/text", response_model=TextArtifactsResponse)
+async def get_session_text_artifacts(
+    session_id: str | None = None,
+    api_key: ApiKey | None = Depends(get_optional_api_key),
+    db: AsyncSession = Depends(get_db),
+) -> TextArtifactsResponse:
+    """
+    Fetch readable text artifacts from session workspace.
+
+    :param session_id: Optional session identifier.
+    :type session_id: Optional[str]
+    :param api_key: Optional authenticated API key.
+    :type api_key: Optional[ApiKey]
+    :param db: Database session.
+    :type db: AsyncSession
+    :return: Structured text artifacts response.
+    :rtype: TextArtifactsResponse
+    """
+    user_id = f"user_{api_key.id.hex[:12]}" if api_key else None
+    workspace = await job_service.resolve_workspace(
+        db=db, session_id=session_id, job_id=None, user_id=user_id
+    )
+    files = job_service.read_text_artifacts(workspace)
+    return TextArtifactsResponse(session_id=session_id, files=files)
+
+
+@router.get("/{job_id}/artifacts/text", response_model=TextArtifactsResponse)
+async def get_job_text_artifacts(
+    job_id: UUID,
+    session_id: str | None = None,
+    api_key: ApiKey | None = Depends(get_optional_api_key),
+    db: AsyncSession = Depends(get_db),
+) -> TextArtifactsResponse:
+    """
+    Fetch readable text artifacts for a specific job.
+
+    :param job_id: Target job UUID.
+    :type job_id: UUID
+    :param session_id: Optional session identifier.
+    :type session_id: Optional[str]
+    :param api_key: Optional authenticated API key.
+    :type api_key: Optional[ApiKey]
+    :param db: Database session.
+    :type db: AsyncSession
+    :return: Structured text artifacts response.
+    :rtype: TextArtifactsResponse
+    """
+    user_id = f"user_{api_key.id.hex[:12]}" if api_key else None
+    workspace = await job_service.resolve_workspace(
+        db=db, session_id=session_id, job_id=str(job_id), user_id=user_id
+    )
+    files = job_service.read_text_artifacts(workspace)
+    return TextArtifactsResponse(
+        session_id=session_id, job_id=str(job_id), files=files
+    )
+

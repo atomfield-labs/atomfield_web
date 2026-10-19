@@ -27,6 +27,18 @@ export const jobsService = {
     return new Blob([response.data], { type: 'application/zip' });
   },
 
+  async getTextArtifacts(params?: { jobId?: string; sessionId?: string }): Promise<{
+    session_id?: string;
+    job_id?: string;
+    files: Array<{ filename: string; content: string; size_bytes: number }>;
+  }> {
+    const url = params?.jobId ? `/api/jobs/${params.jobId}/artifacts/text` : '/api/jobs/artifacts/text';
+    const response = await apiClient.get(url, {
+      params: { session_id: params?.sessionId },
+    });
+    return response.data;
+  },
+
   async listJobs(params?: { status?: string; limit?: number; offset?: number }) {
     const response = await apiClient.get<{ jobs: import('../../types/api').JobItem[]; total: number }>(
       '/api/jobs',

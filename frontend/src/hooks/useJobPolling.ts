@@ -12,6 +12,7 @@ interface UseJobPollingOptions {
     jobId?: string
   ) => void;
   onUpdateSelectedNode: (updater: (prev: any) => any) => void;
+  onAllFinished?: () => void;
   intervalMs?: number;
 }
 
@@ -20,6 +21,7 @@ export function useJobPolling({
   activePipelineId,
   onUpdateExecution,
   onUpdateSelectedNode,
+  onAllFinished,
   intervalMs = 1500,
 }: UseJobPollingOptions) {
   useEffect(() => {
@@ -94,6 +96,9 @@ export function useJobPolling({
           }
         } catch (e) {
           console.error('Failed to update session status in storage', e);
+        }
+        if (onAllFinished) {
+          onAllFinished();
         }
       }
 
