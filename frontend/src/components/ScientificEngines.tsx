@@ -54,29 +54,29 @@ export const SCIENTIFIC_PACKAGES: ScientificPackage[] = [
 
 export default function ScientificEngines() {
   return (
-    <section className="w-full px-6 py-8">
+    <section className="w-full px-6 py-16 sm:py-20 my-6 sm:my-10">
       <div className="max-w-6xl mx-auto flex flex-col items-center text-center">
         {/* Simple Centered Heading */}
-        <h3 className="text-xs sm:text-sm font-semibold tracking-wider text-slate-500 uppercase mb-8">
+        <h3 className="text-xs sm:text-sm font-semibold tracking-wider text-slate-500 uppercase mb-10 sm:mb-12">
           Core Scientific Packages
         </h3>
 
         {/* Center-Justified Plain Logo Grid (No Bounding Boxes) */}
-        <div className="flex flex-wrap items-center justify-center gap-8 sm:gap-12 md:gap-14">
+        <div className="flex flex-wrap items-center justify-center gap-10 sm:gap-14 md:gap-16">
           {SCIENTIFIC_PACKAGES.map((pkg) => (
             <div
               key={pkg.id}
-              className="flex flex-col items-center justify-center gap-2"
+              className="flex flex-col items-center justify-center gap-2.5"
             >
-              <div className="h-12 w-28 flex items-center justify-center">
+              <div className="h-20 sm:h-24 w-36 sm:w-44 flex items-center justify-center">
                 <img
                   src={pkg.logo}
                   alt={pkg.name}
-                  className="max-h-12 max-w-full object-contain"
+                  className="max-h-20 sm:max-h-24 max-w-full object-contain"
                   loading="lazy"
                 />
               </div>
-              <span className="text-xs font-medium text-slate-700">
+              <span className="text-xs sm:text-sm font-semibold text-slate-700">
                 {pkg.name}
               </span>
             </div>

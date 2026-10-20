@@ -9,11 +9,19 @@ wheels/
 # Virtual environments
 .venv
 .env
-__pycache__/
+
+# Tests and test artifacts
+tests/
+test_*.py
+.pytest_cache/
 
 # Logs and runtime artifacts
 *.log
+**/*.log
 artifacts/
 node_modules/
 .DS_Store
 .vscode/
+
+# Test screenshots and capture artifacts
+frontend/*.png

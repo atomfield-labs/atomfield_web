@@ -7,26 +7,26 @@ import PolymerMelt from '../animations/PolymerMelt'
 
 export default function SectionsContainer() {
   return (
-    <section id="modules-grid" className="w-full px-4 sm:px-6 md:px-8 lg:px-10 xl:px-12 pb-24">
-      {/* Section Header */}
-      <div className="mb-10 text-center md:text-left max-w-2xl">
-        <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
+    <section id="modules-grid" className="w-full px-6 sm:px-12 md:px-16 lg:px-20 pb-24 mx-auto">
+      {/* Center-Justified Section Header */}
+      <div className="mb-12 text-center max-w-2xl mx-auto">
+        <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900 text-center">
           Calculation Modules
         </h2>
-        <p className="text-base text-slate-600 mt-2 font-medium">
+        <p className="text-base text-slate-600 mt-2 font-medium text-center">
           Preconfigured high-throughput quantum chemistry and molecular dynamics workflows.
         </p>
       </div>
 
-      {/* 3-Cards Per Row Responsive Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8 w-full">
-        {/* Card 1: Nanoreactor (First) */}
+      {/* Symmetrical 2-Cards Per Row: Preserved Original Card Width, Generous Symmetric Spacing */}
+      <div className="flex flex-wrap justify-center gap-12 sm:gap-16 md:gap-20 lg:gap-24 max-w-[980px] mx-auto">
+        {/* Card 1: Nanoreactor */}
         <div 
           onClick={() => window.location.hash = '#pipeline/nanoreactor'}
-          className="group relative bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-[0_20px_45px_-12px_rgba(249,115,22,0.18),0_4px_16px_rgba(0,0,0,0.04)] hover:border-orange-500 hover:ring-2 hover:ring-orange-500/20 transition-all duration-300 ease-out flex flex-col h-full overflow-hidden cursor-pointer hover:-translate-y-1.5"
+          className="group relative bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-[0_20px_45px_-12px_rgba(249,115,22,0.18),0_4px_16px_rgba(0,0,0,0.04)] hover:border-orange-500 hover:ring-2 hover:ring-orange-500/20 transition-all duration-300 ease-out flex flex-col overflow-hidden cursor-pointer hover:-translate-y-1.5 w-full sm:w-[390px] max-w-[400px]"
         >
-          {/* Dominant 3D Animation Header (Zoomed Out for Full Framing) */}
-          <div className="w-full h-96 sm:h-[400px] bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
+          {/* Dominant 3D Animation Header (Slightly Reduced Length) */}
+          <div className="w-full h-72 sm:h-80 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
             <Suspense fallback={<div className="w-full h-full bg-slate-50 animate-pulse" />}>
               <Canvas camera={{ position: [0, 3.8, 11.6], fov: 45 }} className="w-full h-full">
                 <ambientLight intensity={1.2} />
@@ -38,18 +38,18 @@ export default function SectionsContainer() {
             </Suspense>
           </div>
 
-          {/* Darker Orange Shaded Text Section */}
-          <div className="p-6 flex flex-col justify-between flex-1 bg-orange-100/90 border-t border-orange-200 rounded-b-2xl">
-            <div>
-              <h3 className="text-xl font-bold text-slate-900 tracking-tight group-hover:text-orange-700 transition-colors">
+          {/* Darker Orange Shaded Text Section (Center-Justified) */}
+          <div className="p-5 flex flex-col justify-between flex-1 bg-orange-100/90 border-t border-orange-200 rounded-b-2xl text-center items-center">
+            <div className="flex flex-col items-center w-full">
+              <h3 className="text-xl font-bold text-slate-900 tracking-tight group-hover:text-orange-700 transition-colors text-center">
                 Nanoreactor & Catalysis
               </h3>
-              <p className="text-xs text-slate-700 font-medium leading-relaxed mt-2">
+              <p className="text-xs text-slate-700 font-medium leading-relaxed mt-2 text-center min-h-[36px] flex items-center justify-center">
                 Discover reaction pathways and compute activation barriers (Ea) in accelerated reactive molecular environments with xTB and GFN-FF.
               </p>
 
               {/* Tags in Orange Color */}
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-3.5 text-xs font-mono font-semibold text-orange-700">
+              <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 mt-3.5 text-xs font-mono font-semibold text-orange-700 min-h-[28px]">
                 <span>xTB / GFN-FF</span>
                 <span className="text-orange-400">•</span>
                 <span>PES Exploration</span>
@@ -64,7 +64,7 @@ export default function SectionsContainer() {
                 e.stopPropagation();
                 window.location.hash = '#pipeline/nanoreactor';
               }}
-              className="w-full mt-5 py-2.5 px-4 bg-slate-900 group-hover:bg-orange-600 text-white text-xs font-semibold tracking-wide rounded-xl transition-all duration-200 shadow-sm flex items-center justify-between cursor-pointer"
+              className="w-full mt-5 py-2.5 px-4 bg-slate-900 group-hover:bg-orange-600 text-white text-xs font-semibold tracking-wide rounded-xl transition-all duration-200 shadow-sm flex items-center justify-center gap-2 cursor-pointer"
             >
               <span>Launch Nanoreactor</span>
               <span className="font-mono text-sm transform group-hover:translate-x-1 transition-transform duration-200">&rarr;</span>
@@ -72,10 +72,10 @@ export default function SectionsContainer() {
           </div>
         </div>
 
-        {/* Card 2: Optoelectronics (Second) */}
-        <div className="group relative bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-[0_20px_45px_-12px_rgba(249,115,22,0.18),0_4px_16px_rgba(0,0,0,0.04)] hover:border-orange-500 hover:ring-2 hover:ring-orange-500/20 transition-all duration-300 ease-out flex flex-col h-full overflow-hidden hover:-translate-y-1.5">
-          {/* Dominant 3D Animation Header */}
-          <div className="w-full h-96 sm:h-[400px] bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
+        {/* Card 2: Optoelectronics */}
+        <div className="group relative bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-[0_20px_45px_-12px_rgba(249,115,22,0.18),0_4px_16px_rgba(0,0,0,0.04)] hover:border-orange-500 hover:ring-2 hover:ring-orange-500/20 transition-all duration-300 ease-out flex flex-col overflow-hidden hover:-translate-y-1.5 w-full sm:w-[390px] max-w-[400px]">
+          {/* Dominant 3D Animation Header (Slightly Reduced Length) */}
+          <div className="w-full h-72 sm:h-80 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
             <Suspense fallback={<div className="w-full h-full bg-slate-50 animate-pulse" />}>
               <Canvas camera={{ position: [0, 0, 7.5], fov: 45 }} className="w-full h-full">
                 <ambientLight intensity={1.2} />
@@ -97,18 +97,18 @@ export default function SectionsContainer() {
             </div>
           </div>
 
-          {/* Darker Orange Shaded Text Section */}
-          <div className="p-6 flex flex-col justify-between flex-1 bg-orange-100/90 border-t border-orange-200 rounded-b-2xl">
-            <div>
-              <h3 className="text-xl font-bold text-slate-900 tracking-tight group-hover:text-orange-700 transition-colors">
+          {/* Darker Orange Shaded Text Section (Center-Justified) */}
+          <div className="p-5 flex flex-col justify-between flex-1 bg-orange-100/90 border-t border-orange-200 rounded-b-2xl text-center items-center">
+            <div className="flex flex-col items-center w-full">
+              <h3 className="text-xl font-bold text-slate-900 tracking-tight group-hover:text-orange-700 transition-colors text-center">
                 Optoelectronic Properties
               </h3>
-              <p className="text-xs text-slate-700 font-medium leading-relaxed mt-2">
+              <p className="text-xs text-slate-700 font-medium leading-relaxed mt-2 text-center min-h-[36px] flex items-center justify-center">
                 Calculate electronic excited states, fluorescence vs phosphorescence pathways, oscillator strengths, and frontier orbital energies.
               </p>
 
               {/* Tags in Orange Color */}
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-3.5 text-xs font-mono font-semibold text-orange-700">
+              <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 mt-3.5 text-xs font-mono font-semibold text-orange-700 min-h-[28px]">
                 <span>TD-DFT</span>
                 <span className="text-orange-400">•</span>
                 <span>Singlet / Triplet</span>
@@ -117,17 +117,18 @@ export default function SectionsContainer() {
               </div>
             </div>
 
-            {/* Simple Text Status */}
-            <div className="mt-5 text-xs font-medium text-slate-500">
-              In active development
+            {/* Status Button Placeholder with identical height */}
+            <div className="w-full mt-5 py-2.5 px-4 bg-orange-200/60 border border-orange-300/80 text-orange-900/70 text-xs font-semibold tracking-wide rounded-xl flex items-center justify-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
+              <span>In Active Development</span>
             </div>
           </div>
         </div>
 
-        {/* Card 3: Solid State (Third - Zoomed Out) */}
-        <div className="group relative bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-[0_20px_45px_-12px_rgba(249,115,22,0.18),0_4px_16px_rgba(0,0,0,0.04)] hover:border-orange-500 hover:ring-2 hover:ring-orange-500/20 transition-all duration-300 ease-out flex flex-col h-full overflow-hidden hover:-translate-y-1.5">
-          {/* Dominant 3D Animation Header (Zoomed Out for Full Framing) */}
-          <div className="w-full h-96 sm:h-[400px] bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
+        {/* Card 3: Solid State */}
+        <div className="group relative bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-[0_20px_45px_-12px_rgba(249,115,22,0.18),0_4px_16px_rgba(0,0,0,0.04)] hover:border-orange-500 hover:ring-2 hover:ring-orange-500/20 transition-all duration-300 ease-out flex flex-col overflow-hidden hover:-translate-y-1.5 w-full sm:w-[390px] max-w-[400px]">
+          {/* Dominant 3D Animation Header (Slightly Reduced Length) */}
+          <div className="w-full h-72 sm:h-80 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
             <Suspense fallback={<div className="w-full h-full bg-slate-50 animate-pulse" />}>
               <Canvas camera={{ position: [0, 0, 13.0], fov: 45 }} className="w-full h-full">
                 <ambientLight intensity={1.2} />
@@ -137,18 +138,18 @@ export default function SectionsContainer() {
             </Suspense>
           </div>
 
-          {/* Darker Orange Shaded Text Section */}
-          <div className="p-6 flex flex-col justify-between flex-1 bg-orange-100/90 border-t border-orange-200 rounded-b-2xl">
-            <div>
-              <h3 className="text-xl font-bold text-slate-900 tracking-tight group-hover:text-orange-700 transition-colors">
+          {/* Darker Orange Shaded Text Section (Center-Justified) */}
+          <div className="p-5 flex flex-col justify-between flex-1 bg-orange-100/90 border-t border-orange-200 rounded-b-2xl text-center items-center">
+            <div className="flex flex-col items-center w-full">
+              <h3 className="text-xl font-bold text-slate-900 tracking-tight group-hover:text-orange-700 transition-colors text-center">
                 Solid State & Lattices
               </h3>
-              <p className="text-xs text-slate-700 font-medium leading-relaxed mt-2">
+              <p className="text-xs text-slate-700 font-medium leading-relaxed mt-2 text-center min-h-[36px] flex items-center justify-center">
                 Model infinite crystal structures, phonon dispersions, and interstitial ion migration pathways in solid electrolytes and battery materials.
               </p>
 
               {/* Tags in Orange Color */}
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-3.5 text-xs font-mono font-semibold text-orange-700">
+              <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 mt-3.5 text-xs font-mono font-semibold text-orange-700 min-h-[28px]">
                 <span>Periodic DFT</span>
                 <span className="text-orange-400">•</span>
                 <span>Phonon Dispersions</span>
@@ -157,17 +158,18 @@ export default function SectionsContainer() {
               </div>
             </div>
 
-            {/* Simple Text Status */}
-            <div className="mt-5 text-xs font-medium text-slate-500">
-              In active development
+            {/* Status Button Placeholder with identical height */}
+            <div className="w-full mt-5 py-2.5 px-4 bg-orange-200/60 border border-orange-300/80 text-orange-900/70 text-xs font-semibold tracking-wide rounded-xl flex items-center justify-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
+              <span>In Active Development</span>
             </div>
           </div>
         </div>
 
-        {/* Card 4: Polymers (Fourth - Standalone in Row 2) */}
-        <div className="group relative bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-[0_20px_45px_-12px_rgba(249,115,22,0.18),0_4px_16px_rgba(0,0,0,0.04)] hover:border-orange-500 hover:ring-2 hover:ring-orange-500/20 transition-all duration-300 ease-out flex flex-col h-full overflow-hidden hover:-translate-y-1.5">
-          {/* Dominant 3D Animation Header with White Background */}
-          <div className="w-full h-96 sm:h-[400px] bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
+        {/* Card 4: Polymers */}
+        <div className="group relative bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-[0_20px_45px_-12px_rgba(249,115,22,0.18),0_4px_16px_rgba(0,0,0,0.04)] hover:border-orange-500 hover:ring-2 hover:ring-orange-500/20 transition-all duration-300 ease-out flex flex-col overflow-hidden hover:-translate-y-1.5 w-full sm:w-[390px] max-w-[400px]">
+          {/* Dominant 3D Animation Header (Slightly Reduced Length) */}
+          <div className="w-full h-72 sm:h-80 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
             <Suspense fallback={<div className="w-full h-full bg-slate-50 animate-pulse" />}>
               <Canvas camera={{ position: [0, 0, 10], fov: 45 }} className="w-full h-full">
                 <ambientLight intensity={1.2} />
@@ -178,18 +180,18 @@ export default function SectionsContainer() {
             </Suspense>
           </div>
 
-          {/* Darker Orange Shaded Text Section */}
-          <div className="p-6 flex flex-col justify-between flex-1 bg-orange-100/90 border-t border-orange-200 rounded-b-2xl">
-            <div>
-              <h3 className="text-xl font-bold text-slate-900 tracking-tight group-hover:text-orange-700 transition-colors">
+          {/* Darker Orange Shaded Text Section (Center-Justified) */}
+          <div className="p-5 flex flex-col justify-between flex-1 bg-orange-100/90 border-t border-orange-200 rounded-b-2xl text-center items-center">
+            <div className="flex flex-col items-center w-full">
+              <h3 className="text-xl font-bold text-slate-900 tracking-tight group-hover:text-orange-700 transition-colors text-center">
                 Polymer Chain Dynamics
               </h3>
-              <p className="text-xs text-slate-700 font-medium leading-relaxed mt-2">
+              <p className="text-xs text-slate-700 font-medium leading-relaxed mt-2 text-center min-h-[36px] flex items-center justify-center">
                 Simulate macromolecular entanglement, stress-strain curves, glass transition temperatures (Tg), and mechanical bond scission events.
               </p>
 
               {/* Tags in Orange Color */}
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-3.5 text-xs font-mono font-semibold text-orange-700">
+              <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 mt-3.5 text-xs font-mono font-semibold text-orange-700 min-h-[28px]">
                 <span>Coarse-Grained MD</span>
                 <span className="text-orange-400">•</span>
                 <span>Glass Transition (Tg)</span>
@@ -198,9 +200,10 @@ export default function SectionsContainer() {
               </div>
             </div>
 
-            {/* Simple Text Status */}
-            <div className="mt-5 text-xs font-medium text-slate-500">
-              In active development
+            {/* Status Button Placeholder with identical height */}
+            <div className="w-full mt-5 py-2.5 px-4 bg-orange-200/60 border border-orange-300/80 text-orange-900/70 text-xs font-semibold tracking-wide rounded-xl flex items-center justify-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
+              <span>In Active Development</span>
             </div>
           </div>
         </div>

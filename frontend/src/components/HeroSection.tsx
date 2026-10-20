@@ -1,51 +1,62 @@
+import PipelineFlowHero from './animations/PipelineFlowHero';
+
 export default function HeroSection() {
   return (
-    <section className="relative w-full min-h-[72vh] flex flex-col items-center justify-center px-6 pt-24 pb-12">
-      <div className="max-w-4xl mx-auto text-center">
+    <section className="relative w-full min-h-[80vh] flex flex-col justify-center px-6 sm:px-10 md:px-12 lg:px-16 pt-24 sm:pt-28 pb-12">
+      <div className="max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-center">
         
-        {/* Brand Label */}
-        <div className="inline-flex items-center mb-8 px-4 py-1.5 rounded-full bg-white/70 backdrop-blur-md border border-orange-500/20 shadow-sm">
-          <span className="text-[11px] font-bold tracking-widest text-orange-700 uppercase">
-            The Modern Standard in Simulation
-          </span>
-        </div>
+        {/* Left Column: Prominent, Bigger Text (The Main Thing) */}
+        <div className="lg:col-span-6 flex flex-col items-start text-left">
+          {/* Brand Label */}
+          <div className="inline-flex items-center mb-5 px-4 py-1.5 rounded-full bg-white/80 backdrop-blur-md border border-orange-500/20 shadow-xs">
+            <span className="text-xs font-bold tracking-widest text-orange-700 uppercase">
+              The Modern Standard in Simulation
+            </span>
+          </div>
 
-        {/* Brand Statement */}
-        <h1 className="text-7xl md:text-9xl font-extrabold tracking-tight mb-4 text-slate-900 leading-[1.05] pb-2">
-          AtomField.
-        </h1>
+          {/* Clean Brand Statement - Prominent, No Logo on Left */}
+          <h1 className="text-5xl sm:text-6xl md:text-7xl font-extrabold tracking-tight text-slate-900 leading-[1.08] mb-4">
+            AtomField.
+          </h1>
 
-        {/* Value Proposition */}
-        <div className="mb-8 md:mb-10 flex items-center justify-center">
-          <h2 className="text-2xl md:text-4xl font-extrabold text-slate-700 tracking-tight max-w-3xl mx-auto">
-            The computational orchestrator for <span className="text-orange-600">materials discovery.</span>
+          {/* Value Proposition */}
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-800 tracking-tight leading-snug mb-5 max-w-xl">
+            Create your own computational pipeline for <span className="text-orange-600">materials discovery.</span>
           </h2>
+
+          {/* Paragraph */}
+          <p className="text-base sm:text-lg text-slate-600 mb-9 leading-relaxed font-normal max-w-xl">
+            Replace fragmented scripts and manual workflows with an automated, high-throughput simulation pipeline. 
+            AtomField orchestrates quantum chemistry, reaction network discovery, and molecular dynamics from single molecules to infinite crystal lattices.
+          </p>
+
+          {/* CTA Buttons */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-start gap-4 w-full sm:w-auto">
+            <button 
+              onClick={() => window.location.hash = '#pipeline/nanoreactor'}
+              className="px-7 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-base font-semibold transition-colors shadow-sm cursor-pointer flex items-center justify-center gap-2"
+            >
+              <span>Launch Nanoreactor Demo</span>
+              <span>&rarr;</span>
+            </button>
+            <button 
+              onClick={() => {
+                const el = document.getElementById('modules-grid');
+                el?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="px-7 py-3.5 rounded-xl bg-white/90 backdrop-blur text-slate-700 text-base font-medium border border-slate-200 hover:border-slate-300 hover:text-orange-600 hover:bg-slate-50 transition-colors shadow-sm cursor-pointer flex items-center justify-center gap-1.5"
+            >
+              <span>Explore Modules</span>
+              <span>&darr;</span>
+            </button>
+          </div>
         </div>
 
-        {/* Paragraph */}
-        <p className="text-lg md:text-xl text-slate-600 mb-10 max-w-2xl mx-auto leading-relaxed text-center font-medium">
-          Replace fragmented scripts and manual workflows with an automated, high-throughput simulation pipeline. 
-          AtomField orchestrates quantum chemistry, reaction network discovery, and molecular dynamics from single molecules to infinite crystal lattices.
-        </p>
-
-        {/* CTA Buttons */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-          <button 
-            onClick={() => window.location.hash = '#pipeline/nanoreactor'}
-            className="px-8 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold transition-colors shadow-sm cursor-pointer"
-          >
-            Launch Nanoreactor Demo &rarr;
-          </button>
-          <button 
-            onClick={() => {
-              const el = document.getElementById('modules-grid');
-              el?.scrollIntoView({ behavior: 'smooth' });
-            }}
-            className="px-8 py-3.5 rounded-xl bg-white/90 backdrop-blur text-slate-700 font-medium border border-slate-200 hover:border-slate-300 hover:text-orange-600 hover:bg-slate-50 transition-colors shadow-sm cursor-pointer"
-          >
-            Explore Modules &darr;
-          </button>
+        {/* Right Column: Symbolic Pure Nodes Animation (Pasted directly on landing page) */}
+        <div className="lg:col-span-6 w-full flex items-center justify-center">
+          <PipelineFlowHero />
         </div>
+
       </div>
     </section>
   );
