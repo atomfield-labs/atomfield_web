@@ -1,6 +1,7 @@
 import { useState, useEffect, Component, type ReactNode } from 'react'
 
 import HeroSection from './components/HeroSection'
+import ScientificEngines from './components/ScientificEngines'
 import SectionsContainer from './components/SectionsContainer'
 import Navbar from './components/Navbar'
 import SessionsDashboard from './components/dashboard/SessionsDashboard'
@@ -57,6 +58,7 @@ function App() {
         ) : (
           <div className="absolute inset-0 z-10 overflow-y-auto bg-slate-50 selection:bg-orange-100 selection:text-orange-900">
             <HeroSection />
+            <ScientificEngines />
             <SectionsContainer />
           </div>
         )}
