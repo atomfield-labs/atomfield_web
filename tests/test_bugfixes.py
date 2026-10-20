@@ -339,3 +339,56 @@ def test_successful_dag_execution_and_injection():
             break
 
     assert completed, "Downstream node did not succeed after upstream completed"
+
+
+def test_delete_session():
+    headers = get_auth_headers("delete_session_test_key")
+    test_session_id = f"test_session_{uuid.uuid4().hex[:8]}"
+
+    # 1. Submit pipeline with test_session_id
+    payload = {
+        "session_id": test_session_id,
+        "nodes": [
+            {
+                "ui_id": "node_1",
+                "script_name": "sample_script.py",
+                "parameters": {"test_param": "123"},
+            }
+        ],
+        "edges": [],
+    }
+    submit_res = requests.post(
+        f"{BASE_URL}/api/jobs/pipeline/submit",
+        json=payload,
+        headers=headers,
+    )
+    assert submit_res.status_code in (200, 201, 202)
+    job_ids = submit_res.json()["job_ids"]
+    assert "node_1" in job_ids
+
+    # 2. Verify job exists in list_jobs
+    list_res = requests.get(f"{BASE_URL}/api/jobs", headers=headers)
+    assert list_res.status_code == 200
+    jobs = list_res.json()["jobs"]
+    matching = [
+        j for j in jobs if j.get("parameters", {}).get("pipeline_id") == test_session_id
+    ]
+    assert len(matching) >= 1
+
+    # 3. Delete session via DELETE /api/jobs/session/{session_id}
+    del_res = requests.delete(
+        f"{BASE_URL}/api/jobs/session/{test_session_id}",
+        headers=headers,
+    )
+    assert del_res.status_code == 200
+    del_data = del_res.json()
+    assert del_data["status"] == "success"
+
+    # 4. Verify job is gone from list_jobs
+    list_res2 = requests.get(f"{BASE_URL}/api/jobs", headers=headers)
+    assert list_res2.status_code == 200
+    jobs2 = list_res2.json()["jobs"]
+    matching2 = [
+        j for j in jobs2 if j.get("parameters", {}).get("pipeline_id") == test_session_id
+    ]
+    assert len(matching2) == 0

@@ -113,6 +113,31 @@ async def clear_all_jobs(
     return await job_service.clear_all_data(db=db, redis_queue=redis)
 
 
+@router.delete("/session/{session_id}")
+async def delete_session(
+    session_id: str,
+    api_key: ApiKey | None = Depends(get_optional_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Delete a session, including all its database jobs, dependencies, and artifacts.
+
+    :param session_id: Pipeline session identifier.
+    :type session_id: str
+    :param api_key: Optional authenticated user API key.
+    :type api_key: ApiKey | None
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :return: Operation confirmation payload.
+    :rtype: dict
+    """
+    return await job_service.delete_session(
+        db=db,
+        session_id=session_id,
+        api_key_id=api_key.id if api_key else None,
+    )
+
+
 # -----------------------------------------------------------------------
 # Job queries
 # -----------------------------------------------------------------------

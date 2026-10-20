@@ -6,6 +6,28 @@ import ApiKeyModal from '../auth/ApiKeyModal';
 
 export type SessionInfo = SessionMetadata;
 
+const getDeletedSessionIds = (): Set<string> => {
+  try {
+    const raw = localStorage.getItem('atomfield_deleted_sessions');
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+};
+
+const markSessionDeleted = (id: string) => {
+  try {
+    const deleted = getDeletedSessionIds();
+    deleted.add(id);
+    localStorage.setItem(
+      'atomfield_deleted_sessions',
+      JSON.stringify(Array.from(deleted))
+    );
+  } catch (err) {
+    console.error('Failed to mark session deleted in storage', err);
+  }
+};
+
 export default function SessionsDashboard() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
@@ -41,11 +63,12 @@ export default function SessionsDashboard() {
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
+          const deletedIds = getDeletedSessionIds();
           loadedSessions = parsed
             .filter((item: any) => {
               const id = typeof item === 'string' ? item : item?.id;
               // Template card has its own dedicated card, exclude template ID from user sessions
-              return id && id !== 'nanoreactor';
+              return id && id !== 'nanoreactor' && !deletedIds.has(id);
             })
             .map((item: any) => {
               if (typeof item === 'string') {
@@ -81,12 +104,15 @@ export default function SessionsDashboard() {
           let updatedList = [...prevSessions];
           let hasChanges = false;
 
+          const deletedIds = getDeletedSessionIds();
+
           // If a cluster job has a pipeline_id not in sessions, add it as a session
           jobs.forEach((job) => {
             const pipelineId = job.parameters?.pipeline_id;
             if (
               pipelineId &&
               pipelineId !== 'nanoreactor' &&
+              !deletedIds.has(pipelineId) &&
               !updatedList.some((s) => s.id === pipelineId)
             ) {
               const newSession: SessionInfo = {
@@ -146,18 +172,27 @@ export default function SessionsDashboard() {
     };
   }, [apiKey]);
 
-  const handleDeleteSession = (e: React.MouseEvent, id: string) => {
+  const handleDeleteSession = async (e: React.MouseEvent, id: string) => {
     e.preventDefault();
     e.stopPropagation();
     if (!confirm('Are you sure you want to delete this session?')) return;
+
+    markSessionDeleted(id);
 
     try {
       const filtered = sessions.filter((s) => s.id !== id);
       setSessions(filtered);
       localStorage.setItem('atomfield_sessions', JSON.stringify(filtered));
       localStorage.removeItem(`atomfield_blueprint_${id}`);
+      localStorage.removeItem(`atomfield_jobs_${id}`);
     } catch (err) {
-      console.error('Failed to delete session', err);
+      console.error('Failed to delete session locally', err);
+    }
+
+    try {
+      await jobsService.deleteSession(id);
+    } catch (err) {
+      console.error('Failed to delete session on cluster', err);
     }
   };
 
@@ -178,6 +213,7 @@ export default function SessionsDashboard() {
 
     try {
       localStorage.removeItem('atomfield_sessions');
+      localStorage.removeItem('atomfield_deleted_sessions');
       Object.keys(localStorage).forEach((key) => {
         if (
           key.startsWith('atomfield_blueprint_') ||
@@ -351,9 +387,11 @@ export default function SessionsDashboard() {
 
             {/* User Session Cards */}
             {sessions.map((s) => (
-              <a
+              <div
                 key={s.id}
-                href={`#pipeline/${s.id}`}
+                onClick={() => {
+                  window.location.hash = `#pipeline/${s.id}`;
+                }}
                 className="flex flex-col bg-white border border-orange-200 rounded-xl p-6 hover:shadow-lg hover:border-orange-400 transition-all cursor-pointer min-h-[220px] relative overflow-hidden group border-t-4 border-t-orange-500"
               >
                 <div className="flex justify-between items-start mb-4">
@@ -362,7 +400,7 @@ export default function SessionsDashboard() {
                     type="button"
                     onClick={(e) => handleDeleteSession(e, s.id)}
                     title="Delete"
-                    className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-all"
+                    className="z-10 opacity-70 hover:opacity-100 group-hover:opacity-100 p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-all cursor-pointer"
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path
@@ -398,7 +436,7 @@ export default function SessionsDashboard() {
                     </svg>
                   </span>
                 </div>
-              </a>
+              </div>
             ))}
           </div>
         </div>

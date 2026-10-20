@@ -53,4 +53,11 @@ export const jobsService = {
     );
     return response.data;
   },
+
+  async deleteSession(sessionId: string): Promise<{ status: string; message: string }> {
+    const response = await apiClient.delete<{ status: string; message: string }>(
+      `/api/jobs/session/${sessionId}`
+    );
+    return response.data;
+  },
 };

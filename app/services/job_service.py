@@ -14,7 +14,7 @@ from pathlib import Path
 
 from arq import ArqRedis
 from fastapi import HTTPException
-from sqlalchemy import func, select, text, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -1176,6 +1176,75 @@ async def clear_all_data(
     return {
         "status": "success",
         "message": "All database records, jobs, and artifacts cleared.",
+    }
+
+
+async def delete_session(
+    db: AsyncSession,
+    session_id: str,
+    api_key_id: _uuid.UUID | None = None,
+) -> dict:
+    """
+    Delete a specific session and all its database jobs, dependencies, and artifacts.
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param session_id: Pipeline session identifier.
+    :type session_id: str
+    :param api_key_id: Optional API key owner ID.
+    :type api_key_id: Optional[_uuid.UUID]
+    :return: Summary dictionary of operation.
+    :rtype: dict
+    """
+    clean_session_id = sanitize_identifier(session_id)
+
+    # 1. Query for jobs belonging to this pipeline/session
+    query = select(Job.id).where(
+        Job.parameters.op("->>")("pipeline_id") == clean_session_id
+    )
+    if api_key_id:
+        query = query.where(Job.api_key_id == api_key_id)
+
+    result = await db.execute(query)
+    job_ids = [row[0] for row in result.fetchall()]
+
+    if job_ids:
+        await db.execute(
+            delete(JobDependency).where(
+                or_(
+                    JobDependency.upstream_id.in_(job_ids),
+                    JobDependency.downstream_id.in_(job_ids),
+                )
+            )
+        )
+        await db.execute(delete(Job).where(Job.id.in_(job_ids)))
+        await db.commit()
+
+    # 2. Clean up workspace directory on disk
+    candidate_paths = [
+        ARTIFACTS_DIR / clean_session_id,
+    ]
+    if api_key_id:
+        user_str = sanitize_identifier(f"user_{api_key_id.hex[:12]}")
+        candidate_paths.append(ARTIFACTS_DIR / user_str / clean_session_id)
+
+    if ARTIFACTS_DIR.exists():
+        for user_dir in ARTIFACTS_DIR.iterdir():
+            if user_dir.is_dir():
+                sub = user_dir / clean_session_id
+                if sub.exists() and sub.is_dir():
+                    candidate_paths.append(sub)
+
+    for p in candidate_paths:
+        if p.exists() and _is_within(ARTIFACTS_DIR, p):
+            if p.is_dir():
+                shutil.rmtree(p, ignore_errors=True)
+            elif p.is_file():
+                p.unlink(missing_ok=True)
+
+    return {
+        "status": "success",
+        "message": f"Session {clean_session_id} and {len(job_ids)} jobs deleted.",
     }
 
 
