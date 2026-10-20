@@ -1,6 +1,6 @@
 export default function HeroSection() {
   return (
-    <section className="relative w-full min-h-[85vh] flex flex-col items-center justify-center px-6 pt-28 pb-16">
+    <section className="relative w-full min-h-[72vh] flex flex-col items-center justify-center px-6 pt-24 pb-12">
       <div className="max-w-4xl mx-auto text-center">
         
         {/* Brand Label */}
