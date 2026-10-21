@@ -49,6 +49,7 @@ export default function PipelineView() {
               <GraphCanvas 
                 blueprint={blueprint} 
                 onNodeClick={(node) => setSelectedNode(node)} 
+                onNodeDoubleClick={(node) => setSelectedNode(node)}
               />
             </ReactFlowProvider>
           ) : (
