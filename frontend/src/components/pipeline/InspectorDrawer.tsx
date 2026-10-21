@@ -101,8 +101,6 @@ export default function InspectorDrawer({
   const scriptName = node.script_name || node.data?.label || 'Unknown Script';
   const parameters = node.parameters || node.data?.parameters || {};
   const logs = node.logs || node.data?.logs || '';
-  const status = (node.status || node.data?.status || 'Draft').toUpperCase();
-  const executionTime = node.data?.execution_time_seconds || node.execution_time_seconds;
   const fallbackDefaults =
     defaultParameters ||
     node.default_parameters ||
@@ -154,48 +152,6 @@ export default function InspectorDrawer({
     }
   };
 
-  // Status badge styling
-  const getStatusBadge = () => {
-    switch (status) {
-      case 'RUNNING':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide bg-blue-50 text-blue-700 border border-blue-200">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-            RUNNING
-          </span>
-        );
-      case 'SUCCEEDED':
-      case 'COMPLETED':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide bg-emerald-50 text-emerald-700 border border-emerald-200">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-            COMPLETED
-          </span>
-        );
-      case 'FAILED':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide bg-red-50 text-red-700 border border-red-200">
-            <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-            FAILED
-          </span>
-        );
-      case 'PENDING':
-      case 'QUEUED':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide bg-amber-50 text-amber-700 border border-amber-200">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-            QUEUED
-          </span>
-        );
-      default:
-        return (
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide bg-slate-100 text-slate-600 border border-slate-200">
-            {status}
-          </span>
-        );
-    }
-  };
-
   return (
     <div
       className={`fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-950/60 backdrop-blur-xs transition-opacity duration-200 ${
@@ -211,7 +167,7 @@ export default function InspectorDrawer({
         ref={modalRef}
         role="dialog"
         aria-modal="true"
-        className={`w-full max-w-3xl lg:max-w-4xl max-h-[88vh] bg-white rounded-xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden transition-all duration-200 ease-out transform ${
+        className={`w-full max-w-3xl lg:max-w-4xl bg-white rounded-xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden transition-all duration-200 ease-out transform ${
           isAnimatingIn ? 'scale-100 opacity-100 translate-y-0' : 'scale-95 opacity-0 translate-y-2'
         }`}
       >
@@ -228,16 +184,13 @@ export default function InspectorDrawer({
               </div>
             )}
             <div className="flex flex-col min-w-0">
-              <div className="flex items-center gap-2.5">
-                <h3 className="font-bold text-slate-900 text-base truncate">
-                  {isStructureNode ? filename : scriptName}
-                </h3>
-                {!isStructureNode && getStatusBadge()}
-              </div>
+              <h3 className="font-bold text-slate-900 text-base truncate">
+                {isStructureNode ? filename : scriptName}
+              </h3>
               <span className="text-xs font-mono text-slate-500 mt-0.5 truncate">
                 {isStructureNode
                   ? `.${format} Asset • ${lineCount} lines • ${sizeKb} KB`
-                  : `ID: ${node.id?.substring(0, 14)}${executionTime ? ` • Duration: ${executionTime}s` : ''}`}
+                  : `ID: ${node.id?.substring(0, 14)}`}
               </span>
             </div>
           </div>
@@ -291,12 +244,12 @@ export default function InspectorDrawer({
           </div>
         )}
 
-        {/* Modal Body */}
-        <div className="flex-1 overflow-y-auto p-6 min-h-[280px]">
+        {/* Modal Body: Constant height so tab size never jumps or resizes */}
+        <div className="h-[480px] p-6 overflow-hidden flex flex-col">
           {/* Structure Node Body */}
           {isStructureNode && (
-            <div className="flex flex-col gap-3">
-              <div className="flex justify-between items-center text-xs">
+            <div className="h-full flex flex-col gap-3">
+              <div className="flex justify-between items-center text-xs shrink-0">
                 <div className="flex items-center gap-2">
                   <span className="px-2 py-0.5 bg-slate-100 text-slate-700 border border-slate-200 rounded font-mono text-[10px] font-bold">
                     .{format}
@@ -323,8 +276,9 @@ export default function InspectorDrawer({
                 )}
               </div>
 
-              <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 max-h-[460px] overflow-auto">
-                <pre className="font-mono text-xs text-slate-200 whitespace-pre leading-relaxed select-text">
+              {/* Light background for coordinates: never black */}
+              <div className="flex-1 min-h-0 bg-slate-50 border border-slate-200 rounded-lg p-4 overflow-auto">
+                <pre className="font-mono text-xs text-slate-800 whitespace-pre leading-relaxed select-text font-normal">
                   {rawContent || '# No structure content available'}
                 </pre>
               </div>
@@ -333,11 +287,12 @@ export default function InspectorDrawer({
 
           {/* Script Node Body */}
           {!isStructureNode && (
-            <>
+            <div className="h-full flex flex-col">
+              {/* Parameters Tab: with scrollbar when content gets longer */}
               {scriptTab === 'params' && (
-                <div className="flex flex-col gap-4">
+                <div className="h-full overflow-y-auto pr-2 flex flex-col gap-4">
                   {parameters.input && (
-                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between text-xs font-mono">
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between text-xs font-mono shrink-0">
                       <span className="text-slate-800 font-medium truncate">
                         Input structure: {parameters.input.replace('/workspace/', '')}
                       </span>
@@ -347,22 +302,25 @@ export default function InspectorDrawer({
                     </div>
                   )}
 
-                  <YamlParamEditor
-                    parameters={parameters}
-                    onChange={(newParams) => {
-                      if (onUpdateParameters) {
-                        onUpdateParameters(newParams);
-                      }
-                    }}
-                  />
+                  <div className="flex-1">
+                    <YamlParamEditor
+                      parameters={parameters}
+                      onChange={(newParams) => {
+                        if (onUpdateParameters) {
+                          onUpdateParameters(newParams);
+                        }
+                      }}
+                    />
+                  </div>
                 </div>
               )}
 
+              {/* Logs Tab: Light background, never black */}
               {scriptTab === 'logs' && (
-                <div className="h-full">
-                  <div className="bg-slate-950 text-slate-200 border border-slate-800 rounded-lg p-4 font-mono text-xs overflow-auto max-h-[460px] leading-relaxed whitespace-pre-wrap select-text">
+                <div className="h-full flex flex-col">
+                  <div className="flex-1 min-h-0 bg-slate-50 border border-slate-200 rounded-lg p-4 font-mono text-xs text-slate-800 overflow-auto leading-relaxed whitespace-pre-wrap select-text">
                     {logs || (
-                      <span className="text-slate-500 italic">
+                      <span className="text-slate-400 italic">
                         No log output recorded yet. Output will stream here during execution.
                       </span>
                     )}
@@ -370,8 +328,9 @@ export default function InspectorDrawer({
                 </div>
               )}
 
+              {/* Artifacts Tab */}
               {scriptTab === 'artifacts' && (
-                <div className="flex flex-col gap-3">
+                <div className="h-full overflow-y-auto pr-2 flex flex-col gap-3">
                   {((node.artifacts && Array.isArray(node.artifacts) && node.artifacts.length > 0) ||
                     (node.data?.artifacts &&
                       Array.isArray(node.data?.artifacts) &&
@@ -389,7 +348,7 @@ export default function InspectorDrawer({
                       ))}
                     </div>
                   ) : (
-                    <div className="py-12 flex flex-col items-center justify-center text-xs text-slate-400 bg-slate-50/50 border border-dashed border-slate-200 rounded-lg p-6 text-center">
+                    <div className="h-full flex flex-col items-center justify-center text-xs text-slate-400 bg-slate-50/50 border border-dashed border-slate-200 rounded-lg p-6 text-center">
                       <FileText className="w-8 h-8 text-slate-300 mb-2" />
                       <span className="font-semibold text-slate-600">No artifacts generated yet</span>
                       <span className="text-slate-400 text-[11px] mt-0.5">
@@ -399,7 +358,7 @@ export default function InspectorDrawer({
                   )}
                 </div>
               )}
-            </>
+            </div>
           )}
         </div>
 
