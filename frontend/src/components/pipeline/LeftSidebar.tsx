@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Info } from 'lucide-react';
+import { ChevronDown, ChevronRight, Info, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { scriptsService } from '../../api/services';
 import type { ScriptManifestItem } from '../../types/api';
 
@@ -142,6 +142,7 @@ export default function LeftSidebar({
   const [scripts, setScripts] = useState<ScriptManifestItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  const [isCollapsed, setIsCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
 
   const [openCategories, setOpenCategories] = useState<Record<string, boolean>>({
     builders: true,
@@ -209,17 +210,47 @@ export default function LeftSidebar({
 
   return (
     <>
-      <aside className="w-[260px] bg-white border-r border-slate-200 flex flex-col justify-between shrink-0 select-none z-10 shadow-xs">
-        {/* Header and Scrollable Category List */}
-        <div className="flex-1 overflow-y-auto p-3">
-          <div className="flex items-center justify-between mb-3 px-1">
-            <h2 className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">
-              Node Palette
-            </h2>
-            <span className="text-[10px] font-mono text-slate-400">
-              {scripts.length} scripts
-            </span>
-          </div>
+      {/* Slide back / Toggle Open Button (when collapsed) */}
+      {isCollapsed && (
+        <button
+          type="button"
+          onClick={() => setIsCollapsed(false)}
+          className="absolute top-3 left-3 z-30 px-3 py-1.5 bg-white/95 hover:bg-white text-slate-700 hover:text-orange-600 border border-slate-200 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer text-xs font-semibold backdrop-blur-xs group"
+          title="Open Node Palette"
+          aria-label="Open Node Palette"
+        >
+          <PanelLeftOpen className="w-4 h-4 text-orange-500 group-hover:scale-110 transition-transform" />
+          <span>Node Palette</span>
+        </button>
+      )}
+
+      <aside
+        className={`relative bg-white border-r border-slate-200 flex flex-col justify-between shrink-0 select-none z-20 shadow-xs transition-all duration-300 ease-in-out ${
+          isCollapsed ? 'w-0 border-r-0 overflow-hidden' : 'w-[260px]'
+        }`}
+      >
+        <div className="w-[260px] h-full flex flex-col justify-between overflow-hidden">
+          {/* Header and Scrollable Category List */}
+          <div className="flex-1 overflow-y-auto p-3">
+            <div className="flex items-center justify-between mb-3 px-1">
+              <div className="flex items-center gap-1.5">
+                <h2 className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">
+                  Node Palette
+                </h2>
+                <span className="text-[10px] font-mono text-slate-400">
+                  ({scripts.length})
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCollapsed(true)}
+                className="p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                title="Slide back sidebar"
+                aria-label="Slide back sidebar"
+              >
+                <PanelLeftClose className="w-4 h-4" />
+              </button>
+            </div>
 
           {isLoading ? (
             <div className="py-8 text-center text-xs font-medium text-slate-400 animate-pulse">
@@ -323,6 +354,7 @@ export default function LeftSidebar({
           <div className="text-[11px] text-slate-400 leading-normal">
             Drag node to canvas to insert into pipeline.
           </div>
+        </div>
         </div>
       </aside>
 
