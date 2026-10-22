@@ -1,3 +1,4 @@
+import { withoutPlatformKeys } from './taskCatalog';
 import type { Node, Edge } from '@xyflow/react';
 import type { PipelineSubmitRequest, PipelineSubmitFile } from '../types/api';
 
@@ -49,15 +50,16 @@ export function buildPipelineSubmitPayload(
     session_id: sessionId,
     nodes: executableNodes.map((node) => {
       const data = node.data as any;
-      const scriptName =
-        data.filename ||
-        data.script_id ||
-        (data.label?.endsWith('.py') ? data.label : `${data.label}.py`);
+      // task_id is set when a catalog task is dropped; the rest are
+      // fallbacks for drafts saved before the catalog existed.
+      const taskId =
+        data.task_id || data.filename || data.script_id || data.label;
 
       return {
         ui_id: node.id,
-        script_name: scriptName,
-        parameters: data.parameters || {},
+        script_name: taskId,
+        parameters: withoutPlatformKeys(data.parameters || {}),
+        inputs: data.inputs || {},
       };
     }),
     edges: executableEdges.map((edge) => ({

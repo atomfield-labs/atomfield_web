@@ -4,6 +4,18 @@ import { jobsService } from '../../api/services';
 import { triggerFileDownload } from '../../utils/downloadHelper';
 import YamlParamEditor from './YamlParamEditor';
 import CH4Icon from '../icons/CH4Icon';
+import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
+import type { InputFiles } from '../../types/api';
+
+const WIRED_ROW_CLASS = [
+  'p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center',
+  'justify-between text-xs font-mono shrink-0',
+].join(' ');
+
+const WIRED_BADGE_CLASS = [
+  'px-2 py-0.5 bg-orange-100 text-orange-700 border border-orange-200',
+  'text-[10px] font-bold rounded shrink-0',
+].join(' ');
 
 interface InspectorDrawerProps {
   node: any | null;
@@ -29,6 +41,7 @@ export default function InspectorDrawer({
   // Tabs for script nodes: params | logs | artifacts
   const [scriptTab, setScriptTab] = useState<'params' | 'logs' | 'artifacts'>('params');
   const [isDownloading, setIsDownloading] = useState(false);
+  const { taskById } = useTaskDefinitions();
 
   const handleClose = useCallback(() => {
     setIsAnimatingIn(false);
@@ -100,6 +113,10 @@ export default function InspectorDrawer({
   // Script node attributes
   const scriptName = node.script_name || node.data?.label || 'Unknown Script';
   const parameters = node.parameters || node.data?.parameters || {};
+  const task = taskById.get(node.data?.task_id ?? node.task_id);
+  const wiredInputs = Object.entries(
+    (node.data?.inputs ?? node.inputs ?? {}) as InputFiles
+  );
   const logs = node.logs || node.data?.logs || '';
   const fallbackDefaults =
     defaultParameters ||
@@ -291,20 +308,19 @@ export default function InspectorDrawer({
               {/* Parameters Tab: with scrollbar when content gets longer */}
               {scriptTab === 'params' && (
                 <div className="h-full overflow-y-auto pr-2 flex flex-col gap-4">
-                  {parameters.input && (
-                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between text-xs font-mono shrink-0">
+                  {wiredInputs.map(([port, files]) => (
+                    <div key={port} className={WIRED_ROW_CLASS}>
                       <span className="text-slate-800 font-medium truncate">
-                        Input structure: {parameters.input.replace('/workspace/', '')}
+                        {port}: {files.join(', ')}
                       </span>
-                      <span className="px-2 py-0.5 bg-orange-100 text-orange-700 border border-orange-200 text-[10px] font-bold rounded shrink-0">
-                        WIRED
-                      </span>
+                      <span className={WIRED_BADGE_CLASS}>WIRED</span>
                     </div>
-                  )}
+                  ))}
 
                   <div className="flex-1">
                     <YamlParamEditor
                       parameters={parameters}
+                      specs={task?.parameters}
                       onChange={(newParams) => {
                         if (onUpdateParameters) {
                           onUpdateParameters(newParams);

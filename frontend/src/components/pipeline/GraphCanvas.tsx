@@ -18,6 +18,12 @@ import { GitBranch } from 'lucide-react';
 import RemovableEdge from './RemovableEdge';
 import StructureNode from './StructureNode';
 import CalculationNode from './CalculationNode';
+import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
+import type { TaskDefinition } from '../../types/api';
+import {
+  defaultParameterValues,
+  inputPortForFile,
+} from '../../utils/taskCatalog';
 import BranchExpanderNode from './BranchExpanderNode';
 import BranchCircleNode from './BranchCircleNode';
 import BranchDotsNode from './BranchDotsNode';
@@ -95,6 +101,7 @@ export default function GraphCanvas({
   const [clickedNodeId, setClickedNodeId] = useState<string | null>(null);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [customToolbarCount, setCustomToolbarCount] = useState(3);
+  const { taskById } = useTaskDefinitions();
 
   const activeToolbarNodeId = clickedNodeId;
 
@@ -606,7 +613,7 @@ export default function GraphCanvas({
 
           if (
             (parentData as any)?.structureFilename &&
-            (parentData as any)?.parameters?.input
+            Object.keys((parentData as any)?.inputs ?? {}).length > 0
           ) {
             newReplica.data.structureFilename = (parentData as any).structureFilename;
             newReplica.data.structureEdgeId = edgeId;
@@ -1012,6 +1019,8 @@ export default function GraphCanvas({
           data: { 
             label: n.label || n.script_name, 
             filename: n.filename || n.script_name,
+            task_id: n.task_id || n.script_name,
+            inputs: n.inputs || {},
             script_id: n.script_id || n.ui_id || n.id,
             status: n.status || 'Draft', 
             parameters: n.parameters || {},
@@ -1108,13 +1117,11 @@ export default function GraphCanvas({
             const d = n.data as any;
             if (d?.structureEdgeId && allRemovedIds.has(d.structureEdgeId)) {
               updated = true;
-              const newParams = { ...(d.parameters || {}) };
-              delete newParams.input;
               return {
                 ...n,
                 data: {
                   ...d,
-                  parameters: newParams,
+                  inputs: {},
                   structureEdgeId: undefined,
                   structureFilename: undefined,
                 },
@@ -1174,14 +1181,17 @@ export default function GraphCanvas({
           nds.map((n) => {
             if (targetIdsToUpdate.has(n.id)) {
               const nData = n.data as any;
+              const task = taskById.get(nData.task_id);
+              const port = task
+                ? inputPortForFile(task, sourceData.filename ?? '')
+                : null;
               return {
                 ...n,
                 data: {
                   ...nData,
-                  parameters: {
-                    ...(nData.parameters || {}),
-                    input: workspacePath,
-                  },
+                  inputs: port
+                    ? { [port]: [sourceData.filename] }
+                    : nData.inputs,
                   structureFilename: sourceData.filename,
                 },
               };
@@ -1220,7 +1230,7 @@ export default function GraphCanvas({
         setEdges((eds) => [...eds, ...newEdgesToAdd]);
       }
     },
-    []
+    [taskById]
   );
 
   const onReconnect = useCallback(
@@ -1286,6 +1296,11 @@ export default function GraphCanvas({
         return;
       }
 
+      // Catalog tasks carry parameter specs; their defaults seed the node.
+      const defaults = Array.isArray(scriptData.parameters)
+        ? defaultParameterValues(scriptData as TaskDefinition)
+        : scriptData.default_parameters || {};
+
       const newNode: Node = {
         id: uuidv4(),
         type: 'default',
@@ -1295,11 +1310,12 @@ export default function GraphCanvas({
         targetPosition: Position.Left,
         data: { 
           label: scriptData.title || scriptData.name || fallbackName || 'Untitled Script',
+          task_id: scriptData.id,
           script_id: scriptData.id,
-          filename: scriptData.filename,
           status: 'Draft',
-          parameters: scriptData.default_parameters || {},
-          default_parameters: scriptData.default_parameters || {}
+          parameters: defaults,
+          default_parameters: defaults,
+          inputs: {},
         },
         style: {
           background: statusColors['Draft'],

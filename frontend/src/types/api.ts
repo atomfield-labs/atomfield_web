@@ -6,13 +6,59 @@ export interface QuotaResponse {
   runsRemaining: number;
 }
 
-export interface ScriptManifestItem {
+// Task catalog (GET /api/task-definitions); mirrors app/catalog/models.py.
+export type ParameterKind = 'boolean' | 'integer' | 'number' | 'string';
+
+export type ParameterValue =
+  | boolean
+  | number
+  | string
+  | null
+  | Array<boolean | number | string>;
+
+export interface ParameterSpec {
+  name: string;
+  flag: string;
+  kind: ParameterKind;
+  default: ParameterValue;
+  choices: Array<boolean | number | string> | null;
+  multiple: boolean;
+  required: boolean;
+  help: string | null;
+  label: string | null;
+  unit: string | null;
+  minimum: number | null;
+  maximum: number | null;
+}
+
+export interface InputPort {
+  name: string;
+  flag: string;
+  formats: string[];
+  required: boolean;
+  multiple: boolean;
+}
+
+export interface OutputPort {
+  name: string;
+  glob: string;
+}
+
+export interface TaskDefinition {
   id: string;
-  filename: string;
   title: string;
   description: string;
-  default_parameters: Record<string, any>;
+  category: string;
+  module: string;
+  resources: { cpus: number; memory_mb: number; walltime_minutes: number };
+  platform_flags: { job_name: string | null; cpus: string | null };
+  inputs: InputPort[];
+  outputs: OutputPort[];
+  parameters: ParameterSpec[];
 }
+
+// Input port name -> uploaded file names.
+export type InputFiles = Record<string, string[]>;
 
 export interface BlueprintNode {
   ui_id: string;
@@ -53,6 +99,7 @@ export interface PipelineSubmitNode {
   ui_id: string;
   script_name: string;
   parameters: Record<string, any>;
+  inputs: InputFiles;
 }
 
 export interface PipelineSubmitEdge {

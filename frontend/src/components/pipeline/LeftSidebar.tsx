@@ -1,9 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Info, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
-import { scriptsService } from '../../api/services';
-import type { ScriptManifestItem } from '../../types/api';
-
-export type { ScriptManifestItem };
+import React, { useState } from 'react';
+import {
+  ChevronDown,
+  ChevronRight,
+  Info,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from 'lucide-react';
+import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
+import type { TaskDefinition } from '../../types/api';
+import { groupByCategory } from '../../utils/taskCatalog';
 
 interface LeftSidebarProps {
   onLoadModularWorkflow?: () => void;
@@ -18,116 +23,83 @@ interface SidebarItem {
   isStructure?: boolean;
   isWorkflow?: boolean;
   workflowType?: 'flash' | 'pipe';
-  rawScript?: ScriptManifestItem;
+  task?: TaskDefinition;
 }
 
-interface CategoryDefinition {
+interface PaletteCategory {
   id: string;
   label: string;
-  getItems: (
-    scripts: ScriptManifestItem[],
-    onLoadModularWorkflow?: () => void,
-    onLoadFlashWorkflow?: () => void
-  ) => SidebarItem[];
+  items: SidebarItem[];
 }
 
-const CATEGORIES: CategoryDefinition[] = [
-  {
-    id: 'builders',
-    label: 'Builders',
-    getItems: () => [
-      {
-        id: 'structure_input',
-        title: 'Structure Input (.xyz)',
-        description: 'Molecular coordinate file input (.xyz, .mol, .sdf, .pdb). Drag onto canvas or upload file.',
-        isStructure: true,
-      },
-    ],
-  },
-  {
-    id: 'optimizers',
-    label: 'Optimizers',
-    getItems: (scripts) => {
-      const targetIds = ['xtb_opt', 'mlff_opt', 'mlff_refine', 'ts_search'];
-      return targetIds
-        .map((id) => scripts.find((s) => s.id === id))
-        .filter((s): s is ScriptManifestItem => !!s)
-        .map((s) => ({
-          id: s.id,
-          title: s.title,
-          filename: s.filename,
-          description: s.description,
-          rawScript: s,
-        }));
+const BUILDERS: PaletteCategory = {
+  id: 'builders',
+  label: 'Builders',
+  items: [
+    {
+      id: 'structure_input',
+      title: 'Structure Input (.xyz)',
+      description:
+        'Molecular coordinate file input (.xyz, .mol, .sdf, .pdb). ' +
+        'Drag onto canvas or upload file.',
+      isStructure: true,
     },
-  },
-  {
-    id: 'scfs',
-    label: 'SCFs',
-    getItems: () => [], // Dedicated single-point SCF drivers coming soon
-  },
-  {
-    id: 'molecular_dynamics',
-    label: 'Molecular Dynamics',
-    getItems: (scripts) => {
-      const targetIds = ['xtb_md'];
-      return targetIds
-        .map((id) => scripts.find((s) => s.id === id))
-        .filter((s): s is ScriptManifestItem => !!s)
-        .map((s) => ({
-          id: s.id,
-          title: s.title,
-          filename: s.filename,
-          description: s.description,
-          rawScript: s,
-        }));
-    },
-  },
-  {
-    id: 'materials_informatics',
-    label: 'Materials Informatics',
-    getItems: (scripts) => {
-      const targetIds = ['rxn_network'];
-      return targetIds
-        .map((id) => scripts.find((s) => s.id === id))
-        .filter((s): s is ScriptManifestItem => !!s)
-        .map((s) => ({
-          id: s.id,
-          title: s.title,
-          filename: s.filename,
-          description: s.description,
-          rawScript: s,
-        }));
-    },
-  },
-  {
-    id: 'prebuilt_drivers',
-    label: 'Prebuilt Drivers',
-    getItems: (_scripts, _onLoadModularWorkflow, _onLoadFlashWorkflow) => {
-      const items: SidebarItem[] = [];
+  ],
+};
 
-      items.push({
-        id: 'flash_nanoreactor',
-        title: 'Nanoreactor Flash',
-        filename: 'xtb_nanoreactor.py',
-        description: 'Fast monolithic prebuilt run: parallel MD replicates & reaction network graph extraction. Click to switch pipeline.',
-        isWorkflow: true,
-        workflowType: 'flash',
-      });
-
-      items.push({
-        id: 'modular_nanoreactor',
-        title: 'Nanoreactor Pipe',
-        filename: 'modular_workflow',
-        description: '2D decomposed 5-node reaction discovery pipeline: xTB Opt -> xTB MD -> Reaction Network -> SevenNet Refine -> TS Search. Click to switch pipeline.',
-        isWorkflow: true,
-        workflowType: 'pipe',
-      });
-
-      return items;
+const PREBUILT_DRIVERS: PaletteCategory = {
+  id: 'prebuilt_drivers',
+  label: 'Prebuilt Drivers',
+  items: [
+    {
+      id: 'flash_nanoreactor',
+      title: 'Nanoreactor Flash',
+      filename: 'xtb_nanoreactor',
+      description:
+        'Fast monolithic prebuilt run: parallel MD replicates & reaction ' +
+        'network graph extraction. Click to switch pipeline.',
+      isWorkflow: true,
+      workflowType: 'flash',
     },
-  },
-];
+    {
+      id: 'modular_nanoreactor',
+      title: 'Nanoreactor Pipe',
+      filename: 'modular_workflow',
+      description:
+        '2D decomposed 5-node reaction discovery pipeline: xTB Opt -> ' +
+        'xTB MD -> Reaction Network -> SevenNet Refine -> TS Search. ' +
+        'Click to switch pipeline.',
+      isWorkflow: true,
+      workflowType: 'pipe',
+    },
+  ],
+};
+
+/**
+ * Palette entry for one catalog task; its id shows in the tooltip.
+ */
+function taskItem(task: TaskDefinition): SidebarItem {
+  return {
+    id: task.id,
+    title: task.title,
+    filename: task.id,
+    description: task.description,
+    task,
+  };
+}
+
+/**
+ * Fixed builders first, then one category per catalog category, then
+ * the prebuilt pipeline templates.
+ */
+function buildCategories(tasks: TaskDefinition[]): PaletteCategory[] {
+  const catalogCategories = groupByCategory(tasks).map(([label, group]) => ({
+    id: `catalog:${label}`,
+    label,
+    items: group.map(taskItem),
+  }));
+  return [BUILDERS, ...catalogCategories, PREBUILT_DRIVERS];
+}
 
 interface TooltipState {
   item: SidebarItem;
@@ -139,37 +111,21 @@ export default function LeftSidebar({
   onLoadModularWorkflow,
   onLoadFlashWorkflow,
 }: LeftSidebarProps = {}) {
-  const [scripts, setScripts] = useState<ScriptManifestItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { tasks, isLoading } = useTaskDefinitions();
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
-  const [isCollapsed, setIsCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
-
-  const [openCategories, setOpenCategories] = useState<Record<string, boolean>>({
-    builders: true,
-    optimizers: true,
-    scfs: false,
-    molecular_dynamics: true,
-    materials_informatics: true,
-    prebuilt_drivers: true,
-  });
-
-  useEffect(() => {
-    scriptsService
-      .getAvailableScripts()
-      .then((data) => {
-        setScripts(data);
-        setIsLoading(false);
-      })
-      .catch((err) => {
-        console.error('Failed to fetch available scripts:', err);
-        setIsLoading(false);
-      });
-  }, []);
+  const [isCollapsed, setIsCollapsed] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < 768
+  );
+  // Categories start open; only the ones a user closes are recorded.
+  const [openCategories, setOpenCategories] = useState<
+    Record<string, boolean>
+  >({});
+  const categories = buildCategories(tasks);
 
   const toggleCategory = (catId: string) => {
     setOpenCategories((prev) => ({
       ...prev,
-      [catId]: !prev[catId],
+      [catId]: !(prev[catId] ?? true),
     }));
   };
 
@@ -189,9 +145,12 @@ export default function LeftSidebar({
       return;
     }
 
-    if (item.rawScript) {
-      event.dataTransfer.setData('application/reactflow', JSON.stringify(item.rawScript));
-      event.dataTransfer.setData('scriptName', item.rawScript.title);
+    if (item.task) {
+      event.dataTransfer.setData(
+        'application/reactflow',
+        JSON.stringify(item.task)
+      );
+      event.dataTransfer.setData('scriptName', item.task.title);
       event.dataTransfer.effectAllowed = 'move';
     }
   };
@@ -238,7 +197,7 @@ export default function LeftSidebar({
                   Node Palette
                 </h2>
                 <span className="text-[10px] font-mono text-slate-400">
-                  ({scripts.length})
+                  ({tasks.length})
                 </span>
               </div>
               <button
@@ -258,9 +217,9 @@ export default function LeftSidebar({
             </div>
           ) : (
             <div className="space-y-2">
-              {CATEGORIES.map((cat) => {
-                const items = cat.getItems(scripts, onLoadModularWorkflow, onLoadFlashWorkflow);
-                const isOpen = !!openCategories[cat.id];
+              {categories.map((cat) => {
+                const items = cat.items;
+                const isOpen = openCategories[cat.id] ?? true;
 
                 return (
                   <div key={cat.id} className="mb-2">

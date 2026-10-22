@@ -29,7 +29,10 @@ export function serializeGraphToBlueprint(nodes: Node[], edges: Edge[]): { nodes
         ui_id: node.id,
         id: node.id,
         type: node.type || 'default',
-        script_name: data.filename || data.script_id || data.label,
+        script_name:
+          data.task_id || data.filename || data.script_id || data.label,
+        task_id: data.task_id,
+        inputs: data.inputs || {},
         label: data.label,
         status: data.status || 'Draft',
         parameters: data.parameters || {},
