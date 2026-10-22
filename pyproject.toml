@@ -55,6 +55,7 @@ env = [
     # Tests register many keys from one client; the limit itself is
     # tested by lowering it in test_access_control.py.
     "D:KEY_CREATION_LIMIT_PER_HOUR=1000",
+    "D:CATALOG_PATH=tests/fixtures/catalog.json",
 ]
 
 [dependency-groups]

@@ -5,6 +5,7 @@ Configures FastAPI, lifespan hooks, middleware, and route mounting.
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from arq import create_pool
 from fastapi import FastAPI
@@ -12,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from app.api.router import api_router
+from app.catalog.catalog import Catalog
 from app.core.broker import build_redis_settings
 from app.core.config import settings
 from app.core.security import hash_api_key
@@ -31,6 +33,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     # The schema is owned by migrations (python -m app.db.migrate),
     # which run before the server starts.
+
+    # Load (and validate) the catalog first: a broken catalog must stop
+    # the server here, not fail someone's submission later.
+    app.state.catalog = Catalog.from_path(Path(settings.CATALOG_PATH))
 
     # Auto-provision cluster administrator key if configured
     if settings.ADMIN_API_KEY:

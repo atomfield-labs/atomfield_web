@@ -28,12 +28,12 @@ def build_two_node_pipeline(session_id: str, script_name: str) -> dict:
             {
                 "ui_id": "node_1",
                 "script_name": script_name,
-                "parameters": {"iterations": 5},
+                "parameters": {"charge": 0},
             },
             {
                 "ui_id": "node_2",
                 "script_name": script_name,
-                "parameters": {"iterations": 10},
+                "parameters": {"charge": 1},
             },
         ],
         "edges": [{"upstream_ui_id": "node_1", "downstream_ui_id": "node_2"}],
@@ -79,7 +79,7 @@ def test_unauthenticated_requests_blocked(client: TestClient):
     """
     job_response = client.post(
         "/api/jobs/submit",
-        json={"script_name": "test.py", "parameters": {}},
+        json={"script_name": "toy_opt", "parameters": {}},
     )
     assert job_response.status_code == 401
 
@@ -87,7 +87,7 @@ def test_unauthenticated_requests_blocked(client: TestClient):
         "/api/jobs/pipeline/submit",
         json={
             "nodes": [
-                {"ui_id": "a", "script_name": "test.py", "parameters": {}}
+                {"ui_id": "a", "script_name": "toy_opt", "parameters": {}}
             ],
             "edges": [],
         },
@@ -119,7 +119,7 @@ def test_auth_key_lifecycle_and_user_stats(
 
     submit_response = client.post(
         "/api/jobs/submit",
-        json={"script_name": "sample_script.py", "parameters": {}},
+        json={"script_name": "toy_opt", "parameters": {}},
         headers=headers,
     )
     assert submit_response.status_code == 202
@@ -188,7 +188,7 @@ def test_dag_cycle_detection(
     :param make_user_headers: Factory registering a user key.
     :type make_user_headers: UserHeadersFactory
     """
-    payload = build_two_node_pipeline("cycle_session", "simulate.py")
+    payload = build_two_node_pipeline("cycle_session", "toy_opt")
     payload["edges"].append(
         {"upstream_ui_id": "node_2", "downstream_ui_id": "node_1"}
     )
@@ -215,7 +215,7 @@ def test_dag_invalid_edge_endpoints(
     """
     payload = {
         "nodes": [
-            {"ui_id": "node_A", "script_name": "simulate.py", "parameters": {}},
+            {"ui_id": "node_A", "script_name": "toy_opt", "parameters": {}},
         ],
         "edges": [
             {
@@ -247,7 +247,7 @@ def test_standalone_job_submission_with_null_parameters(
     """
     response = client.post(
         "/api/jobs/submit",
-        json={"script_name": "simulate.py", "parameters": None},
+        json={"script_name": "toy_opt", "parameters": None},
         headers=make_user_headers(),
     )
     assert response.status_code in (200, 201, 202)
@@ -272,7 +272,7 @@ def test_valid_dag_submission_and_status(
     headers = make_user_headers()
     response = client.post(
         "/api/jobs/pipeline/submit",
-        json=build_two_node_pipeline(session_id, "simulate.py"),
+        json=build_two_node_pipeline(session_id, "toy_opt"),
         headers=headers,
     )
     assert response.status_code in (200, 201, 202)
@@ -305,7 +305,7 @@ def test_job_logs_tailing(
     headers = make_user_headers()
     response = client.post(
         "/api/jobs/submit",
-        json={"script_name": "sample_script.py", "parameters": {}},
+        json={"script_name": "toy_opt", "parameters": {}},
         headers=headers,
     )
     assert response.status_code in (200, 201, 202)
@@ -332,7 +332,7 @@ def test_delete_session(
     """
     headers = make_user_headers("delete_session_test_key")
     session_id = f"test_session_{uuid.uuid4().hex[:8]}"
-    payload = build_two_node_pipeline(session_id, "sample_script.py")
+    payload = build_two_node_pipeline(session_id, "toy_opt")
     submit_response = client.post(
         "/api/jobs/pipeline/submit",
         json=payload,

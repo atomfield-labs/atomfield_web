@@ -9,6 +9,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.catalog.catalog import Catalog
 from app.core.config import settings
 from app.core.rate_limit import FixedWindowRateLimiter, RateLimit
 from app.core.security import hash_api_key
@@ -31,6 +32,18 @@ async def get_redis(request: Request) -> ArqRedis:
     :rtype: ArqRedis
     """
     return request.app.state.redis
+
+
+async def get_catalog(request: Request) -> Catalog:
+    """
+    Provide the task catalog loaded at startup.
+
+    :param request: Active FastAPI HTTP request object.
+    :type request: Request
+    :return: Loaded task catalog.
+    :rtype: Catalog
+    """
+    return request.app.state.catalog
 
 
 async def get_current_api_key(

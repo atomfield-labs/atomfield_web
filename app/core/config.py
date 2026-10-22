@@ -50,8 +50,9 @@ class Settings(BaseSettings):
 
     # --- Workspaces and Filesystem ---
     ARTIFACTS_DIR: str = str(_BASE_DIR / "artifacts")
-    HOST_SCRIPTS_DIR: str = str(_BASE_DIR / "scripts")
-    HOST_ARTIFACTS_DIR: str = str(_BASE_DIR / "artifacts")
+
+    # --- Task catalog, written by the domain pack (afscripts) ---
+    CATALOG_PATH: str = str(_BASE_DIR / "scripts_repo" / "catalog.json")
 
     # --- Computational Chemistry Driver ---
     CHEMISTRY_PYTHON_BIN: str = (

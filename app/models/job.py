@@ -55,6 +55,8 @@ class Job(Base):
     )
 
     parameters = Column(JSONB, nullable=True)
+    # Input port name -> file names in the session workspace.
+    input_files = Column(JSONB, nullable=True)
     output_data = Column(JSONB, nullable=True)
     error_message = Column(Text, nullable=True)
 

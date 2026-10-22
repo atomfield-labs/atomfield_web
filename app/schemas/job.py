@@ -6,6 +6,26 @@ from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic.fields import FieldInfo
+
+InputFiles = dict[str, list[str]]
+
+
+def input_files_field() -> FieldInfo:
+    """
+    Describe the input-file mapping shared by job and node requests.
+
+    :return: Pydantic field defaulting to no input files.
+    :rtype: FieldInfo
+    """
+    return Field(
+        default_factory=dict,
+        examples=[{"structure": ["water.xyz"]}],
+        description=(
+            "Input port name -> uploaded file names. Ports and formats "
+            "are listed by GET /api/task-definitions."
+        ),
+    )
 
 
 class JobSubmitRequest(BaseModel):
@@ -17,14 +37,16 @@ class JobSubmitRequest(BaseModel):
         ...,
         min_length=1,
         max_length=255,
-        examples=["band_structure.py"],
-        description="Name of the simulation script to execute.",
+        examples=["xtb_opt"],
+        description="Id of a task from GET /api/task-definitions.",
     )
     parameters: dict[str, object] | None = Field(
         default=None,
-        examples=[{"lattice_constant_angstrom": 5.43, "temperature_k": 300}],
-        description="Input parameters passed to the script.",
+        examples=[{"charge": 0, "optlevel": "tight"}],
+        description="Values for the task's parameters; omitted ones use "
+        "their defaults.",
     )
+    inputs: InputFiles = input_files_field()
 
 
 class JobResponse(BaseModel):
@@ -36,6 +58,7 @@ class JobResponse(BaseModel):
     script_name: str
     status: str
     parameters: dict[str, object] | None = None
+    input_files: InputFiles | None = None
     output_data: dict[str, object] | None = None
     error_message: str | None = None
     execution_time_seconds: float | None = None
@@ -66,6 +89,7 @@ class JobNode(BaseModel):
     )
     script_name: str = Field(..., min_length=1, max_length=255)
     parameters: dict[str, object] = Field(default_factory=dict)
+    inputs: InputFiles = input_files_field()
 
 
 class JobEdge(BaseModel):

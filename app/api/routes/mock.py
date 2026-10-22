@@ -203,8 +203,6 @@ NANOREACTOR_PARAMETERS = {
     "neb_engine": "sevennet",
     "nimages": 10,
     "rxn_filter": "smiles",
-    "jobname": "nanoreactor",
-    "input": "/workspace/ethanol.xyz",
 }
 
 NANOREACTOR_BLUEPRINT = {
@@ -224,10 +222,11 @@ NANOREACTOR_BLUEPRINT = {
         {
             "ui_id": "xtb_nanoreactor",
             "id": "xtb_nanoreactor",
-            "script_name": "xtb_nanoreactor.py",
+            "script_name": "xtb_nanoreactor",
             "label": "Nanoreactor Flash",
             "status": "Ready",
             "parameters": NANOREACTOR_PARAMETERS,
+            "inputs": {"structure": ["ethanol.xyz"]},
             "default_parameters": NANOREACTOR_PARAMETERS,
             "position": {"x": 380, "y": 220},
         },
@@ -261,29 +260,28 @@ MODULAR_NANOREACTOR_BLUEPRINT = {
         {
             "ui_id": "xtb_opt_1",
             "id": "xtb_opt_1",
-            "script_name": "xtbopt_driver.py",
+            "script_name": "xtb_opt",
             "label": "xTB Geometry Optimization",
+            "inputs": {"structure": ["ethanol.xyz"]},
             "status": "Ready",
             "parameters": {
                 "gfn": 2,
                 "charge": 0,
                 "optlevel": "normal",
                 "maxcycle": 250,
-                "jobname": "xtb_opt",
             },
             "default_parameters": {
                 "gfn": 2,
                 "charge": 0,
                 "optlevel": "normal",
                 "maxcycle": 250,
-                "jobname": "xtb_opt",
             },
             "position": {"x": 360, "y": 140},
         },
         {
             "ui_id": "xtb_md_1",
             "id": "xtb_md_1",
-            "script_name": "xtbmd_driver.py",
+            "script_name": "xtb_md",
             "label": "xTB Molecular Dynamics",
             "status": "Ready",
             "parameters": {
@@ -292,7 +290,6 @@ MODULAR_NANOREACTOR_BLUEPRINT = {
                 "temp": 1200.0,
                 "time": 10.0,
                 "step": 1.0,
-                "jobname": "xtb_md",
             },
             "default_parameters": {
                 "gfn": 2,
@@ -300,32 +297,29 @@ MODULAR_NANOREACTOR_BLUEPRINT = {
                 "temp": 1200.0,
                 "time": 10.0,
                 "step": 1.0,
-                "jobname": "xtb_md",
             },
             "position": {"x": 620, "y": 140},
         },
         {
             "ui_id": "rxn_network_1",
             "id": "rxn_network_1",
-            "script_name": "rxn_network_driver.py",
+            "script_name": "rxn_network",
             "label": "Reaction Network Mapper",
             "status": "Ready",
             "parameters": {
                 "charge": 0,
                 "rxn_filter": "smiles",
-                "jobname": "rxn_network",
             },
             "default_parameters": {
                 "charge": 0,
                 "rxn_filter": "smiles",
-                "jobname": "rxn_network",
             },
             "position": {"x": 620, "y": 320},
         },
         {
             "ui_id": "mlff_refine_1",
             "id": "mlff_refine_1",
-            "script_name": "mlff_refine_driver.py",
+            "script_name": "mlff_refine",
             "label": "SevenNet Conformer Refinement",
             "status": "Ready",
             "parameters": {
@@ -334,7 +328,6 @@ MODULAR_NANOREACTOR_BLUEPRINT = {
                 "fmax": 0.01,
                 "steps": 250,
                 "charge": 0,
-                "jobname": "mlff_refine",
             },
             "default_parameters": {
                 "engine": "sevennet",
@@ -342,14 +335,13 @@ MODULAR_NANOREACTOR_BLUEPRINT = {
                 "fmax": 0.01,
                 "steps": 250,
                 "charge": 0,
-                "jobname": "mlff_refine",
             },
             "position": {"x": 880, "y": 320},
         },
         {
             "ui_id": "ts_search_1",
             "id": "ts_search_1",
-            "script_name": "ts_search_driver.py",
+            "script_name": "ts_search",
             "label": "Transition State Search",
             "status": "Ready",
             "parameters": {
@@ -358,7 +350,6 @@ MODULAR_NANOREACTOR_BLUEPRINT = {
                 "ts_engine": "sevennet",
                 "nimages": 10,
                 "charge": 0,
-                "jobname": "ts_search",
             },
             "default_parameters": {
                 "ts_search": "sella_neb",
@@ -366,7 +357,6 @@ MODULAR_NANOREACTOR_BLUEPRINT = {
                 "ts_engine": "sevennet",
                 "nimages": 10,
                 "charge": 0,
-                "jobname": "ts_search",
             },
             "position": {"x": 1140, "y": 320},
         },

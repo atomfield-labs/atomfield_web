@@ -1,0 +1,91 @@
+{
+  "format_version": 1,
+  "tasks": [
+    {
+      "id": "toy_opt",
+      "title": "Toy optimization",
+      "description": "Covers every parameter kind.",
+      "category": "Optimizers",
+      "module": "toy.opt_driver",
+      "resources": {"cpus": 2, "memory_mb": 1000, "walltime_minutes": 10},
+      "platform_flags": {"job_name": "-JOBNAME", "cpus": "-parallel"},
+      "inputs": [
+        {
+          "name": "structure",
+          "flag": "-i",
+          "formats": ["xyz"],
+          "required": false,
+          "multiple": false
+        }
+      ],
+      "outputs": [{"name": "structure", "glob": "*_optimized.xyz"}],
+      "parameters": [
+        {"name": "charge", "flag": "-charge", "kind": "integer", "default": 0},
+        {
+          "name": "temp",
+          "flag": "-temp",
+          "kind": "number",
+          "default": 300.0,
+          "unit": "K",
+          "minimum": 0
+        },
+        {
+          "name": "gfnff",
+          "flag": "-gfnff",
+          "kind": "boolean",
+          "default": false
+        },
+        {"name": "keep", "flag": "-nokeep", "kind": "boolean", "default": true},
+        {
+          "name": "optlevel",
+          "flag": "-optlevel",
+          "kind": "string",
+          "default": "normal",
+          "choices": ["normal", "tight"]
+        },
+        {
+          "name": "gfn",
+          "flag": "-gfn",
+          "kind": "integer",
+          "default": 2,
+          "choices": [0, 1, 2]
+        },
+        {"name": "solvent", "flag": "-solvent", "kind": "string"}
+      ]
+    },
+    {
+      "id": "toy_network",
+      "title": "Toy network",
+      "description": "Covers list inputs and required parameters.",
+      "category": "Materials Informatics",
+      "module": "toy.network_driver",
+      "resources": {"cpus": 1, "memory_mb": 500, "walltime_minutes": 5},
+      "platform_flags": {"job_name": "-JOBNAME"},
+      "inputs": [
+        {
+          "name": "trajectories",
+          "flag": "-i",
+          "formats": ["xyz", "trj"],
+          "multiple": true
+        },
+        {
+          "name": "reference",
+          "flag": "-ref",
+          "formats": ["xyz"],
+          "required": true
+        }
+      ],
+      "outputs": [{"name": "network", "glob": "*_network.json"}],
+      "parameters": [
+        {
+          "name": "method",
+          "flag": "-method",
+          "kind": "string",
+          "required": true
+        },
+        {"name": "tags", "flag": "-tags", "kind": "string", "multiple": true},
+        {"name": "copy", "flag": "-copy", "kind": "string", "default": "a"}
+      ]
+    }
+  ]
+}

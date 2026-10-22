@@ -10,6 +10,7 @@ from collections.abc import Iterator
 
 import pytest
 from alembic import command
+from alembic.script import ScriptDirectory
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -29,7 +30,8 @@ from app.db.migrate import (
 from tests.stores import drop_test_database, recreate_test_database
 
 SCRATCH_DATABASE = "atomfield_migrations_test"
-HEAD = "0002"
+# Read from migrations/, so adding a revision never breaks these tests.
+HEAD = ScriptDirectory.from_config(build_alembic_config()).get_current_head()
 
 
 @pytest.fixture

@@ -34,7 +34,7 @@ def submit_job(client: TestClient, headers: dict[str, str]) -> str:
     """
     response = client.post(
         "/api/jobs/submit",
-        json={"script_name": "sample_script.py", "parameters": {}},
+        json={"script_name": "toy_opt", "parameters": {}},
         headers=headers,
     )
     assert response.status_code == 202
@@ -227,9 +227,7 @@ def test_delete_session_cannot_touch_other_users(
     stranger = make_user_headers("session_stranger")
     payload = {
         "session_id": "same_session_name",
-        "nodes": [
-            {"ui_id": "a", "script_name": "sample_script.py", "parameters": {}}
-        ],
+        "nodes": [{"ui_id": "a", "script_name": "toy_opt", "parameters": {}}],
         "edges": [],
     }
     client.post("/api/jobs/pipeline/submit", json=payload, headers=owner)

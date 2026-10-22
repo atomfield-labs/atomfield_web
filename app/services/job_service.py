@@ -292,6 +292,7 @@ async def create_job(
     new_job = Job(
         script_name=request.script_name,
         parameters=params,
+        input_files=request.inputs or None,
         status="Pending",
         api_key_id=api_key.id if api_key else None,
     )
@@ -462,6 +463,7 @@ async def enqueue_execution(redis_queue: ArqRedis, job: Job) -> None:
         str(job.id),
         job.script_name,
         job.parameters or {},
+        job.input_files or {},
     )
 
 
@@ -620,7 +622,7 @@ def _provision_pipeline_workspace(
     return pipeline_id
 
 
-async def _create_blocked_pipeline_jobs(
+async def create_blocked_pipeline_jobs(
     db: AsyncSession,
     nodes,
     pipeline_id: str,
@@ -652,6 +654,7 @@ async def _create_blocked_pipeline_jobs(
         new_job = Job(
             script_name=node.script_name,
             parameters=params,
+            input_files=node.inputs or None,
             status="Blocked",
             api_key_id=api_key.id if api_key else None,
         )
@@ -701,7 +704,7 @@ async def _persist_pipeline_jobs(
     :return: Tuple of (ui_jobs, ui_to_db_map).
     :rtype: tuple
     """
-    db_jobs = await _create_blocked_pipeline_jobs(
+    db_jobs = await create_blocked_pipeline_jobs(
         db, request.nodes, pipeline_id, api_key
     )
     ui_to_db_map = {ui_id: job.id for ui_id, job in db_jobs}

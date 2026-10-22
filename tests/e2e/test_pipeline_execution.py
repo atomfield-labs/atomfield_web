@@ -4,6 +4,7 @@ Postgres). Skipped by default; run with ``pytest -m e2e`` after
 ``docker compose up``.
 """
 
+import os
 import time
 import uuid
 from itertools import pairwise
@@ -13,10 +14,12 @@ import requests
 
 pytestmark = pytest.mark.e2e
 
-BASE_URL = "http://localhost:8000"
+# Point at another stack with ATOMFIELD_E2E_URL=http://host:port.
+BASE_URL = os.environ.get("ATOMFIELD_E2E_URL", "http://localhost:8000")
 POLL_ATTEMPTS = 20
 POLL_INTERVAL_SECONDS = 1.0
 UPSTREAM_FAILED_MESSAGE = "Upstream dependency failed"
+WATER_XYZ = "3\nwater\nO 0 0 0.117\nH 0 0.757 -0.467\nH 0 -0.757 -0.467\n"
 
 
 def create_user_headers(label: str = "pytest_e2e_user") -> dict[str, str]:
@@ -36,27 +39,44 @@ def create_user_headers(label: str = "pytest_e2e_user") -> dict[str, str]:
     return {"X-API-Key": response.json()["api_key"]}
 
 
-def build_chain(ui_ids: list[str], script_names: list[str]) -> dict:
+def build_chain(nodes: list[dict], with_water: bool = False) -> dict:
     """
-    Build a submit payload for a linear chain of nodes.
+    Build a submit payload linking the given nodes in order.
 
-    :param ui_ids: Node ids, in chain order.
-    :type ui_ids: list[str]
-    :param script_names: Script per node, same order as ``ui_ids``.
-    :type script_names: list[str]
+    :param nodes: Node bodies (ui_id, script_name, parameters, inputs).
+    :type nodes: list[dict]
+    :param with_water: Attach ``water.xyz`` to the session.
+    :type with_water: bool
     :return: JSON body for ``/api/jobs/pipeline/submit``.
     :rtype: dict
     """
-    nodes = [
-        {"ui_id": ui_id, "script_name": script_name, "parameters": {}}
-        for ui_id, script_name in zip(ui_ids, script_names, strict=True)
-    ]
     edges = [
-        {"upstream_ui_id": parent, "downstream_ui_id": child}
-        for parent, child in pairwise(ui_ids)
+        {"upstream_ui_id": parent["ui_id"], "downstream_ui_id": child["ui_id"]}
+        for parent, child in pairwise(nodes)
     ]
-    session_id = f"test_e2e_{uuid.uuid4().hex[:6]}"
-    return {"session_id": session_id, "nodes": nodes, "edges": edges}
+    files = [{"filename": "water.xyz", "content": WATER_XYZ}]
+    return {
+        "session_id": f"test_e2e_{uuid.uuid4().hex[:6]}",
+        "nodes": nodes,
+        "edges": edges,
+        "files": files if with_water else [],
+    }
+
+
+def task_node(ui_id: str, task_id: str, **parameters) -> dict:
+    """
+    Describe one pipeline node running a catalog task.
+
+    :param ui_id: Node id within the pipeline.
+    :type ui_id: str
+    :param task_id: Catalog task id.
+    :type task_id: str
+    :param parameters: Parameter values for the task.
+    :type parameters: Any
+    :return: Node body.
+    :rtype: dict
+    """
+    return {"ui_id": ui_id, "script_name": task_id, "parameters": parameters}
 
 
 def submit_pipeline(payload: dict, headers: dict[str, str]) -> dict[str, str]:
@@ -97,15 +117,15 @@ def fetch_job(job_id: str, headers: dict[str, str]) -> dict:
 def test_cascading_failure_propagation():
     """
     A failing root marks its child and grandchild as upstream-failed.
+    The root fails because it has no structure to optimize.
     """
     headers = create_user_headers()
-    job_ids = submit_pipeline(
-        build_chain(
-            ["root_failing", "downstream_child", "downstream_grandchild"],
-            ["nonexistent_script.py", "simulate.py", "simulate.py"],
-        ),
-        headers,
-    )
+    nodes = [
+        task_node("root_failing", "xtb_opt"),
+        task_node("downstream_child", "xtb_md", time=0.2),
+        task_node("downstream_grandchild", "rxn_network"),
+    ]
+    job_ids = submit_pipeline(build_chain(nodes), headers)
     descendants = [job_ids["downstream_child"]]
     descendants.append(job_ids["downstream_grandchild"])
     for _ in range(POLL_ATTEMPTS):
@@ -123,13 +143,10 @@ def test_successful_dag_execution_and_injection():
     A child runs after its parent succeeds and sees the parent's result.
     """
     headers = create_user_headers()
-    job_ids = submit_pipeline(
-        build_chain(
-            ["upstream_node", "downstream_node"],
-            ["sample_script.py", "sample_script.py"],
-        ),
-        headers,
-    )
+    parent = task_node("upstream_node", "xtb_opt")
+    parent["inputs"] = {"structure": ["water.xyz"]}
+    nodes = [parent, task_node("downstream_node", "xtb_md", time=0.2)]
+    job_ids = submit_pipeline(build_chain(nodes, with_water=True), headers)
     for _ in range(POLL_ATTEMPTS):
         time.sleep(POLL_INTERVAL_SECONDS)
         child = fetch_job(job_ids["downstream_node"], headers)
