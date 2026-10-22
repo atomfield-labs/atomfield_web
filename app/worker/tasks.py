@@ -103,7 +103,8 @@ def _link_upstream_workspaces(
     :type session_dir: Path
     :param job_workspace: Execution workspace directory for the current job.
     :type job_workspace: Path
-    :param parameters: Job parameters dictionary containing optional upstream_results.
+    :param parameters: Job parameters dictionary containing optional
+        upstream_results.
     :type parameters: dict[str, Any]
     """
     upstream_results = parameters.get("upstream_results")
@@ -172,7 +173,6 @@ def _resolve_workspace_dir(
     _copy_session_inputs_to_job(session_dir, job_workspace)
     _link_upstream_workspaces(session_dir, job_workspace, parameters)
     return pipeline_id, job_workspace
-
 
 
 def _is_nanoreactor_task(script_name: str, driver_path: Path) -> bool:
@@ -472,7 +472,7 @@ def _run_nanoreactor_pipeline(
 
 def _is_chemistry_task(script_name: str) -> str | None:
     """
-    Check if the given script name maps to a Hilbert modular chemistry driver.
+    Check if the given script name maps to a modular chemistry driver.
 
     :param script_name: Script identifier string.
     :type script_name: str
@@ -641,7 +641,9 @@ def _run_chemistry_driver(
         )
         return {
             "status": "failed",
-            "error": f"{script_key} failed (code {return_code}):\n{error_detail}",
+            "error": (
+                f"{script_key} failed (code {return_code}):\n{error_detail}"
+            ),
         }
 
     return _format_chemistry_output(

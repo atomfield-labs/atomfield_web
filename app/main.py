@@ -7,15 +7,14 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from arq import create_pool
-from arq.connections import RedisSettings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from app.api.router import api_router
+from app.core.broker import build_redis_settings
 from app.core.config import settings
 from app.core.security import hash_api_key
-from app.db.base import Base
 from app.db.session import AsyncSessionLocal, engine
 from app.models.api_key import ApiKey
 
@@ -30,8 +29,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     :return: Async generator yielding control to the application context.
     :rtype: AsyncGenerator[None, None]
     """
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+    # The schema is owned by migrations (python -m app.db.migrate),
+    # which run before the server starts.
 
     # Auto-provision cluster administrator key if configured
     if settings.ADMIN_API_KEY:
@@ -52,9 +51,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 session.add(admin_key)
                 await session.commit()
 
-    app.state.redis = await create_pool(
-        RedisSettings(host=settings.REDIS_HOST, port=settings.REDIS_PORT)
-    )
+    app.state.redis = await create_pool(build_redis_settings())
     try:
         yield
     finally:

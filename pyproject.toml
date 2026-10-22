@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
+    "alembic>=1.20.1",
     "arq>=0.28.0",
     "asyncpg>=0.32.0",
     "docker>=7.2.0",
@@ -32,5 +33,36 @@ build-backend = "uv_build"
 line-length = 80
 
 [tool.ruff.lint]
+# E501 is off by default; the 80-character rule is enforced here.
+extend-select = ["E501"]
 extend-ignore = ["B008"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "scripts_repo/src"]
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: needs the full stack running (API, worker, Redis, Postgres)",
+]
+# pytest-env sets these before any app module is imported, because
+# settings are read at import time. "D:" means default only: a variable
+# already exported in the shell wins.
+env = [
+    "D:POSTGRES_DB=atomfield_test",
+    "D:REDIS_DB=15",
+    "D:ADMIN_API_KEY=af_test_admin_key",
+    "D:ARTIFACTS_DIR=.pytest_cache/test-artifacts",
+    # Tests register many keys from one client; the limit itself is
+    # tested by lowering it in test_access_control.py.
+    "D:KEY_CREATION_LIMIT_PER_HOUR=1000",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.16.0",
+    "pytest>=9.1.1",
+    "pytest-env>=1.8.1",
+    "requests>=2.34.2",
+    "ruff>=0.17.1",
+]
 

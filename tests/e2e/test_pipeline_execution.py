@@ -1,0 +1,140 @@
+"""
+End-to-end pipeline tests against a running stack (API, worker, Redis,
+Postgres). Skipped by default; run with ``pytest -m e2e`` after
+``docker compose up``.
+"""
+
+import time
+import uuid
+from itertools import pairwise
+
+import pytest
+import requests
+
+pytestmark = pytest.mark.e2e
+
+BASE_URL = "http://localhost:8000"
+POLL_ATTEMPTS = 20
+POLL_INTERVAL_SECONDS = 1.0
+UPSTREAM_FAILED_MESSAGE = "Upstream dependency failed"
+
+
+def create_user_headers(label: str = "pytest_e2e_user") -> dict[str, str]:
+    """
+    Register a user key on the running server.
+
+    :param label: Human-readable label stored with the key.
+    :type label: str
+    :return: Headers carrying the new key.
+    :rtype: dict[str, str]
+    """
+    response = requests.post(
+        f"{BASE_URL}/api/auth/keys",
+        json={"label": label},
+    )
+    assert response.status_code == 201
+    return {"X-API-Key": response.json()["api_key"]}
+
+
+def build_chain(ui_ids: list[str], script_names: list[str]) -> dict:
+    """
+    Build a submit payload for a linear chain of nodes.
+
+    :param ui_ids: Node ids, in chain order.
+    :type ui_ids: list[str]
+    :param script_names: Script per node, same order as ``ui_ids``.
+    :type script_names: list[str]
+    :return: JSON body for ``/api/jobs/pipeline/submit``.
+    :rtype: dict
+    """
+    nodes = [
+        {"ui_id": ui_id, "script_name": script_name, "parameters": {}}
+        for ui_id, script_name in zip(ui_ids, script_names, strict=True)
+    ]
+    edges = [
+        {"upstream_ui_id": parent, "downstream_ui_id": child}
+        for parent, child in pairwise(ui_ids)
+    ]
+    session_id = f"test_e2e_{uuid.uuid4().hex[:6]}"
+    return {"session_id": session_id, "nodes": nodes, "edges": edges}
+
+
+def submit_pipeline(payload: dict, headers: dict[str, str]) -> dict[str, str]:
+    """
+    Submit a pipeline and return its node-to-job id mapping.
+
+    :param payload: Pipeline submit body.
+    :type payload: dict
+    :param headers: Owner's key headers.
+    :type headers: dict[str, str]
+    :return: Mapping of node ui_id to job id.
+    :rtype: dict[str, str]
+    """
+    response = requests.post(
+        f"{BASE_URL}/api/jobs/pipeline/submit",
+        json=payload,
+        headers=headers,
+    )
+    assert response.status_code in (200, 201, 202)
+    return response.json()["job_ids"]
+
+
+def fetch_job(job_id: str, headers: dict[str, str]) -> dict:
+    """
+    Fetch one of the caller's jobs from the running server.
+
+    :param job_id: Job identifier.
+    :type job_id: str
+    :param headers: Owner's key headers.
+    :type headers: dict[str, str]
+    :return: Job as returned by ``GET /api/jobs/{job_id}``.
+    :rtype: dict
+    """
+    url = f"{BASE_URL}/api/jobs/{job_id}"
+    return requests.get(url, headers=headers).json()
+
+
+def test_cascading_failure_propagation():
+    """
+    A failing root marks its child and grandchild as upstream-failed.
+    """
+    headers = create_user_headers()
+    job_ids = submit_pipeline(
+        build_chain(
+            ["root_failing", "downstream_child", "downstream_grandchild"],
+            ["nonexistent_script.py", "simulate.py", "simulate.py"],
+        ),
+        headers,
+    )
+    descendants = [job_ids["downstream_child"]]
+    descendants.append(job_ids["downstream_grandchild"])
+    for _ in range(POLL_ATTEMPTS):
+        time.sleep(POLL_INTERVAL_SECONDS)
+        jobs = [fetch_job(job_id, headers) for job_id in descendants]
+        if all(job["status"] == "Failed" for job in jobs):
+            messages = {job["error_message"] for job in jobs}
+            assert messages == {UPSTREAM_FAILED_MESSAGE}
+            return
+    pytest.fail("Descendants did not fail after the root failed")
+
+
+def test_successful_dag_execution_and_injection():
+    """
+    A child runs after its parent succeeds and sees the parent's result.
+    """
+    headers = create_user_headers()
+    job_ids = submit_pipeline(
+        build_chain(
+            ["upstream_node", "downstream_node"],
+            ["sample_script.py", "sample_script.py"],
+        ),
+        headers,
+    )
+    for _ in range(POLL_ATTEMPTS):
+        time.sleep(POLL_INTERVAL_SECONDS)
+        child = fetch_job(job_ids["downstream_node"], headers)
+        if child["status"] == "Success":
+            upstream_results = child["parameters"]["upstream_results"]
+            assert job_ids["upstream_node"] in upstream_results
+            return
+    pytest.fail("Downstream node did not succeed after its parent")

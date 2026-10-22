@@ -3,7 +3,6 @@ HTTP route handlers for simulation jobs and DAG pipelines.
 """
 
 from pathlib import Path
-from uuid import UUID
 
 from arq import ArqRedis
 from fastapi import APIRouter, Depends
@@ -14,10 +13,12 @@ from starlette.background import BackgroundTask
 from app.api.dependencies import (
     get_current_api_key,
     get_optional_api_key,
+    get_owned_job,
     get_redis,
 )
 from app.db.session import get_db
 from app.models.api_key import ApiKey
+from app.models.job import Job
 from app.schemas.job import (
     JobListResponse,
     JobResponse,
@@ -96,36 +97,40 @@ async def submit_pipeline(
 
 
 @router.delete("/clear")
-async def clear_all_jobs(
+async def clear_my_jobs(
+    api_key: ApiKey = Depends(get_current_api_key),
     db: AsyncSession = Depends(get_db),
-    redis: ArqRedis = Depends(get_redis),
 ):
     """
-    Clear all jobs, dependency DAGs, database records, and artifacts.
+    Delete all of the caller's jobs and files, and nobody else's.
 
+    Wiping the whole system is not an HTTP operation: it needs shell
+    access to the server (``python -m app.cli wipe``).
+
+    :param api_key: Authenticated caller.
+    :type api_key: ApiKey
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param redis: Connected Redis worker queue.
-    :type redis: ArqRedis
     :return: Operation confirmation payload.
     :rtype: dict
     """
-    return await job_service.clear_all_data(db=db, redis_queue=redis)
+    return await job_service.clear_user_data(db=db, api_key_id=api_key.id)
 
 
 @router.delete("/session/{session_id}")
 async def delete_session(
     session_id: str,
-    api_key: ApiKey | None = Depends(get_optional_api_key),
+    api_key: ApiKey = Depends(get_current_api_key),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Delete a session, including all its database jobs, dependencies, and artifacts.
+    Delete one of the caller's sessions, including its jobs,
+    dependencies, and artifacts.
 
     :param session_id: Pipeline session identifier.
     :type session_id: str
-    :param api_key: Optional authenticated user API key.
-    :type api_key: ApiKey | None
+    :param api_key: Authenticated caller.
+    :type api_key: ApiKey
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :return: Operation confirmation payload.
@@ -134,7 +139,7 @@ async def delete_session(
     return await job_service.delete_session(
         db=db,
         session_id=session_id,
-        api_key_id=api_key.id if api_key else None,
+        api_key_id=api_key.id,
     )
 
 
@@ -180,39 +185,34 @@ async def list_jobs(
 
 
 @router.get("/{job_id}", response_model=JobResponse)
-async def get_job_status(
-    job_id: UUID,
-    db: AsyncSession = Depends(get_db),
-):
+async def get_job_status(job: Job = Depends(get_owned_job)):
     """
-    Retrieve job status and output metadata.
+    Retrieve status and output metadata of one of the caller's jobs.
 
-    :param job_id: Primary key UUID of target job.
-    :type job_id: UUID
-    :param db: Asynchronous database session.
-    :type db: AsyncSession
+    :param job: Job the caller owns (any job, for the admin).
+    :type job: Job
     :return: Job entity containing execution status and output metrics.
     :rtype: Job
     """
-    return await job_service.get_job_by_id(db=db, job_id=job_id)
+    return job
 
 
 @router.get("/{job_id}/logs")
 async def get_job_logs(
-    job_id: UUID,
+    job: Job = Depends(get_owned_job),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Fetch live logs and generated artifact file list for a job.
 
-    :param job_id: Primary key UUID of target job.
-    :type job_id: UUID
+    :param job: Job the caller owns (any job, for the admin).
+    :type job: Job
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :return: Dictionary containing logs, status, and artifact listing.
     :rtype: dict
     """
-    return await job_service.get_job_logs_and_artifacts(db=db, job_id=job_id)
+    return await job_service.get_job_logs_and_artifacts(db=db, job_id=job.id)
 
 
 # -----------------------------------------------------------------------
@@ -220,7 +220,7 @@ async def get_job_logs(
 # -----------------------------------------------------------------------
 
 
-def _build_zip_response(
+def build_zip_response(
     archive_path: Path,
     identifier: str,
 ) -> FileResponse:
@@ -243,12 +243,12 @@ def _build_zip_response(
     )
 
 
-async def _artifact_archive_response(
+async def artifact_archive_response(
     *,
     db: AsyncSession,
     session_id: str | None,
     job_id: str | None,
-    api_key: ApiKey | None = None,
+    api_key: ApiKey,
 ) -> FileResponse:
     """
     Resolve target workspace and stream it back as a disk-backed ZIP.
@@ -259,12 +259,12 @@ async def _artifact_archive_response(
     :type session_id: str | None
     :param job_id: Optional job identifier.
     :type job_id: str | None
-    :param api_key: Optional authenticated user API key.
-    :type api_key: ApiKey | None
+    :param api_key: Authenticated caller.
+    :type api_key: ApiKey
     :return: Streamed FileResponse binary archive.
     :rtype: FileResponse
     """
-    user_id = f"user_{api_key.id.hex[:12]}" if api_key else None
+    user_id = job_service.user_folder_name(api_key.id)
     workspace_dir = await job_service.resolve_workspace(
         db=db,
         session_id=session_id,
@@ -277,13 +277,13 @@ async def _artifact_archive_response(
         session_id=session_id,
     )
     target_id = session_id or job_id or "workspace"
-    return _build_zip_response(archive_path, target_id)
+    return build_zip_response(archive_path, target_id)
 
 
 @router.get("/artifacts/download")
 async def download_session_artifacts(
     session_id: str | None = None,
-    api_key: ApiKey | None = Depends(get_optional_api_key),
+    api_key: ApiKey = Depends(get_current_api_key),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -291,14 +291,14 @@ async def download_session_artifacts(
 
     :param session_id: Optional session identifier string.
     :type session_id: str | None
-    :param api_key: Optional authenticated user API key.
-    :type api_key: ApiKey | None
+    :param api_key: Authenticated caller.
+    :type api_key: ApiKey
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :return: Streamed ZIP archive file response.
     :rtype: FileResponse
     """
-    return await _artifact_archive_response(
+    return await artifact_archive_response(
         db=db,
         session_id=session_id,
         job_id=None,
@@ -308,29 +308,29 @@ async def download_session_artifacts(
 
 @router.get("/{job_id}/artifacts/download")
 async def download_job_artifacts(
-    job_id: UUID,
+    job: Job = Depends(get_owned_job),
     session_id: str | None = None,
-    api_key: ApiKey | None = Depends(get_optional_api_key),
+    api_key: ApiKey = Depends(get_current_api_key),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Download workspace artifacts for a job (or its session) as a ZIP.
 
-    :param job_id: Target job UUID.
-    :type job_id: UUID
+    :param job: Job the caller owns (any job, for the admin).
+    :type job: Job
     :param session_id: Optional associated session identifier string.
     :type session_id: str | None
-    :param api_key: Optional authenticated user API key.
-    :type api_key: ApiKey | None
+    :param api_key: Authenticated caller.
+    :type api_key: ApiKey
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :return: Streamed ZIP archive file response.
     :rtype: FileResponse
     """
-    return await _artifact_archive_response(
+    return await artifact_archive_response(
         db=db,
         session_id=session_id,
-        job_id=str(job_id),
+        job_id=str(job.id),
         api_key=api_key,
     )
 
@@ -338,7 +338,7 @@ async def download_job_artifacts(
 @router.get("/artifacts/text", response_model=TextArtifactsResponse)
 async def get_session_text_artifacts(
     session_id: str | None = None,
-    api_key: ApiKey | None = Depends(get_optional_api_key),
+    api_key: ApiKey = Depends(get_current_api_key),
     db: AsyncSession = Depends(get_db),
 ) -> TextArtifactsResponse:
     """
@@ -346,14 +346,14 @@ async def get_session_text_artifacts(
 
     :param session_id: Optional session identifier.
     :type session_id: Optional[str]
-    :param api_key: Optional authenticated API key.
-    :type api_key: Optional[ApiKey]
+    :param api_key: Authenticated caller.
+    :type api_key: ApiKey
     :param db: Database session.
     :type db: AsyncSession
     :return: Structured text artifacts response.
     :rtype: TextArtifactsResponse
     """
-    user_id = f"user_{api_key.id.hex[:12]}" if api_key else None
+    user_id = job_service.user_folder_name(api_key.id)
     workspace = await job_service.resolve_workspace(
         db=db, session_id=session_id, job_id=None, user_id=user_id
     )
@@ -363,31 +363,30 @@ async def get_session_text_artifacts(
 
 @router.get("/{job_id}/artifacts/text", response_model=TextArtifactsResponse)
 async def get_job_text_artifacts(
-    job_id: UUID,
+    job: Job = Depends(get_owned_job),
     session_id: str | None = None,
-    api_key: ApiKey | None = Depends(get_optional_api_key),
+    api_key: ApiKey = Depends(get_current_api_key),
     db: AsyncSession = Depends(get_db),
 ) -> TextArtifactsResponse:
     """
     Fetch readable text artifacts for a specific job.
 
-    :param job_id: Target job UUID.
-    :type job_id: UUID
+    :param job: Job the caller owns (any job, for the admin).
+    :type job: Job
     :param session_id: Optional session identifier.
     :type session_id: Optional[str]
-    :param api_key: Optional authenticated API key.
-    :type api_key: Optional[ApiKey]
+    :param api_key: Authenticated caller.
+    :type api_key: ApiKey
     :param db: Database session.
     :type db: AsyncSession
     :return: Structured text artifacts response.
     :rtype: TextArtifactsResponse
     """
-    user_id = f"user_{api_key.id.hex[:12]}" if api_key else None
+    user_id = job_service.user_folder_name(api_key.id)
     workspace = await job_service.resolve_workspace(
-        db=db, session_id=session_id, job_id=str(job_id), user_id=user_id
+        db=db, session_id=session_id, job_id=str(job.id), user_id=user_id
     )
     files = job_service.read_text_artifacts(workspace)
     return TextArtifactsResponse(
-        session_id=session_id, job_id=str(job_id), files=files
+        session_id=session_id, job_id=str(job.id), files=files
     )
-

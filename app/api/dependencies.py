@@ -2,15 +2,23 @@
 Shared FastAPI route dependencies for database, cache, and authentication.
 """
 
+from uuid import UUID
+
 from arq import ArqRedis
 from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.rate_limit import FixedWindowRateLimiter, RateLimit
 from app.core.security import hash_api_key
 from app.db.session import get_db
 from app.models.api_key import ApiKey
+from app.models.job import Job
+
+CLOUDFLARE_CLIENT_HEADER = "CF-Connecting-IP"
+UNKNOWN_CLIENT = "unknown"
+SECONDS_PER_HOUR = 3600
 
 
 async def get_redis(request: Request) -> ArqRedis:
@@ -115,11 +123,108 @@ async def require_admin_key(
             detail="Admin API key is not configured on the server.",
         )
 
-    admin_hash = hash_api_key(settings.ADMIN_API_KEY)
-    if api_key.key_hash != admin_hash:
+    if not is_admin_key(api_key):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Administrator privileges required.",
         )
 
     return api_key
+
+
+def is_admin_key(api_key: ApiKey) -> bool:
+    """
+    Decide whether a key is the configured administrator key.
+
+    :param api_key: Authenticated key.
+    :type api_key: ApiKey
+    :return: True only if an admin key is configured and this is it.
+    :rtype: bool
+    """
+    if not settings.ADMIN_API_KEY:
+        return False
+    return api_key.key_hash == hash_api_key(settings.ADMIN_API_KEY)
+
+
+async def get_owned_job(
+    job_id: UUID,
+    api_key: ApiKey = Depends(get_current_api_key),
+    db: AsyncSession = Depends(get_db),
+) -> Job:
+    """
+    Load a job the caller may see: their own, or any job for the admin.
+
+    Unknown and foreign jobs both answer 404, so a stranger cannot even
+    learn that a job id exists.
+
+    :param job_id: Job id from the URL path.
+    :type job_id: UUID
+    :param api_key: Authenticated caller.
+    :type api_key: ApiKey
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :return: The job, if the caller may access it.
+    :rtype: Job
+    :raises HTTPException: 404 if missing or owned by someone else.
+    """
+    job = await db.get(Job, job_id)
+    visible = job is not None and (
+        job.api_key_id == api_key.id or is_admin_key(api_key)
+    )
+    if not visible:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job {job_id} not found",
+        )
+    return job
+
+
+def client_address(request: Request) -> str:
+    """
+    Identify the client for rate limiting.
+
+    Behind Cloudflare Tunnel every request arrives from the tunnel, so
+    the real address is in ``CF-Connecting-IP``. That header is trusted
+    only when configured, because a direct caller could forge it.
+
+    :param request: Incoming request.
+    :type request: Request
+    :return: Best-known client address.
+    :rtype: str
+    """
+    if settings.TRUST_PROXY_HEADERS:
+        forwarded = request.headers.get(CLOUDFLARE_CLIENT_HEADER)
+        if forwarded:
+            return forwarded
+    return request.client.host if request.client else UNKNOWN_CLIENT
+
+
+async def limit_key_creation(
+    request: Request,
+    redis: ArqRedis = Depends(get_redis),
+) -> None:
+    """
+    Refuse key creation beyond the hourly limit per client address.
+
+    Without it anyone could mint unlimited keys, each with its own job
+    quota, which makes the quota meaningless.
+
+    :param request: Incoming request.
+    :type request: Request
+    :param redis: Shared Redis client holding the counters.
+    :type redis: ArqRedis
+    :raises HTTPException: 429 with Retry-After when over the limit.
+    """
+    limit = RateLimit(
+        name="api-key-creation",
+        max_requests=settings.KEY_CREATION_LIMIT_PER_HOUR,
+        window_seconds=SECONDS_PER_HOUR,
+    )
+    limiter = FixedWindowRateLimiter(redis, limit)
+    decision = await limiter.check(client_address(request))
+    if not decision.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many new API keys from this address. Try later.",
+            headers={"Retry-After": str(decision.retry_after_seconds)},
+        )

@@ -6,9 +6,13 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_current_api_key, get_optional_api_key
-from app.core.config import settings
-from app.core.security import generate_api_key, hash_api_key
+from app.api.dependencies import (
+    get_current_api_key,
+    get_optional_api_key,
+    is_admin_key,
+    limit_key_creation,
+)
+from app.core.security import generate_api_key
 from app.db.session import get_db
 from app.models.api_key import ApiKey
 from app.models.job import Job
@@ -26,6 +30,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
     "/keys",
     response_model=ApiKeyCreateResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(limit_key_creation)],
 )
 async def create_api_key(
     request: ApiKeyCreateRequest,
@@ -75,10 +80,7 @@ async def get_current_user_info(
     :return: User account identity and remaining calculation balance.
     :rtype: ApiKeyInfoResponse
     """
-    admin_hash = (
-        hash_api_key(settings.ADMIN_API_KEY) if settings.ADMIN_API_KEY else None
-    )
-    is_admin = bool(admin_hash and api_key.key_hash == admin_hash)
+    is_admin = is_admin_key(api_key)
     remaining = max(0, api_key.quota_limit - api_key.quota_used)
     return ApiKeyInfoResponse(
         key_prefix=api_key.key_prefix,

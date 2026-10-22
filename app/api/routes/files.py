@@ -17,10 +17,13 @@ from fastapi import (
 )
 from pydantic import BaseModel
 
-from app.api.dependencies import get_optional_api_key
+from app.api.dependencies import get_current_api_key
 from app.core.config import settings
 from app.models.api_key import ApiKey
-from app.services.job_service import sanitize_identifier
+from app.services.job_service import (
+    sanitize_identifier,
+    user_folder_name,
+)
 
 router = APIRouter(prefix="/files", tags=["Files"])
 
@@ -436,7 +439,7 @@ def _build_structure_metadata(
 async def upload_structure(
     file: UploadFile = File(...),
     session_id: str = Form("default"),
-    api_key: ApiKey | None = Depends(get_optional_api_key),
+    api_key: ApiKey = Depends(get_current_api_key),
 ):
     """
     Upload and parse molecular structure file into workspace.
@@ -445,15 +448,15 @@ async def upload_structure(
     :type file: UploadFile
     :param session_id: Associated session identifier.
     :type session_id: str
-    :param api_key: Optional authenticated user API key.
-    :type api_key: ApiKey | None
+    :param api_key: Authenticated caller; files go to their folder.
+    :type api_key: ApiKey
     :return: Parsed structure metadata model.
     :rtype: StructureMetadata
     """
     clean_filename = Path(file.filename or "structure.xyz").name
     extension = _validate_uploaded_file(file)
     content_bytes, content_str = await _read_file_payload(file)
-    user_id = f"user_{api_key.id.hex[:12]}" if api_key else None
+    user_id = user_folder_name(api_key.id)
     _resolve_and_write_file(
         session_id, clean_filename, content_str, user_id=user_id
     )

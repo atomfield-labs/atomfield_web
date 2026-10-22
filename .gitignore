@@ -10,15 +10,14 @@ wheels/
 .venv
 .env
 
-# Tests and test artifacts
-tests/
-test_*.py
+# Test artifacts
 .pytest_cache/
 
 # Logs and runtime artifacts
 *.log
 **/*.log
 artifacts/
+backups/
 node_modules/
 .DS_Store
 .vscode/

@@ -425,13 +425,14 @@ async def get_blueprint() -> dict:
 @router.get("/pipeline/nanoreactor_modular/blueprint")
 async def get_modular_blueprint() -> dict:
     """
-    Retrieve decomposed 5-node pipeline blueprint for modular reaction discovery.
+    Retrieve decomposed 5-node pipeline blueprint for modular reaction
+    discovery.
 
-    :return: Dictionary containing preconfigured nodes and edges for 5 lean nodes.
+    :return: Dictionary containing preconfigured nodes and edges for 5
+        lean nodes.
     :rtype: dict
     """
     return MODULAR_NANOREACTOR_BLUEPRINT
-
 
 
 @router.get("/auth/quota")

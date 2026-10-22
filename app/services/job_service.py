@@ -45,6 +45,18 @@ def sanitize_identifier(name: str) -> str:
     return clean_name[:64] or fallback_id
 
 
+def user_folder_name(api_key_id: _uuid.UUID) -> str:
+    """
+    Name the workspace folder (and ``user_id`` parameter) of one user.
+
+    :param api_key_id: Owner's API key id.
+    :type api_key_id: _uuid.UUID
+    :return: Folder name such as ``user_1a2b3c4d5e6f``.
+    :rtype: str
+    """
+    return f"user_{api_key_id.hex[:12]}"
+
+
 # -----------------------------------------------------------------------
 # Workspace path safety
 # -----------------------------------------------------------------------
@@ -134,11 +146,11 @@ async def resolve_workspace(
     :return: Resolved path if existing, else None.
     :rtype: Optional[Path]
     """
+    # A caller only ever sees their own folder, even before it exists:
+    # falling back to the shared root would expose other users' folders.
     target_base = base_dir
     if user_id:
-        user_folder = base_dir / sanitize_identifier(str(user_id))
-        if user_folder.is_dir():
-            target_base = user_folder
+        target_base = base_dir / sanitize_identifier(str(user_id))
 
     if job_id:
         try:
@@ -275,7 +287,7 @@ async def create_job(
 
     params = dict(request.parameters or {})
     if api_key:
-        params["user_id"] = f"user_{api_key.id.hex[:12]}"
+        params["user_id"] = user_folder_name(api_key.id)
 
     new_job = Job(
         script_name=request.script_name,
@@ -596,7 +608,7 @@ def _provision_pipeline_workspace(
     raw_session_id = request.session_id or f"pipeline_{_uuid.uuid4().hex[:8]}"
     pipeline_id = sanitize_identifier(raw_session_id)
     if api_key:
-        user_str = sanitize_identifier(f"user_{api_key.id.hex[:12]}")
+        user_str = sanitize_identifier(user_folder_name(api_key.id))
         workspace_dir = (ARTIFACTS_DIR / user_str / pipeline_id).resolve()
     else:
         workspace_dir = (ARTIFACTS_DIR / pipeline_id).resolve()
@@ -630,7 +642,7 @@ async def _create_blocked_pipeline_jobs(
     """
     db_jobs: list[tuple[str, Job]] = []
     user_str = (
-        sanitize_identifier(f"user_{api_key.id.hex[:12]}") if api_key else None
+        sanitize_identifier(user_folder_name(api_key.id)) if api_key else None
     )
     for node in nodes:
         params = dict(node.parameters or {})
@@ -1179,72 +1191,102 @@ async def clear_all_data(
     }
 
 
+async def delete_jobs(db: AsyncSession, job_ids: list[_uuid.UUID]) -> None:
+    """
+    Delete jobs and every dependency edge that touches them.
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param job_ids: Jobs to delete.
+    :type job_ids: list[_uuid.UUID]
+    """
+    if not job_ids:
+        return
+    touches_deleted = or_(
+        JobDependency.upstream_id.in_(job_ids),
+        JobDependency.downstream_id.in_(job_ids),
+    )
+    await db.execute(delete(JobDependency).where(touches_deleted))
+    await db.execute(delete(Job).where(Job.id.in_(job_ids)))
+    await db.commit()
+
+
+def remove_user_workspace(
+    api_key_id: _uuid.UUID,
+    session_id: str | None = None,
+) -> None:
+    """
+    Delete one user's workspace folder, or one session inside it.
+
+    Only the owner's folder is touched, never another user's folder
+    that happens to hold a session with the same name.
+
+    :param api_key_id: Owner's API key id.
+    :type api_key_id: _uuid.UUID
+    :param session_id: Session to delete; None deletes the whole folder.
+    :type session_id: str | None
+    """
+    target = ARTIFACTS_DIR / user_folder_name(api_key_id)
+    if session_id is not None:
+        target = target / sanitize_identifier(session_id)
+    if target.is_dir() and _is_within(ARTIFACTS_DIR, target):
+        shutil.rmtree(target, ignore_errors=True)
+
+
 async def delete_session(
     db: AsyncSession,
     session_id: str,
-    api_key_id: _uuid.UUID | None = None,
+    api_key_id: _uuid.UUID,
 ) -> dict:
     """
-    Delete a specific session and all its database jobs, dependencies, and artifacts.
+    Delete one of the caller's sessions: its jobs, edges and files.
 
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :param session_id: Pipeline session identifier.
     :type session_id: str
-    :param api_key_id: Optional API key owner ID.
-    :type api_key_id: Optional[_uuid.UUID]
+    :param api_key_id: Caller's API key id; only their jobs are deleted.
+    :type api_key_id: _uuid.UUID
     :return: Summary dictionary of operation.
     :rtype: dict
     """
     clean_session_id = sanitize_identifier(session_id)
-
-    # 1. Query for jobs belonging to this pipeline/session
     query = select(Job.id).where(
-        Job.parameters.op("->>")("pipeline_id") == clean_session_id
+        Job.parameters.op("->>")("pipeline_id") == clean_session_id,
+        Job.api_key_id == api_key_id,
     )
-    if api_key_id:
-        query = query.where(Job.api_key_id == api_key_id)
-
-    result = await db.execute(query)
-    job_ids = [row[0] for row in result.fetchall()]
-
-    if job_ids:
-        await db.execute(
-            delete(JobDependency).where(
-                or_(
-                    JobDependency.upstream_id.in_(job_ids),
-                    JobDependency.downstream_id.in_(job_ids),
-                )
-            )
-        )
-        await db.execute(delete(Job).where(Job.id.in_(job_ids)))
-        await db.commit()
-
-    # 2. Clean up workspace directory on disk
-    candidate_paths = [
-        ARTIFACTS_DIR / clean_session_id,
-    ]
-    if api_key_id:
-        user_str = sanitize_identifier(f"user_{api_key_id.hex[:12]}")
-        candidate_paths.append(ARTIFACTS_DIR / user_str / clean_session_id)
-
-    if ARTIFACTS_DIR.exists():
-        for user_dir in ARTIFACTS_DIR.iterdir():
-            if user_dir.is_dir():
-                sub = user_dir / clean_session_id
-                if sub.exists() and sub.is_dir():
-                    candidate_paths.append(sub)
-
-    for p in candidate_paths:
-        if p.exists() and _is_within(ARTIFACTS_DIR, p):
-            if p.is_dir():
-                shutil.rmtree(p, ignore_errors=True)
-            elif p.is_file():
-                p.unlink(missing_ok=True)
-
+    job_ids = list((await db.execute(query)).scalars())
+    await delete_jobs(db, job_ids)
+    remove_user_workspace(api_key_id, clean_session_id)
     return {
         "status": "success",
-        "message": f"Session {clean_session_id} and {len(job_ids)} jobs deleted.",
+        "message": (
+            f"Session {clean_session_id} and {len(job_ids)} jobs deleted."
+        ),
+    }
+
+
+async def clear_user_data(db: AsyncSession, api_key_id: _uuid.UUID) -> dict:
+    """
+    Delete all of one user's jobs and workspace files.
+
+    Other users' data and the shared queue are left alone; wiping the
+    whole system is an operator task (``python -m app.cli wipe``).
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param api_key_id: Caller's API key id.
+    :type api_key_id: _uuid.UUID
+    :return: Summary dictionary of operation.
+    :rtype: dict
+    """
+    query = select(Job.id).where(Job.api_key_id == api_key_id)
+    job_ids = list((await db.execute(query)).scalars())
+    await delete_jobs(db, job_ids)
+    remove_user_workspace(api_key_id)
+    return {
+        "status": "success",
+        "message": f"Deleted your {len(job_ids)} jobs and their files.",
     }
 
 
@@ -1343,4 +1385,3 @@ def read_text_artifacts(workspace_dir: Path | None) -> list[TextArtifactItem]:
         if loaded:
             items.append(loaded)
     return items if items else _default_nanoreactor_artifacts()
-

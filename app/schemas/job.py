@@ -127,4 +127,3 @@ class TextArtifactsResponse(BaseModel):
     session_id: str | None = None
     job_id: str | None = None
     files: list[TextArtifactItem] = Field(default_factory=list)
-
