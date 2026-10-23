@@ -1,25 +1,27 @@
 """
-Redis broker connection settings shared by the API and the worker.
+The Redis connection shared by the API's queue, rate limits and sweeper.
 """
 
-from arq.connections import RedisSettings
+from redis.asyncio import Redis
 
 from app.core.config import settings
 
 
-def build_redis_settings() -> RedisSettings:
+def create_redis() -> Redis:
     """
-    Build the one Redis connection description both processes use.
+    Open the one Redis client the API process uses.
 
-    Keeping it in one place means a new option (database, password)
-    cannot reach the API but miss the worker.
+    Keeping the connection options in one place means a new one (a
+    password, a database number) cannot reach one caller but miss
+    another.
 
-    :return: Connection settings for ARQ pools and workers.
-    :rtype: RedisSettings
+    :return: Client with its own connection pool; close with
+        ``aclose()``.
+    :rtype: Redis
     """
-    return RedisSettings(
+    return Redis(
         host=settings.REDIS_HOST,
         port=settings.REDIS_PORT,
-        database=settings.REDIS_DB,
+        db=settings.REDIS_DB,
         password=settings.REDIS_PASSWORD,
     )

@@ -52,7 +52,7 @@ flowchart TD
 | :--- | :--- |
 | **Pipeline UI** | React, TypeScript, React Flow, Vite, Tailwind CSS |
 | **Control Plane** | Python 3.11+, FastAPI, SQLAlchemy (Async), Asyncpg |
-| **Queue & Scheduling** | Redis, ARQ (Distributed Task Queue) |
+| **Queue & Scheduling** | Redis (one job queue per compute target), outbound-only agents |
 | **State & Persistence** | PostgreSQL, ACID transaction locking |
 | **Execution Environment** | Isolated POSIX workspaces, Docker container sandboxing |
 

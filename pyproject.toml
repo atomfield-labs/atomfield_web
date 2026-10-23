@@ -9,10 +9,10 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "alembic>=1.20.1",
-    "arq>=0.28.0",
     "asyncpg>=0.32.0",
     "docker>=7.2.0",
     "fastapi>=0.142.2",
+    "httpx>=0.28.1",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
     "python-dotenv>=1.2.4",
@@ -56,6 +56,9 @@ env = [
     # tested by lowering it in test_access_control.py.
     "D:KEY_CREATION_LIMIT_PER_HOUR=1000",
     "D:CATALOG_PATH=tests/fixtures/catalog.json",
+    "D:HOUSE_AGENT_TOKEN=af_agent_test_house",
+    # Tests run the sweeper explicitly, never in the background.
+    "D:SWEEPER_ENABLED=false",
 ]
 
 [dependency-groups]

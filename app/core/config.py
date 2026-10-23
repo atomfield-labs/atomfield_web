@@ -63,6 +63,17 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"  # development | staging | production
     ADMIN_API_KEY: str | None = None
 
+    # --- Agents ---
+    # Token of the platform's own (house) agent; None disables it.
+    HOUSE_AGENT_TOKEN: str | None = None
+
+    # --- Sweeper (repairs queues and expired leases) ---
+    SWEEPER_ENABLED: bool = True
+    SWEEP_INTERVAL_SECONDS: float = 30.0
+    # An agent silent this long has lost its jobs.
+    LEASE_TIMEOUT_SECONDS: float = 180.0
+    DEADLINE_GRACE_SECONDS: float = 600.0
+
     # --- Abuse limits ---
     KEY_CREATION_LIMIT_PER_HOUR: int = 3
     # True only behind Cloudflare Tunnel with the API port closed to the

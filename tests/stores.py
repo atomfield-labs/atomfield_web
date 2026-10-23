@@ -40,6 +40,21 @@ def require_test_redis() -> None:
         raise RuntimeError("Refusing to flush Redis database 0")
 
 
+def make_redis() -> Redis:
+    """
+    Open a Redis client on the test database, inside the caller's loop.
+
+    :return: Client; the caller closes it with ``aclose()``.
+    :rtype: Redis
+    """
+    return Redis(
+        host=settings.REDIS_HOST,
+        port=settings.REDIS_PORT,
+        db=settings.REDIS_DB,
+        password=settings.REDIS_PASSWORD,
+    )
+
+
 async def execute_maintenance(statement: str) -> None:
     """
     Run one statement on the maintenance database.
@@ -92,12 +107,7 @@ async def flush_test_redis() -> None:
     :raises RuntimeError: If Redis points at database 0.
     """
     require_test_redis()
-    redis_client = Redis(
-        host=settings.REDIS_HOST,
-        port=settings.REDIS_PORT,
-        db=settings.REDIS_DB,
-        password=settings.REDIS_PASSWORD,
-    )
+    redis_client = make_redis()
     try:
         await redis_client.flushdb()
     finally:

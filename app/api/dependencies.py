@@ -4,8 +4,8 @@ Shared FastAPI route dependencies for database, cache, and authentication.
 
 from uuid import UUID
 
-from arq import ArqRedis
 from fastapi import Depends, Header, HTTPException, Request, status
+from redis.asyncio import Redis
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,22 +16,35 @@ from app.core.security import hash_api_key
 from app.db.session import get_db
 from app.models.api_key import ApiKey
 from app.models.job import Job
+from app.queue.job_queue import RedisJobQueue
 
 CLOUDFLARE_CLIENT_HEADER = "CF-Connecting-IP"
 UNKNOWN_CLIENT = "unknown"
 SECONDS_PER_HOUR = 3600
 
 
-async def get_redis(request: Request) -> ArqRedis:
+async def get_redis(request: Request) -> Redis:
     """
-    Provide the ARQ Redis connection pool from application state.
+    Provide the Redis client created at startup.
 
     :param request: Active FastAPI HTTP request object.
     :type request: Request
-    :return: Shared ArqRedis client instance.
-    :rtype: ArqRedis
+    :return: Shared Redis client.
+    :rtype: Redis
     """
     return request.app.state.redis
+
+
+async def get_job_queue(request: Request) -> RedisJobQueue:
+    """
+    Provide the job queue created at startup.
+
+    :param request: Active FastAPI HTTP request object.
+    :type request: Request
+    :return: Shared job queue.
+    :rtype: RedisJobQueue
+    """
+    return request.app.state.job_queue
 
 
 async def get_catalog(request: Request) -> Catalog:
@@ -214,7 +227,7 @@ def client_address(request: Request) -> str:
 
 async def limit_key_creation(
     request: Request,
-    redis: ArqRedis = Depends(get_redis),
+    redis: Redis = Depends(get_redis),
 ) -> None:
     """
     Refuse key creation beyond the hourly limit per client address.
@@ -225,7 +238,7 @@ async def limit_key_creation(
     :param request: Incoming request.
     :type request: Request
     :param redis: Shared Redis client holding the counters.
-    :type redis: ArqRedis
+    :type redis: Redis
     :raises HTTPException: 429 with Retry-After when over the limit.
     """
     limit = RateLimit(

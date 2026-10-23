@@ -16,6 +16,7 @@ from app.core.security import generate_api_key
 from app.db.session import get_db
 from app.models.api_key import ApiKey
 from app.models.job import Job
+from app.runs.states import FAILURE_STATUSES, JobStatus
 from app.schemas.auth import (
     ApiKeyCreateRequest,
     ApiKeyCreateResponse,
@@ -117,10 +118,12 @@ async def get_user_statistics(
     status_counts = dict(result.all())
 
     total = sum(status_counts.values())
-    success = status_counts.get("Success", 0)
-    failed = status_counts.get("Failed", 0)
-    running = status_counts.get("Running", 0)
-    pending = status_counts.get("Pending", 0) + status_counts.get("Blocked", 0)
+    success = status_counts.get(JobStatus.SUCCEEDED, 0)
+    failed = sum(status_counts.get(state, 0) for state in FAILURE_STATUSES)
+    running = status_counts.get(JobStatus.RUNNING, 0)
+    pending = status_counts.get(JobStatus.QUEUED, 0) + status_counts.get(
+        JobStatus.WAITING, 0
+    )
     remaining = max(0, api_key.quota_limit - api_key.quota_used)
 
     return UserStatsResponse(

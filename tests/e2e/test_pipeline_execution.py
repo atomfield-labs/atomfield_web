@@ -131,7 +131,7 @@ def test_cascading_failure_propagation():
     for _ in range(POLL_ATTEMPTS):
         time.sleep(POLL_INTERVAL_SECONDS)
         jobs = [fetch_job(job_id, headers) for job_id in descendants]
-        if all(job["status"] == "Failed" for job in jobs):
+        if all(job["status"] == "upstream_failed" for job in jobs):
             messages = {job["error_message"] for job in jobs}
             assert messages == {UPSTREAM_FAILED_MESSAGE}
             return
@@ -150,7 +150,7 @@ def test_successful_dag_execution_and_injection():
     for _ in range(POLL_ATTEMPTS):
         time.sleep(POLL_INTERVAL_SECONDS)
         child = fetch_job(job_ids["downstream_node"], headers)
-        if child["status"] == "Success":
+        if child["status"] == "succeeded":
             upstream_results = child["parameters"]["upstream_results"]
             assert job_ids["upstream_node"] in upstream_results
             return

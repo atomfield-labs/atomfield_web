@@ -39,9 +39,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
       - name: Lint (includes the 80-character rule)
-        run: uv run ruff check app tests migrations
+        run: uv run ruff check app agent tests migrations
       - name: Check formatting
-        run: uv run ruff format --check app tests migrations
+        run: uv run ruff format --check app agent tests migrations
       - name: Test
         run: uv run pytest
 

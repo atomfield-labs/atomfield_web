@@ -1,25 +1,20 @@
 """
-Run one catalog task as a subprocess inside its job workspace.
+Job workspaces: one folder per job inside its session folder, with the
+session's uploads copied in and parent workspaces linked under
+``upstream/``.
 
-The command comes from the task's definition (``build_argv``), so this
-module knows nothing about any particular script: a new task in the
-catalog runs here without a code change.
+A retried attempt starts in a fresh folder; the previous attempt's
+folder is renamed ``job_<id>.try<n>``, so a still-running old process
+can never mix its files with the new attempt's.
 """
 
 import os
 import shutil
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
-from app.catalog.argv import Invocation, build_argv
-from app.catalog.models import TaskDefinition
-from app.core.config import settings
-from app.services.job_service import sanitize_identifier
+from app.core.identifiers import sanitize_identifier
 
-BASE_DIR = Path(__file__).resolve().parents[2]
-PACK_SOURCE_DIR = BASE_DIR / "scripts_repo" / "src"
 UPSTREAM_DIR = "upstream"
 EXECUTION_LOG = "execution.log"
 LOG_TAIL_CHARACTERS = 1000
@@ -94,43 +89,66 @@ def link_upstream_workspaces(
             link_directory(upstream_root / ancestor.name, ancestor)
 
 
+def session_folder(artifacts_dir: Path, parameters: dict[str, Any]) -> Path:
+    """
+    Locate a job's session folder from its stored parameters.
+
+    :param artifacts_dir: Root of all workspaces on this machine.
+    :type artifacts_dir: Path
+    :param parameters: Job parameters with ``pipeline_id``/``user_id``.
+    :type parameters: dict[str, Any]
+    :return: Session folder path.
+    :rtype: Path
+    """
+    folder = artifacts_dir
+    if parameters.get("user_id"):
+        folder /= sanitize_identifier(str(parameters["user_id"]))
+    return folder / sanitize_identifier(str(parameters["pipeline_id"]))
+
+
+def retire_previous_attempt(workspace: Path, attempt: int) -> None:
+    """
+    Move the last attempt's folder aside so this attempt starts empty.
+
+    :param workspace: The job's workspace path.
+    :type workspace: Path
+    :param attempt: The attempt about to start.
+    :type attempt: int
+    """
+    if attempt > 1 and workspace.exists():
+        workspace.rename(
+            workspace.with_name(f"{workspace.name}.try{attempt - 1}")
+        )
+
+
 def prepare_workspace(
+    artifacts_dir: Path,
     parameters: dict[str, Any],
     job_id: str,
+    attempt: int = 1,
 ) -> tuple[str, Path]:
     """
-    Create the job's workspace inside its session folder.
+    Create the job's workspace for one attempt inside its session.
 
+    :param artifacts_dir: Root of all workspaces on this machine.
+    :type artifacts_dir: Path
     :param parameters: Job parameters with ``pipeline_id``/``user_id``.
     :type parameters: dict[str, Any]
     :param job_id: Job id.
     :type job_id: str
+    :param attempt: Attempt number; above 1, the old folder is retired.
+    :type attempt: int
     :return: Pipeline id and the job's workspace path.
     :rtype: tuple[str, Path]
     """
-    pipeline_id = sanitize_identifier(
-        str(parameters.get("pipeline_id", f"job_{job_id}"))
-    )
-    session_dir = Path(settings.ARTIFACTS_DIR)
-    if parameters.get("user_id"):
-        session_dir /= sanitize_identifier(str(parameters["user_id"]))
-    session_dir /= pipeline_id
+    parameters = {"pipeline_id": f"job_{job_id}", **parameters}
+    session_dir = session_folder(artifacts_dir, parameters)
     workspace = session_dir / f"job_{sanitize_identifier(str(job_id))}"
+    retire_previous_attempt(workspace, attempt)
     workspace.mkdir(parents=True, exist_ok=True)
     copy_session_inputs(session_dir, workspace)
     link_upstream_workspaces(session_dir, workspace, parameters)
-    return pipeline_id, workspace
-
-
-def resolve_python_executable() -> str:
-    """
-    Pick the interpreter of the domain pack's environment.
-
-    :return: Configured interpreter, or this one if it does not exist.
-    :rtype: str
-    """
-    configured = settings.CHEMISTRY_PYTHON_BIN
-    return configured if os.path.exists(configured) else sys.executable
+    return session_dir.name, workspace
 
 
 def build_environment(pack_source_dir: Path) -> dict[str, str]:
@@ -149,38 +167,6 @@ def build_environment(pack_source_dir: Path) -> dict[str, str]:
     return environment
 
 
-def run_logged(
-    argv: list[str],
-    workspace: Path,
-    log_path: Path,
-    environment: dict[str, str],
-) -> int:
-    """
-    Run a command in the workspace, sending all output to a log file.
-
-    :param argv: Command, as built by ``build_argv``.
-    :type argv: list[str]
-    :param workspace: Working directory.
-    :type workspace: Path
-    :param log_path: File that receives stdout and stderr.
-    :type log_path: Path
-    :param environment: Environment variables.
-    :type environment: dict[str, str]
-    :return: Exit code.
-    :rtype: int
-    """
-    with log_path.open("w", encoding="utf-8") as log_stream:
-        process = subprocess.run(
-            argv,
-            cwd=workspace,
-            stdout=log_stream,
-            stderr=subprocess.STDOUT,
-            env=environment,
-            check=False,
-        )
-    return process.returncode
-
-
 def read_tail(path: Path, max_characters: int = LOG_TAIL_CHARACTERS) -> str:
     """
     Read the end of a log file, or nothing if it does not exist.
@@ -197,34 +183,29 @@ def read_tail(path: Path, max_characters: int = LOG_TAIL_CHARACTERS) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")[-max_characters:]
 
 
-def failure_result(
-    task: TaskDefinition,
-    workspace: Path,
-    return_code: int,
-) -> dict[str, Any]:
+def failure_message(task_id: str, workspace: Path, return_code: int) -> str:
     """
     Describe a failed run, preferring the script's own log.
 
-    :param task: Task that ran.
-    :type task: TaskDefinition
+    :param task_id: Task that ran.
+    :type task_id: str
     :param workspace: The job's workspace.
     :type workspace: Path
     :param return_code: Exit code of the script.
     :type return_code: int
-    :return: Failure result for the worker.
-    :rtype: dict[str, Any]
+    :return: Error message for the job record.
+    :rtype: str
     """
     detail = (
-        read_tail(workspace / f"{task.id}.log")
+        read_tail(workspace / f"{task_id}.log")
         or read_tail(workspace / EXECUTION_LOG)
         or f"Process exited with code {return_code}"
     )
-    message = f"{task.id} failed (code {return_code}):\n{detail}"
-    return {"status": "failed", "error": message}
+    return f"{task_id} failed (code {return_code}):\n{detail}"
 
 
-def success_result(
-    task: TaskDefinition,
+def success_output(
+    task_id: str,
     workspace: Path,
     pipeline_id: str,
     job_id: str,
@@ -232,15 +213,15 @@ def success_result(
     """
     Describe a successful run and list the files it left behind.
 
-    :param task: Task that ran.
-    :type task: TaskDefinition
+    :param task_id: Task that ran.
+    :type task_id: str
     :param workspace: The job's workspace.
     :type workspace: Path
     :param pipeline_id: Pipeline the job belongs to.
     :type pipeline_id: str
     :param job_id: Job id.
     :type job_id: str
-    :return: Success result for the worker.
+    :return: Output payload for the job record.
     :rtype: dict[str, Any]
     """
     artifacts = sorted(
@@ -248,52 +229,13 @@ def success_result(
         for item in workspace.iterdir()
         if item.is_file() and not item.name.startswith(".")
     )
-    script_log = f"{task.id}.log"
+    script_log = f"{task_id}.log"
     has_script_log = (workspace / script_log).exists()
-    output = {
+    return {
         "status": "simulation_complete",
-        "script": task.id,
+        "script": task_id,
         "logfile": script_log if has_script_log else EXECUTION_LOG,
         "pipeline_id": pipeline_id,
         "job_id": job_id,
         "artifacts": artifacts,
     }
-    return {"status": "success", "output": output}
-
-
-def run_catalog_task(
-    task: TaskDefinition,
-    parameters: dict[str, Any],
-    input_files: dict[str, list[str]],
-    job_id: str,
-) -> dict[str, Any]:
-    """
-    Run one job of a catalog task from start to finish.
-
-    :param task: Task definition.
-    :type task: TaskDefinition
-    :param parameters: Stored job parameters (validated values plus
-        platform bookkeeping, which ``build_argv`` ignores).
-    :type parameters: dict[str, Any]
-    :param input_files: Input port name -> uploaded file names.
-    :type input_files: dict[str, list[str]]
-    :param job_id: Job id.
-    :type job_id: str
-    :return: Success or failure result for the worker.
-    :rtype: dict[str, Any]
-    """
-    pipeline_id, workspace = prepare_workspace(parameters, job_id)
-    invocation = Invocation(
-        values=parameters,
-        inputs=input_files,
-        job_name=task.id,
-        cpus=task.resources.cpus,
-    )
-    argv = build_argv(task, invocation, resolve_python_executable())
-    environment = build_environment(PACK_SOURCE_DIR)
-    return_code = run_logged(
-        argv, workspace, workspace / EXECUTION_LOG, environment
-    )
-    if return_code != 0:
-        return failure_result(task, workspace, return_code)
-    return success_result(task, workspace, pipeline_id, job_id)

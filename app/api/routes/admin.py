@@ -12,6 +12,7 @@ from app.api.dependencies import require_admin_key
 from app.db.session import get_db
 from app.models.api_key import ApiKey
 from app.models.job import Job
+from app.runs.states import FAILURE_STATUSES, JobStatus
 from app.schemas.auth import (
     AdminQuotaUpdateRequest,
     AdminStatsResponse,
@@ -40,9 +41,15 @@ async def get_admin_platform_stats(
     total_users_query = select(func.count(ApiKey.id))
     total_jobs_query = select(
         func.count(Job.id).label("total"),
-        func.sum(case((Job.status == "Success", 1), else_=0)).label("success"),
-        func.sum(case((Job.status == "Failed", 1), else_=0)).label("failed"),
-        func.sum(case((Job.status == "Running", 1), else_=0)).label("running"),
+        func.sum(case((Job.status == JobStatus.SUCCEEDED, 1), else_=0)).label(
+            "success"
+        ),
+        func.sum(case((Job.status.in_(FAILURE_STATUSES), 1), else_=0)).label(
+            "failed"
+        ),
+        func.sum(case((Job.status == JobStatus.RUNNING, 1), else_=0)).label(
+            "running"
+        ),
         func.coalesce(func.sum(Job.execution_time_seconds), 0.0).label(
             "compute_time"
         ),
@@ -94,13 +101,13 @@ async def list_admin_users(
         select(
             Job.api_key_id,
             func.count(Job.id).label("total_jobs"),
-            func.sum(case((Job.status == "Success", 1), else_=0)).label(
-                "success_jobs"
-            ),
-            func.sum(case((Job.status == "Failed", 1), else_=0)).label(
-                "failed_jobs"
-            ),
-            func.sum(case((Job.status == "Running", 1), else_=0)).label(
+            func.sum(
+                case((Job.status == JobStatus.SUCCEEDED, 1), else_=0)
+            ).label("success_jobs"),
+            func.sum(
+                case((Job.status.in_(FAILURE_STATUSES), 1), else_=0)
+            ).label("failed_jobs"),
+            func.sum(case((Job.status == JobStatus.RUNNING, 1), else_=0)).label(
                 "running_jobs"
             ),
             func.coalesce(func.sum(Job.execution_time_seconds), 0.0).label(
@@ -191,13 +198,13 @@ async def update_user_quota(
     # Re-calculate job statistics
     stats_stmt = select(
         func.count(Job.id).label("total_jobs"),
-        func.sum(case((Job.status == "Success", 1), else_=0)).label(
+        func.sum(case((Job.status == JobStatus.SUCCEEDED, 1), else_=0)).label(
             "success_jobs"
         ),
-        func.sum(case((Job.status == "Failed", 1), else_=0)).label(
+        func.sum(case((Job.status.in_(FAILURE_STATUSES), 1), else_=0)).label(
             "failed_jobs"
         ),
-        func.sum(case((Job.status == "Running", 1), else_=0)).label(
+        func.sum(case((Job.status == JobStatus.RUNNING, 1), else_=0)).label(
             "running_jobs"
         ),
         func.coalesce(func.sum(Job.execution_time_seconds), 0.0).label(

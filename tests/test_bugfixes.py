@@ -252,7 +252,7 @@ def test_standalone_job_submission_with_null_parameters(
     )
     assert response.status_code in (200, 201, 202)
     job_data = response.json()
-    assert job_data["status"] == "Pending"
+    assert job_data["status"] == "queued"
     assert "user_id" in job_data["parameters"]
 
 
@@ -286,8 +286,8 @@ def test_valid_dag_submission_and_status(
     root = client.get(f"/api/jobs/{root_id}", headers=headers).json()
     child = client.get(f"/api/jobs/{child_id}", headers=headers).json()
     root_status, child_status = root["status"], child["status"]
-    assert root_status == "Pending"
-    assert child_status == "Blocked"
+    assert root_status == "queued"
+    assert child_status == "waiting"
 
 
 def test_job_logs_tailing(

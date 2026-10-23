@@ -2,24 +2,25 @@
 Business logic and persistence layer for jobs and DAG pipelines.
 """
 
-import copy
 import logging
 import os
-import re
 import shutil
 import tempfile
 import uuid as _uuid
 import zipfile
 from pathlib import Path
 
-from arq import ArqRedis
 from fastapi import HTTPException
-from sqlalchemy import delete, func, or_, select, text, update
+from redis.asyncio import Redis
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.config import settings
+from app.core.identifiers import sanitize_identifier
 from app.models import ApiKey, Job, JobDependency
+from app.queue.job_queue import RedisJobQueue
+from app.runs.lifecycle import create_run, dispatch
+from app.runs.states import JobStatus
 from app.schemas.job import (
     JobSubmitRequest,
     PipelineSubmitRequest,
@@ -29,20 +30,6 @@ from app.schemas.job import (
 ARTIFACTS_DIR = Path(settings.ARTIFACTS_DIR)
 DEFAULT_MAX_LOG_BYTES = 131072
 logger = logging.getLogger(__name__)
-
-
-def sanitize_identifier(name: str) -> str:
-    """
-    Sanitize identifier to prevent directory traversal and injection.
-
-    :param name: Raw input string to sanitize.
-    :type name: str
-    :return: Clean alphanumeric identifier string.
-    :rtype: str
-    """
-    clean_name = re.sub(r"[^a-zA-Z0-9_\-]", "", name)
-    fallback_id = f"id_{_uuid.uuid4().hex[:8]}"
-    return clean_name[:64] or fallback_id
 
 
 def user_folder_name(api_key_id: _uuid.UUID) -> str:
@@ -265,6 +252,7 @@ def build_workspace_zip(
 async def create_job(
     db: AsyncSession,
     request: JobSubmitRequest,
+    queue: RedisJobQueue,
     api_key: ApiKey | None = None,
 ) -> Job:
     """
@@ -274,6 +262,8 @@ async def create_job(
     :type db: AsyncSession
     :param request: Job creation parameters.
     :type request: JobSubmitRequest
+    :param queue: Job queue the new job is sent to after commit.
+    :type queue: RedisJobQueue
     :param api_key: Optional authenticated user API key.
     :type api_key: Optional[ApiKey]
     :return: Created and refreshed Job record.
@@ -289,16 +279,22 @@ async def create_job(
     if api_key:
         params["user_id"] = user_folder_name(api_key.id)
 
+    owner_id = api_key.id if api_key else None
+    job_id = _uuid.uuid4()
+    run = await create_run(db, owner_id, f"job_{job_id}")
     new_job = Job(
+        id=job_id,
+        run_id=run.id,
         script_name=request.script_name,
         parameters=params,
         input_files=request.inputs or None,
-        status="Pending",
-        api_key_id=api_key.id if api_key else None,
+        status=JobStatus.QUEUED,
+        api_key_id=owner_id,
     )
     db.add(new_job)
     await db.commit()
     await db.refresh(new_job)
+    await dispatch(db, queue, [new_job])
     return new_job
 
 
@@ -375,96 +371,9 @@ async def list_jobs(
     return list(result.scalars().all()), total
 
 
-async def mark_job_running(job_id: str, session: AsyncSession) -> None:
-    """
-    Transition job status to Running upon worker startup.
-
-    :param job_id: Target job UUID string.
-    :type job_id: str
-    :param session: Asynchronous database session.
-    :type session: AsyncSession
-    """
-    parsed_id = _uuid.UUID(str(job_id))
-    statement = update(Job).where(Job.id == parsed_id).values(status="Running")
-    await session.execute(statement)
-    await session.commit()
-
-
-async def mark_job_success(
-    job_id: str,
-    output_data: dict,
-    session: AsyncSession,
-    duration_seconds: float | None = None,
-) -> None:
-    """
-    Transition job status to Success and record output metrics.
-
-    :param job_id: Target job UUID string.
-    :type job_id: str
-    :param output_data: Output dictionary produced by execution.
-    :type output_data: dict
-    :param session: Asynchronous database session.
-    :type session: AsyncSession
-    :param duration_seconds: Elapsed simulation execution time.
-    :type duration_seconds: Optional[float]
-    """
-    parsed_id = _uuid.UUID(str(job_id))
-    payload = {"status": "Success", "output_data": output_data}
-    if duration_seconds is not None:
-        payload["execution_time_seconds"] = duration_seconds
-    statement = update(Job).where(Job.id == parsed_id).values(**payload)
-    await session.execute(statement)
-    await session.commit()
-
-
-async def mark_job_failed(
-    job_id: str,
-    error_message: str,
-    session: AsyncSession,
-    duration_seconds: float | None = None,
-) -> None:
-    """
-    Transition job status to Failed and record error trace.
-
-    :param job_id: Target job UUID string.
-    :type job_id: str
-    :param error_message: Diagnostic failure message.
-    :type error_message: str
-    :param session: Asynchronous database session.
-    :type session: AsyncSession
-    :param duration_seconds: Elapsed execution duration before failure.
-    :type duration_seconds: Optional[float]
-    """
-    parsed_id = _uuid.UUID(str(job_id))
-    payload = {"status": "Failed", "error_message": error_message}
-    if duration_seconds is not None:
-        payload["execution_time_seconds"] = duration_seconds
-    statement = update(Job).where(Job.id == parsed_id).values(**payload)
-    await session.execute(statement)
-    await session.commit()
-
-
 # -----------------------------------------------------------------------
 # Queue dispatch
 # -----------------------------------------------------------------------
-
-
-async def enqueue_execution(redis_queue: ArqRedis, job: Job) -> None:
-    """
-    Dispatch a job to the ARQ worker queue.
-
-    :param redis_queue: Connected Redis queue client.
-    :type redis_queue: ArqRedis
-    :param job: Target Job entity to execute.
-    :type job: Job
-    """
-    await redis_queue.enqueue_job(
-        "execute_script",
-        str(job.id),
-        job.script_name,
-        job.parameters or {},
-        job.input_files or {},
-    )
 
 
 # -----------------------------------------------------------------------
@@ -646,6 +555,7 @@ async def create_blocked_pipeline_jobs(
     user_str = (
         sanitize_identifier(user_folder_name(api_key.id)) if api_key else None
     )
+    run = await create_run(db, api_key.id if api_key else None, pipeline_id)
     for node in nodes:
         params = dict(node.parameters or {})
         params["pipeline_id"] = pipeline_id
@@ -655,7 +565,8 @@ async def create_blocked_pipeline_jobs(
             script_name=node.script_name,
             parameters=params,
             input_files=node.inputs or None,
-            status="Blocked",
+            run_id=run.id,
+            status=JobStatus.WAITING,
             api_key_id=api_key.id if api_key else None,
         )
         db.add(new_job)
@@ -712,26 +623,54 @@ async def _persist_pipeline_jobs(
     return db_jobs, ui_to_db_map
 
 
-def _activate_root_jobs(
+def set_initial_states(
     db_jobs: list[tuple[str, Job]],
     in_degrees: dict[str, int],
 ) -> list[Job]:
     """
-    Identify and transition zero-indegree root jobs to Pending.
+    Give each job its count of parents; jobs with none start queued.
 
     :param db_jobs: List of (ui_id, Job) tuples.
     :type db_jobs: list[tuple[str, Job]]
-    :param in_degrees: In-degree mapping per ui_id.
+    :param in_degrees: Number of parents per ui_id.
     :type in_degrees: dict[str, int]
-    :return: Activated root Job entities.
+    :return: The root jobs, ready to dispatch after commit.
     :rtype: list[Job]
     """
-    root_jobs: list[Job] = []
     for ui_id, job in db_jobs:
-        if in_degrees[ui_id] == 0:
-            job.status = "Pending"
-            root_jobs.append(job)
-    return root_jobs
+        job.pending_parents = in_degrees[ui_id]
+        job.status = (
+            JobStatus.WAITING if in_degrees[ui_id] else JobStatus.QUEUED
+        )
+    return [job for _, job in db_jobs if job.status == JobStatus.QUEUED]
+
+
+def record_parents(
+    db_jobs: list[tuple[str, Job]],
+    edges,
+    ui_to_db_map: dict[str, _uuid.UUID],
+) -> None:
+    """
+    Note each job's parents in ``upstream_results``, which the worker
+    uses to link parent workspaces under ``upstream/``.
+
+    :param db_jobs: List of (ui_id, Job) tuples.
+    :type db_jobs: list[tuple[str, Job]]
+    :param edges: Submitted dependency edges.
+    :type edges: list
+    :param ui_to_db_map: ui_id -> stored job id.
+    :type ui_to_db_map: dict[str, _uuid.UUID]
+    """
+    parents: dict[str, dict[str, dict]] = {}
+    for edge in edges:
+        upstream_id = str(ui_to_db_map[edge.upstream_ui_id])
+        parents.setdefault(edge.downstream_ui_id, {})[upstream_id] = {}
+    for ui_id, job in db_jobs:
+        if ui_id in parents:
+            job.parameters = {
+                **job.parameters,
+                "upstream_results": parents[ui_id],
+            }
 
 
 def _format_pipeline_submission_summary(
@@ -759,6 +698,7 @@ def _format_pipeline_submission_summary(
         "total_nodes": len(request.nodes),
         "roots_started": len(root_jobs),
         "pipeline_id": pipeline_id,
+        "run_id": root_jobs[0].run_id if root_jobs else None,
         "job_ids": {ui_id: str(jid) for ui_id, jid in ui_to_db_map.items()},
     }
 
@@ -766,7 +706,7 @@ def _format_pipeline_submission_summary(
 async def submit_pipeline(
     db: AsyncSession,
     request: PipelineSubmitRequest,
-    redis_queue: ArqRedis,
+    queue: RedisJobQueue,
     api_key: ApiKey | None = None,
 ) -> dict:
     """
@@ -776,8 +716,8 @@ async def submit_pipeline(
     :type db: AsyncSession
     :param request: Pipeline submission payload.
     :type request: PipelineSubmitRequest
-    :param redis_queue: Connected Redis queue client.
-    :type redis_queue: ArqRedis
+    :param queue: Job queue the root jobs are sent to after commit.
+    :type queue: RedisJobQueue
     :param api_key: Optional authenticated user API key.
     :type api_key: Optional[ApiKey]
     :return: Submission summary with job mapping.
@@ -799,10 +739,10 @@ async def submit_pipeline(
     db_jobs, ui_to_db_map = await _persist_pipeline_jobs(
         db, request, pipeline_id, api_key
     )
-    root_jobs = _activate_root_jobs(db_jobs, in_degrees)
+    root_jobs = set_initial_states(db_jobs, in_degrees)
+    record_parents(db_jobs, request.edges, ui_to_db_map)
     await db.commit()
-    for job in root_jobs:
-        await enqueue_execution(redis_queue, job)
+    await dispatch(db, queue, root_jobs)
     return _format_pipeline_submission_summary(
         request, root_jobs, pipeline_id, ui_to_db_map
     )
@@ -957,221 +897,17 @@ async def get_job_logs_and_artifacts(
 # -----------------------------------------------------------------------
 
 
-async def _fetch_downstream_ids(
-    db: AsyncSession,
-    completed_job_id: _uuid.UUID,
-) -> list[_uuid.UUID]:
-    """
-    Query all immediate downstream dependent job IDs.
-
-    :param db: Asynchronous database session.
-    :type db: AsyncSession
-    :param completed_job_id: Completed upstream job UUID.
-    :type completed_job_id: _uuid.UUID
-    :return: List of downstream job UUIDs.
-    :rtype: list[_uuid.UUID]
-    """
-    statement = select(JobDependency.downstream_id).where(
-        JobDependency.upstream_id == completed_job_id
-    )
-    result = await db.execute(statement)
-    return list(result.scalars().all())
-
-
-async def _fetch_job_parents(
-    db: AsyncSession,
-    child_job_id: _uuid.UUID,
-) -> list[Job]:
-    """
-    Query all parent Job entities for a downstream child.
-
-    :param db: Asynchronous database session.
-    :type db: AsyncSession
-    :param child_job_id: Child job UUID.
-    :type child_job_id: _uuid.UUID
-    :return: List of parent Job entities.
-    :rtype: list[Job]
-    """
-    statement = (
-        select(Job)
-        .join(JobDependency, Job.id == JobDependency.upstream_id)
-        .where(JobDependency.downstream_id == child_job_id)
-    )
-    result = await db.execute(statement)
-    return list(result.scalars().all())
-
-
-def _inject_upstream_results(
-    child_job: Job,
-    parent_jobs: list[Job],
-) -> None:
-    """
-    Inject parent job output payloads into child execution parameters.
-
-    :param child_job: Target child Job entity.
-    :type child_job: Job
-    :param parent_jobs: List of completed parent Job entities.
-    :type parent_jobs: list[Job]
-    """
-    injected_payload = (
-        copy.deepcopy(child_job.parameters) if child_job.parameters else {}
-    )
-    injected_payload["upstream_results"] = {}
-    for parent_job in parent_jobs:
-        injected_payload["upstream_results"][str(parent_job.id)] = (
-            parent_job.output_data
-        )
-    child_job.parameters = injected_payload
-    flag_modified(child_job, "parameters")
-
-
-def _process_child_status(
-    child_job: Job,
-    parent_jobs: list[Job],
-) -> tuple[bool, _uuid.UUID | None]:
-    """
-    Evaluate parent states to transition child to Failed or Pending.
-
-    :param child_job: Target child Job entity.
-    :type child_job: Job
-    :param parent_jobs: List of parent Job entities.
-    :type parent_jobs: list[Job]
-    :return: Tuple of (is_ready_to_enqueue, cascade_failed_job_id).
-    :rtype: tuple[bool, Optional[_uuid.UUID]]
-    """
-    if any(parent.status == "Failed" for parent in parent_jobs):
-        child_job.status = "Failed"
-        child_job.error_message = "Upstream dependency failed"
-        return False, child_job.id
-    if all(parent.status == "Success" for parent in parent_jobs):
-        _inject_upstream_results(child_job, parent_jobs)
-        child_job.status = "Pending"
-        return True, None
-    return False, None
-
-
-async def _lock_and_fetch_blocked_job(
-    db: AsyncSession,
-    downstream_id: _uuid.UUID,
-) -> Job | None:
-    """
-    Acquire row-level update lock and return job if in Blocked status.
-
-    :param db: Asynchronous database session.
-    :type db: AsyncSession
-    :param downstream_id: Target job UUID.
-    :type downstream_id: _uuid.UUID
-    :return: Locked Job entity if status is Blocked, else None.
-    :rtype: Job | None
-    """
-    lock_query = select(Job).where(Job.id == downstream_id).with_for_update()
-    child_job = await db.scalar(lock_query)
-    if child_job and child_job.status == "Blocked":
-        return child_job
-    return None
-
-
-async def _evaluate_downstream_children(
-    db: AsyncSession,
-    downstream_ids: list[_uuid.UUID],
-) -> tuple[list[Job], list[_uuid.UUID]]:
-    """
-    Acquire locks and evaluate state transitions for downstream children.
-
-    :param db: Asynchronous database session.
-    :type db: AsyncSession
-    :param downstream_ids: List of downstream job UUIDs.
-    :type downstream_ids: list[_uuid.UUID]
-    :return: Tuple containing ready jobs to enqueue and cascade failed IDs.
-    :rtype: tuple[list[Job], list[_uuid.UUID]]
-    """
-    ready_jobs: list[Job] = []
-    cascade_failed_ids: list[_uuid.UUID] = []
-    for downstream_id in downstream_ids:
-        child_job = await _lock_and_fetch_blocked_job(db, downstream_id)
-        if not child_job:
-            continue
-        parent_jobs = await _fetch_job_parents(db, downstream_id)
-        is_ready, failed_id = _process_child_status(child_job, parent_jobs)
-        if is_ready:
-            ready_jobs.append(child_job)
-        if failed_id:
-            cascade_failed_ids.append(failed_id)
-    return ready_jobs, cascade_failed_ids
-
-
-async def _cascade_failure_propagation(
-    db: AsyncSession,
-    cascade_failed_ids: list[_uuid.UUID],
-    redis_queue: ArqRedis | None,
-) -> None:
-    """
-    Recursively propagate failure status down dependency tree.
-
-    :param db: Asynchronous database session.
-    :type db: AsyncSession
-    :param cascade_failed_ids: List of failed job UUIDs to cascade.
-    :type cascade_failed_ids: list[_uuid.UUID]
-    :param redis_queue: Optional ARQ queue client.
-    :type redis_queue: Optional[ArqRedis]
-    """
-    for failed_id in cascade_failed_ids:
-        await evaluate_downstream_dependencies(db, str(failed_id), redis_queue)
-
-
-async def _dispatch_ready_jobs(
-    redis_queue: ArqRedis | None,
-    ready_jobs: list[Job],
-) -> None:
-    """
-    Dispatch ready unblocked jobs to the ARQ Redis broker.
-
-    :param redis_queue: Optional ARQ queue client.
-    :type redis_queue: Optional[ArqRedis]
-    :param ready_jobs: List of unblocked Job entities.
-    :type ready_jobs: list[Job]
-    """
-    if redis_queue:
-        for job in ready_jobs:
-            await enqueue_execution(redis_queue, job)
-
-
-async def evaluate_downstream_dependencies(
-    db: AsyncSession,
-    completed_job_id: str,
-    redis_queue: ArqRedis | None = None,
-) -> None:
-    """
-    Evaluate and advance downstream dependency jobs for a completed node.
-
-    :param db: Asynchronous database session.
-    :type db: AsyncSession
-    :param completed_job_id: Identifier of the completed upstream job.
-    :type completed_job_id: str
-    :param redis_queue: Optional ARQ queue client for dispatching.
-    :type redis_queue: Optional[ArqRedis]
-    """
-    parsed_id = _uuid.UUID(str(completed_job_id))
-    downstream_ids = await _fetch_downstream_ids(db, parsed_id)
-    ready_jobs, cascade_ids = await _evaluate_downstream_children(
-        db, downstream_ids
-    )
-    await db.commit()
-    await _cascade_failure_propagation(db, cascade_ids, redis_queue)
-    await _dispatch_ready_jobs(redis_queue, ready_jobs)
-
-
 async def clear_all_data(
     db: AsyncSession,
-    redis_queue: ArqRedis | None = None,
+    redis_queue: Redis | None = None,
 ) -> dict:
     """
     Purge all job records, dependency edges, and workspace artifacts.
 
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param redis_queue: Optional ARQ Redis client.
-    :type redis_queue: Optional[ArqRedis]
+    :param redis_queue: Optional Redis client to flush.
+    :type redis_queue: Optional[Redis]
     :return: Summary dictionary of cleared resources.
     :rtype: dict
     """

@@ -5,10 +5,12 @@ SQLAlchemy ORM models for simulation jobs and DAG dependencies.
 import uuid
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     Float,
     ForeignKey,
+    Integer,
     String,
     Text,
     func,
@@ -16,6 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from app.db.base import Base
+from app.runs.states import JobStatus
 
 
 class JobDependency(Base):
@@ -50,9 +53,30 @@ class Job(Base):
     status = Column(
         String(50),
         nullable=False,
-        default="Pending",
+        default=JobStatus.QUEUED,
         index=True,
     )
+    run_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Parents not yet succeeded; the job is queued when this reaches 0.
+    pending_parents = Column(Integer, nullable=False, default=0)
+
+    # Lease: which agent holds the job, on which attempt, until when.
+    attempt = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=2)
+    agent_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("compute_targets.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    last_heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+    deadline_at = Column(DateTime(timezone=True), nullable=True)
+    cancel_requested = Column(Boolean, nullable=False, default=False)
 
     parameters = Column(JSONB, nullable=True)
     # Input port name -> file names in the session workspace.

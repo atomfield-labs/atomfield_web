@@ -12,9 +12,7 @@ authority than an API key, which can leak.
 import argparse
 import asyncio
 
-from arq import create_pool
-
-from app.core.broker import build_redis_settings
+from app.core.broker import create_redis
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
 from app.services.job_service import clear_all_data
@@ -56,7 +54,7 @@ async def wipe_everything() -> dict:
     :return: Summary returned by the service layer.
     :rtype: dict
     """
-    redis = await create_pool(build_redis_settings())
+    redis = create_redis()
     try:
         async with AsyncSessionLocal() as session:
             return await clear_all_data(db=session, redis_queue=redis)

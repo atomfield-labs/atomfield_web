@@ -4,7 +4,6 @@ HTTP route handlers for simulation jobs and DAG pipelines.
 
 from pathlib import Path
 
-from arq import ArqRedis
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,14 +12,15 @@ from starlette.background import BackgroundTask
 from app.api.dependencies import (
     get_catalog,
     get_current_api_key,
+    get_job_queue,
     get_optional_api_key,
     get_owned_job,
-    get_redis,
 )
 from app.catalog.catalog import Catalog
 from app.db.session import get_db
 from app.models.api_key import ApiKey
 from app.models.job import Job
+from app.queue.job_queue import RedisJobQueue
 from app.schemas.job import (
     JobListResponse,
     JobResponse,
@@ -48,7 +48,7 @@ async def submit_job(
     job_req: JobSubmitRequest,
     api_key: ApiKey = Depends(get_current_api_key),
     db: AsyncSession = Depends(get_db),
-    redis: ArqRedis = Depends(get_redis),
+    queue: RedisJobQueue = Depends(get_job_queue),
     catalog: Catalog = Depends(get_catalog),
 ):
     """
@@ -60,17 +60,17 @@ async def submit_job(
     :type api_key: ApiKey
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param redis: Connected Redis worker queue.
-    :type redis: ArqRedis
+    :param queue: Job queue the job is sent to.
+    :type queue: RedisJobQueue
     :param catalog: Task catalog the request is checked against.
     :type catalog: Catalog
     :return: Created Job entity with Pending status.
     :rtype: Job
     """
     job_req = validate_job_request(catalog, job_req)
-    job = await job_service.create_job(db=db, request=job_req, api_key=api_key)
-    await job_service.enqueue_execution(redis, job)
-    return job
+    return await job_service.create_job(
+        db=db, request=job_req, queue=queue, api_key=api_key
+    )
 
 
 @router.post(
@@ -82,7 +82,7 @@ async def submit_pipeline(
     pipeline_req: PipelineSubmitRequest,
     api_key: ApiKey = Depends(get_current_api_key),
     db: AsyncSession = Depends(get_db),
-    redis: ArqRedis = Depends(get_redis),
+    queue: RedisJobQueue = Depends(get_job_queue),
     catalog: Catalog = Depends(get_catalog),
 ):
     """
@@ -94,8 +94,8 @@ async def submit_pipeline(
     :type api_key: ApiKey
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param redis: Connected Redis worker queue.
-    :type redis: ArqRedis
+    :param queue: Job queue the root jobs are sent to.
+    :type queue: RedisJobQueue
     :param catalog: Task catalog every node is checked against.
     :type catalog: Catalog
     :return: Pipeline submission receipt and job ID mappings.
@@ -105,7 +105,7 @@ async def submit_pipeline(
     return await job_service.submit_pipeline(
         db=db,
         request=pipeline_req,
-        redis_queue=redis,
+        queue=queue,
         api_key=api_key,
     )
 

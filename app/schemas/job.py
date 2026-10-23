@@ -55,6 +55,7 @@ class JobResponse(BaseModel):
     """
 
     id: UUID
+    run_id: UUID
     script_name: str
     status: str
     parameters: dict[str, object] | None = None
@@ -130,6 +131,7 @@ class PipelineSubmitResponse(BaseModel):
     total_nodes: int
     roots_started: int
     pipeline_id: str | None = None
+    run_id: UUID | None = None
     job_ids: dict[str, str] = Field(default_factory=dict)
 
 

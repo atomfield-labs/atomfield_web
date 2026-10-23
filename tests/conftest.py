@@ -11,6 +11,8 @@ from collections.abc import Callable, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import pool
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import settings
 from app.db.migrate import migrate
@@ -74,3 +76,20 @@ def make_user_headers(client: TestClient) -> UserHeadersFactory:
         return {"X-API-Key": response.json()["api_key"]}
 
     return create_user_headers
+
+
+@pytest.fixture
+def make_session(client: TestClient) -> Iterator[async_sessionmaker]:
+    """
+    Sessions on a private engine for tests that use the database
+    directly. NullPool opens a fresh connection per session, so each
+    ``asyncio.run`` loop owns its connections (the app's pooled engine
+    belongs to the TestClient's loop).
+
+    :param client: In-process API client; its fixture migrated the DB.
+    :type client: TestClient
+    :return: Session factory.
+    :rtype: Iterator[async_sessionmaker]
+    """
+    engine = create_async_engine(settings.database_url, poolclass=pool.NullPool)
+    yield async_sessionmaker(engine, expire_on_commit=False)
