@@ -64,7 +64,8 @@ const statusColors: Record<string, string> = {
   Running: '#dbeafe',
   Success: '#ecfdf5',
   Completed: '#ecfdf5',
-  Failed: '#fee2e2'
+  Failed: '#fee2e2',
+  Cancelled: '#e2e8f0'
 };
 
 function isGroupMemberNode(node?: Node | null, targetGroupId?: string, parentId?: string): boolean {

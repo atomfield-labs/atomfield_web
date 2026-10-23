@@ -3,6 +3,7 @@ import type { SessionMetadata, JobStatus } from '../../types/api';
 import { jobsService } from '../../api/services';
 import { authService } from '../../api/services/authService';
 import ApiKeyModal from '../auth/ApiKeyModal';
+import { toDisplayStatus } from '../../utils/jobStatus';
 
 export type SessionInfo = SessionMetadata;
 
@@ -120,7 +121,7 @@ export default function SessionsDashboard() {
                 title: pipelineId.startsWith('nanoreactor')
                   ? 'Nanoreactor Catalysis'
                   : `Session ${pipelineId.substring(0, 8)}`,
-                status: job.status,
+                status: toDisplayStatus(job.status),
                 nodeCount: 1,
                 updatedAt: job.created_at,
               };
@@ -134,9 +135,11 @@ export default function SessionsDashboard() {
             const matchingJob = jobs.find(
               (j) => j.parameters?.pipeline_id === s.id
             );
-            if (matchingJob && matchingJob.status !== s.status) {
+            const liveStatus =
+              matchingJob && toDisplayStatus(matchingJob.status);
+            if (liveStatus && liveStatus !== s.status) {
               hasChanges = true;
-              return { ...s, status: matchingJob.status };
+              return { ...s, status: liveStatus };
             }
             return s;
           });
@@ -251,6 +254,13 @@ export default function SessionsDashboard() {
           <span className="flex items-center gap-1.5 px-2.5 py-0.5 bg-red-50 text-red-700 text-xs font-bold rounded-md font-mono border border-red-200">
             <span className="w-2 h-2 rounded-full bg-red-500" />
             FAILED
+          </span>
+        );
+      case 'Cancelled':
+        return (
+          <span className="flex items-center gap-1.5 px-2.5 py-0.5 bg-slate-100 text-slate-700 text-xs font-bold rounded-md font-mono border border-slate-300">
+            <span className="w-2 h-2 rounded-full bg-slate-500" />
+            CANCELLED
           </span>
         );
       default:

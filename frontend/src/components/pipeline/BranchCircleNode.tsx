@@ -21,6 +21,7 @@ const statusStyles: Record<string, { bg: string; border: string; text: string }>
   Completed: { bg: 'bg-emerald-500 hover:bg-emerald-600', border: 'border-emerald-600 ring-2 ring-emerald-300', text: 'text-white' },
   Failed: { bg: 'bg-rose-500 hover:bg-rose-600', border: 'border-rose-600 ring-2 ring-rose-300', text: 'text-white' },
   Blocked: { bg: 'bg-slate-100 hover:bg-orange-50/90', border: 'border-slate-400 hover:border-orange-500', text: 'text-slate-500' },
+  Cancelled: { bg: 'bg-slate-300 hover:bg-slate-400', border: 'border-slate-500', text: 'text-slate-700' },
 };
 
 export default function BranchCircleNode({ data }: { data: BranchCircleData }) {

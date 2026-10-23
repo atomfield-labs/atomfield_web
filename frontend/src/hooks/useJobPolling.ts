@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { jobsService } from '../api/services';
+import { isFinished, toDisplayStatus } from '../utils/jobStatus';
 
 interface UseJobPollingOptions {
   activeJobMap: Record<string, string>;
@@ -37,14 +38,7 @@ export function useJobPolling({
         if (!isSubscribed) return;
         try {
           const { status: rawStatus, logs, artifacts } = await jobsService.getJobLogs(jobId);
-          const lower = (rawStatus || '').toLowerCase();
-          const status = (lower === 'success' || lower === 'completed')
-            ? 'Success'
-            : (lower === 'running')
-            ? 'Running'
-            : (lower === 'failed')
-            ? 'Failed'
-            : (rawStatus || 'Pending');
+          const status = toDisplayStatus(rawStatus);
 
           if (isSubscribed) {
             onUpdateExecution(uiId, status, logs, artifacts, jobId);
@@ -80,7 +74,7 @@ export function useJobPolling({
             });
           }
 
-          if (status !== 'Success' && status !== 'Failed') {
+          if (!isFinished(status)) {
             allFinished = false;
           }
         } catch (err) {

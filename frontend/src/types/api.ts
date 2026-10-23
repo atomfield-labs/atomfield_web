@@ -1,4 +1,23 @@
-export type JobStatus = 'Draft' | 'Pending' | 'Running' | 'Success' | 'Failed' | 'Blocked' | 'Ready';
+// A job's status as the API reports it.
+export type ServerJobStatus =
+  | 'waiting'
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'upstream_failed'
+  | 'cancelled';
+
+// A job's status as the UI shows it ('Draft': not submitted yet).
+export type JobStatus =
+  | 'Draft'
+  | 'Pending'
+  | 'Running'
+  | 'Success'
+  | 'Failed'
+  | 'Blocked'
+  | 'Ready'
+  | 'Cancelled';
 
 export type SaveStatus = 'saved' | 'saving' | 'deployed' | 'idle';
 
@@ -127,7 +146,7 @@ export interface PipelineSubmitResponse {
 }
 
 export interface JobLogsResponse {
-  status: JobStatus;
+  status: ServerJobStatus;
   logs: string;
   artifacts: string[];
 }
@@ -143,7 +162,7 @@ export interface SessionMetadata {
 export interface JobItem {
   id: string;
   script_name: string;
-  status: JobStatus;
+  status: ServerJobStatus;
   parameters: Record<string, any>;
   output_data?: Record<string, any> | null;
   error_message?: string | null;
