@@ -8,7 +8,7 @@ import { jobsService, pipelineService } from '../../api/services';
 import { useQuota } from '../../hooks/useQuota';
 import { useBlueprint } from '../../hooks/useBlueprint';
 import { useSessionDraft, serializeGraphToBlueprint } from '../../hooks/useSessionDraft';
-import { useJobPolling } from '../../hooks/useJobPolling';
+import { useRunEvents } from '../../hooks/useRunEvents';
 import { buildPipelineSubmitPayload } from '../../utils/pipelinePayload';
 import type { SessionMetadata } from '../../types/api';
 
@@ -29,6 +29,7 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
   const [isDeploying, setIsDeploying] = useState(false);
   const [activeJobMap, setActiveJobMap] = useState<Record<string, string>>({});
   const [activePipelineId, setActivePipelineId] = useState<string | null>(null);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
 
   const currentGraphRef = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] });
   const deleteNodeRef = useRef<((nodeId: string) => void) | null>(null);
@@ -64,6 +65,7 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
           existingMap = parsed.job_ids;
           setActiveJobMap(parsed.job_ids);
           if (parsed.pipeline_id) setActivePipelineId(parsed.pipeline_id);
+          if (parsed.run_id) setActiveRunId(parsed.run_id);
         }
       } catch (e) {
         console.error('Failed to parse saved jobs for session', e);
@@ -89,11 +91,20 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
               resolvedMap[nodeKey] = j.id;
             });
           }
+          // Follow the newest submission of this session.
+          const newest = matchingJobs.reduce((a, b) =>
+            a.created_at > b.created_at ? a : b
+          );
           setActiveJobMap(resolvedMap);
           setActivePipelineId(activeSessionId);
+          setActiveRunId(newest.run_id);
           localStorage.setItem(
             `atomfield_jobs_${activeSessionId}`,
-            JSON.stringify({ job_ids: resolvedMap, pipeline_id: activeSessionId })
+            JSON.stringify({
+              job_ids: resolvedMap,
+              pipeline_id: activeSessionId,
+              run_id: newest.run_id,
+            })
           );
         }
       })
@@ -106,7 +117,7 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
     };
   }, [activeSessionId]);
 
-  // Background execution polling
+  // Live job updates
   const handleUpdateExecution = useCallback(
     (uiId: string, status: string, logs?: string, artifacts?: string[], jobId?: string) => {
       if (updateNodeExecutionRef.current) {
@@ -116,7 +127,8 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
     []
   );
 
-  useJobPolling({
+  useRunEvents({
+    runId: activeRunId,
     activeJobMap,
     activePipelineId,
     onUpdateExecution: handleUpdateExecution,
@@ -215,6 +227,7 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
             JSON.stringify({
               job_ids: response.job_ids,
               pipeline_id: response.pipeline_id || targetSessionId,
+              run_id: response.run_id,
             })
           );
         } catch (e) {
@@ -222,6 +235,7 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
         }
 
         setActiveJobMap(response.job_ids);
+        setActiveRunId(response.run_id);
         if (response.pipeline_id) {
           setActivePipelineId(response.pipeline_id);
         }

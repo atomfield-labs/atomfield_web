@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+export const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const client = axios.create({
   baseURL: API_BASE,
@@ -10,21 +10,29 @@ const client = axios.create({
   },
 });
 
-// Device Fingerprinting
-client.interceptors.request.use((config) => {
+/**
+ * Headers that identify this browser (device fingerprint) and its
+ * user (API key). Shared by axios and the live event stream, which
+ * uses fetch.
+ */
+export function authHeaders(): Record<string, string> {
   let deviceId = localStorage.getItem('atomfield_device_id');
   if (!deviceId) {
     deviceId = uuidv4();
     localStorage.setItem('atomfield_device_id', deviceId);
   }
-  
-  config.headers['X-Anonymous-Id'] = deviceId;
-  
+  const headers: Record<string, string> = { 'X-Anonymous-Id': deviceId };
   const apiKey = localStorage.getItem('atomfield_api_key');
   if (apiKey) {
-    config.headers['X-API-Key'] = apiKey;
+    headers['X-API-Key'] = apiKey;
   }
-  
+  return headers;
+}
+
+client.interceptors.request.use((config) => {
+  for (const [name, value] of Object.entries(authHeaders())) {
+    config.headers[name] = value;
+  }
   return config;
 });
 

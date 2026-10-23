@@ -141,6 +141,7 @@ export interface PipelineSubmitRequest {
 export interface PipelineSubmitResponse {
   job_ids: Record<string, string>;
   pipeline_id: string;
+  run_id: string;
   total_nodes: number;
   roots_started: number;
 }
@@ -161,6 +162,7 @@ export interface SessionMetadata {
 
 export interface JobItem {
   id: string;
+  run_id: string;
   script_name: string;
   status: ServerJobStatus;
   parameters: Record<string, any>;
@@ -244,4 +246,29 @@ export interface AdminUserListResponse {
 export interface AdminQuotaUpdateRequest {
   quota_limit?: number;
   reset_quota_used?: boolean;
+}
+
+// One job's new state, numbered within its run (live stream "job").
+export interface JobEvent {
+  run_id: string;
+  seq: number;
+  job_id: string;
+  status: ServerJobStatus;
+  attempt: number;
+  error_message?: string | null;
+}
+
+// One job's state inside a snapshot.
+export interface JobState {
+  job_id: string;
+  status: ServerJobStatus;
+  attempt: number;
+  error_message?: string | null;
+}
+
+// Every job of a run plus the run's counter (live stream "snapshot").
+export interface RunSnapshot {
+  run_id: string;
+  seq: number;
+  jobs: JobState[];
 }
