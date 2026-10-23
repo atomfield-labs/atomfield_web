@@ -5,9 +5,14 @@ Helpers that store small job graphs for database-level tests.
 import uuid
 from collections import Counter
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.events.bus import InMemoryEventBus
+from app.events.changes import commit_and_publish
+from app.events.models import JobEvent
 from app.models.job import Job, JobDependency
+from app.models.run import Run
 from app.runs.lifecycle import create_run
 from app.runs.states import JobStatus
 
@@ -68,3 +73,35 @@ async def snapshot(
         job = await session.get(Job, job_id, populate_existing=True)
         state[name] = (job.status, job.pending_parents)
     return state
+
+
+async def commit_changes(session: AsyncSession) -> list[JobEvent]:
+    """
+    Commit job changes the way the app does (numbered, then published),
+    to a bus nobody listens to.
+
+    :param session: Session holding the changes.
+    :type session: AsyncSession
+    :return: The numbered events.
+    :rtype: list[JobEvent]
+    """
+    return await commit_and_publish(session, InMemoryEventBus())
+
+
+async def run_counter(session: AsyncSession, job_id: uuid.UUID) -> int:
+    """
+    Read the event counter of a job's run.
+
+    :param session: Open session.
+    :type session: AsyncSession
+    :param job_id: Any job of the run.
+    :type job_id: uuid.UUID
+    :return: How many changes the run has announced.
+    :rtype: int
+    """
+    query = (
+        select(Run.event_seq)
+        .join(Job, Job.run_id == Run.id)
+        .where(Job.id == job_id)
+    )
+    return (await session.execute(query)).scalar_one()

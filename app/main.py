@@ -11,7 +11,8 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.auth import provision_house_target
 from app.api.router import api_router
@@ -20,9 +21,12 @@ from app.core.broker import create_redis
 from app.core.config import settings
 from app.core.security import hash_api_key
 from app.db.session import AsyncSessionLocal, engine
+from app.events.redis_bus import RedisEventBus
 from app.models.api_key import ApiKey
 from app.queue.job_queue import RedisJobQueue
 from app.scheduler.sweeper import Sweeper
+
+ADMIN_QUOTA = 999999
 
 
 @asynccontextmanager
@@ -42,27 +46,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # the server here, not fail someone's submission later.
     app.state.catalog = Catalog.from_path(Path(settings.CATALOG_PATH))
 
-    # Auto-provision cluster administrator key if configured
-    if settings.ADMIN_API_KEY:
-        admin_hash = hash_api_key(settings.ADMIN_API_KEY)
-        async with AsyncSessionLocal() as session:
-            stmt = select(ApiKey).where(ApiKey.key_hash == admin_hash)
-            res = await session.execute(stmt)
-            if not res.scalars().first():
-                prefix = settings.ADMIN_API_KEY[:8] + "..."
-                admin_key = ApiKey(
-                    key_hash=admin_hash,
-                    key_prefix=prefix,
-                    label="Cluster Administrator",
-                    quota_limit=999999,
-                    quota_used=0,
-                    is_active=True,
-                )
-                session.add(admin_key)
-                await session.commit()
+    async with AsyncSessionLocal() as session:
+        await provision_admin_key(session)
 
     app.state.redis = create_redis()
     app.state.job_queue = RedisJobQueue(app.state.redis)
+    app.state.event_bus = RedisEventBus(app.state.redis)
     async with AsyncSessionLocal() as session:
         await provision_house_target(session)
     sweeper_task = start_sweeper(app) if settings.SWEEPER_ENABLED else None
@@ -77,6 +66,36 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await engine.dispose()
 
 
+async def provision_admin_key(session: AsyncSession) -> None:
+    """
+    Create the administrator's key from ``ADMIN_API_KEY`` if missing.
+
+    One ``INSERT ... ON CONFLICT DO NOTHING`` instead of "look, then
+    insert": API processes start together, and with look-then-insert
+    two of them can both see no key, both insert, and the second one
+    crashes on the unique key_hash.
+
+    :param session: Open database session; committed here.
+    :type session: AsyncSession
+    """
+    if not settings.ADMIN_API_KEY:
+        return
+    statement = (
+        insert(ApiKey)
+        .values(
+            key_hash=hash_api_key(settings.ADMIN_API_KEY),
+            key_prefix=settings.ADMIN_API_KEY[:8] + "...",
+            label="Cluster Administrator",
+            quota_limit=ADMIN_QUOTA,
+            quota_used=0,
+            is_active=True,
+        )
+        .on_conflict_do_nothing(index_elements=[ApiKey.key_hash])
+    )
+    await session.execute(statement)
+    await session.commit()
+
+
 def start_sweeper(app: FastAPI) -> asyncio.Task:
     """
     Start the sweeper loop in the background of this API process.
@@ -89,6 +108,7 @@ def start_sweeper(app: FastAPI) -> asyncio.Task:
     sweeper = Sweeper(
         AsyncSessionLocal,
         app.state.job_queue,
+        app.state.event_bus,
         app.state.redis,
         interval_seconds=settings.SWEEP_INTERVAL_SECONDS,
         lease_timeout=timedelta(seconds=settings.LEASE_TIMEOUT_SECONDS),

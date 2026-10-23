@@ -18,6 +18,7 @@ from app.core.security import hash_api_key
 from app.models.compute_target import HOUSE_TARGET_ID, ComputeTarget
 from app.models.job import Job
 from app.queue.job_queue import RedisJobQueue
+from tests.graphs import run_counter
 from tests.stores import make_redis
 
 UserHeadersFactory = Callable[..., dict[str, str]]
@@ -267,6 +268,33 @@ def test_success_queues_the_children(client: TestClient, chain):
     assert queue_size() == 1
     child = client.get(f"/api/jobs/{second}", headers=headers).json()
     assert child["status"] == "queued"
+
+
+def test_changes_made_through_the_api_are_numbered(
+    client: TestClient,
+    chain,
+    make_session: async_sessionmaker,
+):
+    """
+    Claiming and finishing the first job announces three changes (it
+    started, it succeeded, the second became queued).
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param chain: Owner headers and job ids.
+    :type chain: tuple
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
+    """
+    _, (first, _) = chain
+    attempt = claim(client).json()["attempt"]
+    assert complete(client, first, attempt).status_code == 200
+
+    async def read_counter() -> int:
+        async with make_session() as session:
+            return await run_counter(session, uuid.UUID(first))
+
+    assert asyncio.run(read_counter()) == 3
 
 
 def test_stale_and_repeated_reports_get_409(client: TestClient, chain):

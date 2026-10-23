@@ -45,14 +45,17 @@ services:
   api:
     build: .
     # Migrate (with a backup when needed) first; exec hands PID 1 to
-    # uvicorn so it receives stop signals.
+    # uvicorn so it receives stop signals. Live event streams never end
+    # on their own, and uvicorn waits for open responses before it
+    # stops, so it must be told to give up on them; browsers reconnect
+    # to the new process and get a fresh snapshot.
     command:
       - sh
       - -c
       - >-
         uv run --python 3.11 python -m app.db.migrate
         && exec uv run --python 3.11 uvicorn app.main:app
-        --host 0.0.0.0 --port 8000
+        --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 5
     ports:
       - "8000:8000"
     env_file: .env

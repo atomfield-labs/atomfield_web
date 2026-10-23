@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.rate_limit import FixedWindowRateLimiter, RateLimit
 from app.core.security import hash_api_key
 from app.db.session import get_db
+from app.events.bus import EventBus
 from app.models.api_key import ApiKey
 from app.models.job import Job
 from app.queue.job_queue import RedisJobQueue
@@ -45,6 +46,18 @@ async def get_job_queue(request: Request) -> RedisJobQueue:
     :rtype: RedisJobQueue
     """
     return request.app.state.job_queue
+
+
+async def get_event_bus(request: Request) -> EventBus:
+    """
+    Provide the event bus created at startup.
+
+    :param request: Active FastAPI HTTP request object.
+    :type request: Request
+    :return: Shared event bus.
+    :rtype: EventBus
+    """
+    return request.app.state.event_bus
 
 
 async def get_catalog(request: Request) -> Catalog:

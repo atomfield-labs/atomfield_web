@@ -13,13 +13,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from app.events.bus import InMemoryEventBus
 from app.models.compute_target import HOUSE_TARGET_ID
 from app.models.job import Job
 from app.queue.job_queue import RedisJobQueue, queue_key
 from app.runs.lifecycle import requeue_lost, start_attempt
 from app.runs.states import JobStatus
 from app.scheduler.sweeper import Sweeper
-from tests.graphs import build_graph, snapshot
+from tests.graphs import build_graph, commit_changes, snapshot
 from tests.stores import make_redis
 
 UserHeadersFactory = Callable[..., dict[str, str]]
@@ -43,6 +44,7 @@ def with_sweeper(make_session: async_sessionmaker, scenario):
         sweeper = Sweeper(
             make_session,
             RedisJobQueue(redis),
+            InMemoryEventBus(),
             redis,
             interval_seconds=30,
             lease_timeout=timedelta(minutes=3),
@@ -89,7 +91,7 @@ async def start_running(make_session, job_id, **values) -> None:
             await session.execute(
                 update(Job).where(Job.id == job_id).values(**values)
             )
-        await session.commit()
+        await commit_changes(session)
 
 
 async def read(make_session, ids) -> dict[str, tuple[str, int]]:
@@ -366,7 +368,7 @@ def test_a_heartbeat_just_before_the_requeue_wins(make_session):
             moved = await requeue_lost(
                 session, ids["A"], 1, timedelta(minutes=3)
             )
-            await session.commit()
+            await commit_changes(session)
         return moved, await read(make_session, ids)
 
     moved, state = with_sweeper(make_session, scenario)

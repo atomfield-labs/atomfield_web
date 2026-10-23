@@ -3,9 +3,11 @@ Create runs and move their jobs through the lifecycle.
 
 Each event (a job starting, a job finishing) is one database
 transaction: the job's own change and every consequence for its
-children commit together or not at all. Callers commit, then dispatch
-the jobs that became ready; a crash in between is repaired by the
-sweeper, because Postgres already says those jobs are queued.
+children commit together or not at all. Every status change is noted
+(``record_changes``); callers commit with ``commit_and_publish``, which
+numbers and announces the changes, then dispatch the jobs that became
+ready. A crash in between is repaired by the sweeper, because Postgres
+already says those jobs are queued.
 """
 
 import uuid
@@ -17,6 +19,7 @@ from typing import Any
 from sqlalchemy import ColumnElement, case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.events.changes import record_changes
 from app.models.compute_target import HOUSE_TARGET_ID
 from app.models.job import Job, JobDependency
 from app.models.run import Run
@@ -142,7 +145,9 @@ async def release_children(
         .execution_options(synchronize_session=False, populate_existing=True)
     )
     result = await session.execute(statement)
-    return [job for job in result.scalars() if job.status == JobStatus.QUEUED]
+    ready = [job for job in result.scalars() if job.status == JobStatus.QUEUED]
+    record_changes(session, ready)
+    return ready
 
 
 async def mark_descendants(
@@ -187,10 +192,12 @@ async def mark_descendants(
             Job.status == JobStatus.WAITING,
         )
         .values(status=status, error_message=message)
-        .returning(Job.id)
-        .execution_options(synchronize_session=False)
+        .returning(Job)
+        .execution_options(synchronize_session=False, populate_existing=True)
     )
-    return list((await session.execute(statement)).scalars())
+    changed = list((await session.execute(statement)).scalars())
+    record_changes(session, changed)
+    return [job.id for job in changed]
 
 
 async def complete_attempt(

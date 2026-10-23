@@ -11,8 +11,9 @@ Every pass it:
 
 Each repair is a conditional update in its own transaction, re-checking
 its condition, so the sweeper can never undo progress an agent made a
-moment earlier. Only one API process sweeps per interval: each pass
-first takes a short Redis lock.
+moment earlier. Repairs are announced like any other job change.
+Only one API process sweeps per interval: each pass first takes a
+short Redis lock.
 """
 
 import asyncio
@@ -25,6 +26,8 @@ from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from app.events.bus import EventBus
+from app.events.changes import commit_and_publish
 from app.models.job import Job
 from app.models.run import Run
 from app.queue.job_queue import RedisJobQueue
@@ -68,6 +71,7 @@ class Sweeper:
         self,
         session_factory: async_sessionmaker,
         queue: RedisJobQueue,
+        bus: EventBus,
         redis: Redis,
         interval_seconds: float,
         lease_timeout: timedelta,
@@ -80,6 +84,8 @@ class Sweeper:
         :type session_factory: async_sessionmaker
         :param queue: Job queue to refill.
         :type queue: RedisJobQueue
+        :param bus: Where repairs are announced.
+        :type bus: EventBus
         :param redis: Redis client for the round lock.
         :type redis: Redis
         :param interval_seconds: Time between passes.
@@ -91,6 +97,7 @@ class Sweeper:
         """
         self.session_factory = session_factory
         self.queue = queue
+        self.bus = bus
         self.redis = redis
         self.interval_seconds = interval_seconds
         self.lease_timeout = lease_timeout
@@ -216,7 +223,7 @@ class Sweeper:
             job = await requeue_lost(
                 session, job_id, attempt, self.lease_timeout
             )
-            await session.commit()
+            await commit_and_publish(session, self.bus)
         if job is None:
             return 0
         await self.queue.add(target_id, [job_id])
@@ -251,7 +258,7 @@ class Sweeper:
                 extra_conditions=[lease_expired(self.lease_timeout)],
                 error_message=reason,
             )
-            await session.commit()
+            await commit_and_publish(session, self.bus)
         return int(done is not None)
 
     async def fail_overdue(self) -> int:
@@ -278,6 +285,6 @@ class Sweeper:
                     extra_conditions=[overdue],
                     error_message="Ran past its time limit",
                 )
-                await session.commit()
+                await commit_and_publish(session, self.bus)
                 failed += int(done is not None)
         return failed

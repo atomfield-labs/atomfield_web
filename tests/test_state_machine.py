@@ -19,6 +19,7 @@ from app.runs.states import (
     can_move,
 )
 from app.runs.transitions import transition
+from tests.graphs import commit_changes
 
 
 async def insert_job(session: AsyncSession, status: JobStatus) -> uuid.UUID:
@@ -35,7 +36,7 @@ async def insert_job(session: AsyncSession, status: JobStatus) -> uuid.UUID:
     run = await create_run(session, None, f"test_{uuid.uuid4().hex[:8]}")
     job = Job(run_id=run.id, script_name="toy_opt", status=status)
     session.add(job)
-    await session.commit()
+    await commit_changes(session)
     return job.id
 
 
@@ -78,7 +79,7 @@ def test_allowed_move_updates_and_returns_the_job(make_session):
             moved = await transition(
                 session, job_id, JobStatus.RUNNING, attempt=1
             )
-            await session.commit()
+            await commit_changes(session)
             return moved
 
     moved = asyncio.run(scenario())
@@ -99,7 +100,7 @@ def test_forbidden_move_changes_nothing(make_session):
         async with make_session() as session:
             job_id = await insert_job(session, JobStatus.SUCCEEDED)
             moved = await transition(session, job_id, JobStatus.RUNNING)
-            await session.commit()
+            await commit_changes(session)
             job = await session.get(Job, job_id, populate_existing=True)
             return moved, job.status
 
@@ -124,7 +125,7 @@ def test_two_racing_claims_have_one_winner(make_session):
                 session, job_id, JobStatus.RUNNING, attempt=agent
             )
             await asyncio.sleep(0.05)  # hold the row lock a moment
-            await session.commit()
+            await commit_changes(session)
             return moved is not None
 
     async def scenario() -> list[bool]:
@@ -153,7 +154,7 @@ def test_report_from_an_old_attempt_is_ignored(make_session):
             current = await transition(
                 session, job_id, JobStatus.SUCCEEDED, expected_attempt=2
             )
-            await session.commit()
+            await commit_changes(session)
             return stale, current
 
     stale, current = asyncio.run(scenario())

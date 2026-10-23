@@ -18,7 +18,7 @@ from app.runs.lifecycle import (
 )
 from app.runs.states import JobStatus
 from app.runs.transitions import transition
-from tests.graphs import build_graph, snapshot
+from tests.graphs import build_graph, commit_changes, snapshot
 
 # A feeds B and C; both feed D.
 DIAMOND = [("A", "B"), ("A", "C"), ("B", "D"), ("C", "D")]
@@ -44,7 +44,7 @@ async def run_and_finish(
     """
     await start_attempt(session, job_id, WALLTIME)
     completion = await complete_attempt(session, job_id, outcome)
-    await session.commit()
+    await commit_changes(session)
     return completion
 
 
@@ -132,7 +132,7 @@ def test_a_duplicate_completion_counts_once(make_session: async_sessionmaker):
             again = await complete_attempt(
                 session, ids["A"], JobStatus.SUCCEEDED
             )
-            await session.commit()
+            await commit_changes(session)
             return again, await snapshot(session, ids)
 
     again, state = asyncio.run(scenario())
@@ -163,7 +163,7 @@ def test_a_stale_attempt_cannot_finish_the_job(
             current = await complete_attempt(
                 session, ids["A"], JobStatus.SUCCEEDED, expected_attempt=2
             )
-            await session.commit()
+            await commit_changes(session)
             return stale, current
 
     stale, current = asyncio.run(scenario())
@@ -193,12 +193,12 @@ def test_a_crash_mid_completion_leaves_nothing_half_done(
         async with make_session() as session:
             ids = await build_graph(session, [("A", "B")])
             await start_attempt(session, ids["A"], WALLTIME)
-            await session.commit()
+            await commit_changes(session)
         monkeypatch.setattr(lifecycle, "release_children", crash)
         with pytest.raises(RuntimeError):
             async with make_session() as session:
                 await complete_attempt(session, ids["A"], JobStatus.SUCCEEDED)
-                await session.commit()
+                await commit_changes(session)
         async with make_session() as session:
             return await snapshot(session, ids)
 

@@ -4,7 +4,14 @@ SQLAlchemy ORM model for runs: one submitted pipeline (or single job).
 
 import uuid
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, func
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    DateTime,
+    ForeignKey,
+    String,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.base import Base
@@ -33,3 +40,6 @@ class Run(Base):
         nullable=False,
     )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # How many job changes the run has announced; each event carries
+    # the counter's value so watchers can order them and spot gaps.
+    event_seq = Column(BigInteger, nullable=False, default=0)

@@ -1,0 +1,55 @@
+"""
+The message a watcher receives when a job changes.
+"""
+
+import uuid
+
+from pydantic import BaseModel, ConfigDict
+
+from app.runs.states import JobStatus
+
+
+class JobEvent(BaseModel):
+    """
+    One job's new state, numbered within its run.
+
+    An event carries state ("B is now queued"), never a step ("move B
+    on"), so applying it twice changes nothing. ``seq`` comes from the
+    run's counter: a watcher already showing a higher number for this
+    job knows the event is old and ignores it.
+    """
+
+    # Pydantic rather than a dataclass: events travel through Redis as
+    # JSON, and model_validate_json checks what comes back in.
+    model_config = ConfigDict(frozen=True)
+
+    run_id: uuid.UUID
+    seq: int
+    job_id: uuid.UUID
+    status: JobStatus
+    attempt: int
+    error_message: str | None = None
+
+
+class JobState(BaseModel):
+    """
+    One job's current state, as part of a snapshot.
+    """
+
+    job_id: uuid.UUID
+    status: JobStatus
+    attempt: int
+    error_message: str | None = None
+
+
+class RunSnapshot(BaseModel):
+    """
+    Every job of a run plus the run's counter, read at one moment.
+
+    A watcher shows these states, then applies only events numbered
+    above ``seq``; anything at or below it is already included.
+    """
+
+    run_id: uuid.UUID
+    seq: int
+    jobs: list[JobState]

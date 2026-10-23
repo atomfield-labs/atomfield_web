@@ -14,6 +14,7 @@ from typing import Any
 from sqlalchemy import ColumnElement, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.events.changes import record_changes
 from app.models.job import Job
 from app.runs.states import ALLOWED_SOURCES, JobStatus
 
@@ -30,7 +31,8 @@ async def transition(
     """
     Move one job to ``target`` if the table allows it from its status.
 
-    Runs inside the caller's transaction; the caller commits.
+    Runs inside the caller's transaction; the caller commits with
+    ``commit_and_publish``, which announces the change.
 
     :param session: Open database session.
     :type session: AsyncSession
@@ -70,5 +72,7 @@ async def transition(
         # The returned row replaces any copy this session already loaded.
         .execution_options(synchronize_session=False, populate_existing=True)
     )
-    result = await session.execute(statement)
-    return result.scalars().first()
+    job = (await session.execute(statement)).scalars().first()
+    if job is not None:
+        record_changes(session, [job])
+    return job

@@ -17,9 +17,10 @@ from app.agents.schemas import (
     JobAssignment,
 )
 from app.agents.service import claim_next, record_heartbeat, report_completion
-from app.api.dependencies import get_catalog, get_job_queue
+from app.api.dependencies import get_catalog, get_event_bus, get_job_queue
 from app.catalog.catalog import Catalog
 from app.db.session import get_db
+from app.events.bus import EventBus
 from app.models.compute_target import ComputeTarget
 from app.queue.job_queue import RedisJobQueue
 
@@ -36,6 +37,7 @@ async def claim(
     target: ComputeTarget = Depends(get_agent_target),
     db: AsyncSession = Depends(get_db),
     queue: RedisJobQueue = Depends(get_job_queue),
+    bus: EventBus = Depends(get_event_bus),
     catalog: Catalog = Depends(get_catalog),
 ):
     """
@@ -49,13 +51,15 @@ async def claim(
     :type db: AsyncSession
     :param queue: Job queue.
     :type queue: RedisJobQueue
+    :param bus: Where the changes are announced.
+    :type bus: EventBus
     :param catalog: Loaded task catalog.
     :type catalog: Catalog
     :return: The assignment, or an empty 204 response.
     :rtype: JobAssignment | Response
     """
     assignment = await claim_next(
-        db, queue, catalog, target, request.wait_seconds
+        db, queue, bus, catalog, target, request.wait_seconds
     )
     if assignment is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -90,6 +94,7 @@ async def complete(
     target: ComputeTarget = Depends(get_agent_target),
     db: AsyncSession = Depends(get_db),
     queue: RedisJobQueue = Depends(get_job_queue),
+    bus: EventBus = Depends(get_event_bus),
 ) -> CompletionResponse:
     """
     Record how one attempt ended.
@@ -104,11 +109,15 @@ async def complete(
     :type db: AsyncSession
     :param queue: Job queue.
     :type queue: RedisJobQueue
+    :param bus: Where the changes are announced.
+    :type bus: EventBus
     :return: The recorded outcome.
     :rtype: CompletionResponse
     :raises HTTPException: 409 if the attempt no longer owns the job.
     """
-    completion = await report_completion(db, queue, target, job_id, request)
+    completion = await report_completion(
+        db, queue, bus, target, job_id, request
+    )
     if completion is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

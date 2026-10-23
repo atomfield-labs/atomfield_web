@@ -17,6 +17,8 @@ from app.agents.schemas import (
     JobReference,
 )
 from app.catalog.catalog import Catalog, UnknownTaskError
+from app.events.bus import EventBus
+from app.events.changes import commit_and_publish
 from app.models.compute_target import ComputeTarget
 from app.models.job import Job
 from app.queue.job_queue import RedisJobQueue
@@ -33,6 +35,7 @@ OUTCOME_FIELDS = {
 
 async def try_start(
     db: AsyncSession,
+    bus: EventBus,
     catalog: Catalog,
     target: ComputeTarget,
     job_id: uuid.UUID,
@@ -46,6 +49,8 @@ async def try_start(
 
     :param db: Asynchronous database session.
     :type db: AsyncSession
+    :param bus: Where the changes are announced.
+    :type bus: EventBus
     :param catalog: Loaded task catalog.
     :type catalog: Catalog
     :param target: Calling agent's target.
@@ -65,11 +70,11 @@ async def try_start(
         await complete_attempt(
             db, job_id, JobStatus.FAILED, error_message=message
         )
-        await db.commit()
+        await commit_and_publish(db, bus)
         return None
     walltime = task.resources.walltime_minutes
     started = await start_attempt(db, job_id, walltime, agent_id=target.id)
-    await db.commit()
+    await commit_and_publish(db, bus)
     if started is None:
         return None
     return JobAssignment(
@@ -86,6 +91,7 @@ async def try_start(
 async def claim_next(
     db: AsyncSession,
     queue: RedisJobQueue,
+    bus: EventBus,
     catalog: Catalog,
     target: ComputeTarget,
     wait_seconds: float,
@@ -97,6 +103,8 @@ async def claim_next(
     :type db: AsyncSession
     :param queue: Job queue.
     :type queue: RedisJobQueue
+    :param bus: Where the changes are announced.
+    :type bus: EventBus
     :param catalog: Loaded task catalog.
     :type catalog: Catalog
     :param target: Calling agent's target.
@@ -114,7 +122,7 @@ async def claim_next(
         job_id = await queue.pop(target.id, remaining)
         if job_id is None:
             return None
-        assignment = await try_start(db, catalog, target, job_id)
+        assignment = await try_start(db, bus, catalog, target, job_id)
         if assignment is not None:
             return assignment
     return None
@@ -171,6 +179,7 @@ async def record_heartbeat(
 async def report_completion(
     db: AsyncSession,
     queue: RedisJobQueue,
+    bus: EventBus,
     target: ComputeTarget,
     job_id: uuid.UUID,
     report: CompletionRequest,
@@ -182,6 +191,8 @@ async def report_completion(
     :type db: AsyncSession
     :param queue: Job queue.
     :type queue: RedisJobQueue
+    :param bus: Where the changes are announced.
+    :type bus: EventBus
     :param target: Calling agent's target.
     :type target: ComputeTarget
     :param job_id: Finished job.
@@ -204,7 +215,7 @@ async def report_completion(
         expected_agent=target.id,
         **values,
     )
-    await db.commit()
+    await commit_and_publish(db, bus)
     if completion and completion.ready:
         ready_ids = [child.id for child in completion.ready]
         await queue.add(target.id, ready_ids)
