@@ -88,6 +88,9 @@ services:
       ATOMFIELD_API_URL: http://api:8000
       ATOMFIELD_AGENT_TOKEN: ${HOUSE_AGENT_TOKEN:?set HOUSE_AGENT_TOKEN in .env}
       ARTIFACTS_DIR: /app/artifacts
+      # Our disk, not the user's: once a run's zip is uploaded (users
+      # download that), its folder here is removed.
+      ATOMFIELD_DELETE_AFTER_UPLOAD: "true"
     # No docker.sock: the agent runs catalog tasks as plain processes,
     # and access to the Docker daemon would equal root on the host.
     volumes:

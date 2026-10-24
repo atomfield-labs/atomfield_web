@@ -17,13 +17,11 @@ from fastapi import (
 )
 from pydantic import BaseModel
 
-from app.api.dependencies import get_current_api_key
+from app.api.dependencies import get_current_api_key, get_store
 from app.core.config import settings
 from app.models.api_key import ApiKey
-from app.services.job_service import (
-    sanitize_identifier,
-    user_folder_name,
-)
+from app.storage.keys import upload_key
+from app.storage.store import ArtifactStore, InvalidKeyError
 
 router = APIRouter(prefix="/files", tags=["Files"])
 
@@ -330,43 +328,6 @@ async def _read_file_payload(file: UploadFile) -> tuple[bytes, str]:
         raise HTTPException(status_code=400, detail=detail_msg)
 
 
-def _resolve_and_write_file(
-    session_id: str,
-    filename: str,
-    content_str: str,
-    user_id: str | None = None,
-) -> Path:
-    """
-    Ensure session directory exists and write content preventing path traversal.
-
-    :param session_id: Session identifier string.
-    :type session_id: str
-    :param filename: Base filename string.
-    :type filename: str
-    :param content_str: File text content to write.
-    :type content_str: str
-    :param user_id: Optional user identifier for directory isolation.
-    :type user_id: str | None
-    :return: Resolved written file Path.
-    :rtype: Path
-    """
-    clean_session_id = sanitize_identifier(session_id)
-    if user_id:
-        clean_user_id = sanitize_identifier(user_id)
-        dest_dir = (ARTIFACTS_DIR / clean_user_id / clean_session_id).resolve()
-    else:
-        dest_dir = (ARTIFACTS_DIR / clean_session_id).resolve()
-
-    if not str(dest_dir).startswith(str(ARTIFACTS_DIR.resolve())):
-        raise HTTPException(status_code=400, detail="Invalid session ID")
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest_file = (dest_dir / filename).resolve()
-    if not str(dest_file).startswith(str(dest_dir)):
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    dest_file.write_text(content_str, encoding="utf-8")
-    return dest_file
-
-
 def _extract_structure_metadata(extension: str, content_str: str):
     """
     Extract structure geometry and formula from content string.
@@ -440,6 +401,7 @@ async def upload_structure(
     file: UploadFile = File(...),
     session_id: str = Form("default"),
     api_key: ApiKey = Depends(get_current_api_key),
+    store: ArtifactStore = Depends(get_store),
 ):
     """
     Upload and parse molecular structure file into workspace.
@@ -450,16 +412,19 @@ async def upload_structure(
     :type session_id: str
     :param api_key: Authenticated caller; files go to their folder.
     :type api_key: ApiKey
+    :param store: Where uploads are kept until an agent fetches them.
+    :type store: ArtifactStore
     :return: Parsed structure metadata model.
     :rtype: StructureMetadata
     """
     clean_filename = Path(file.filename or "structure.xyz").name
     extension = _validate_uploaded_file(file)
     content_bytes, content_str = await _read_file_payload(file)
-    user_id = user_folder_name(api_key.id)
-    _resolve_and_write_file(
-        session_id, clean_filename, content_str, user_id=user_id
-    )
+    try:
+        key = upload_key(api_key.id, session_id, clean_filename)
+    except InvalidKeyError:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    await store.write(key, content_bytes)
     parsed_info = _extract_structure_metadata(extension, content_str)
     return _build_structure_metadata(
         clean_filename, session_id, content_bytes, content_str, parsed_info

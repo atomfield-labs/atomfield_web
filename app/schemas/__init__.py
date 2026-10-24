@@ -14,8 +14,6 @@ from app.schemas.job import (
     JobSubmitRequest,
     PipelineSubmitRequest,
     PipelineSubmitResponse,
-    TextArtifactItem,
-    TextArtifactsResponse,
 )
 
 __all__ = [
@@ -27,7 +25,5 @@ __all__ = [
     "JobSubmitRequest",
     "PipelineSubmitRequest",
     "PipelineSubmitResponse",
-    "TextArtifactItem",
-    "TextArtifactsResponse",
     "UserStatsResponse",
 ]

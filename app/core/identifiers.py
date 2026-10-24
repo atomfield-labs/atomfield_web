@@ -24,3 +24,42 @@ def sanitize_identifier(name: str) -> str:
     clean_name = UNSAFE_CHARACTERS.sub("", name)
     fallback_id = f"id_{uuid.uuid4().hex[:8]}"
     return clean_name[:MAX_IDENTIFIER_LENGTH] or fallback_id
+
+
+def user_folder_name(api_key_id: uuid.UUID) -> str:
+    """
+    Name the folder (and ``user_id`` parameter) of one user.
+
+    :param api_key_id: The user's API key id.
+    :type api_key_id: uuid.UUID
+    :return: Folder name such as ``user_1a2b3c4d5e6f``.
+    :rtype: str
+    """
+    return f"user_{api_key_id.hex[:12]}"
+
+
+def assign_node_keys(names: list[str]) -> dict[str, str]:
+    """
+    Give each pipeline node a folder name unique within its run.
+
+    Names are cleaned with ``sanitize_identifier``; two names that clean
+    to the same text (``opt 1`` and ``opt1``) get ``_2``, ``_3``...
+    Cleaned names hold no dots, so they can never collide with
+    ``run.json`` or a retired attempt's ``<name>.try1`` folder.
+
+    :param names: Node names (UI ids), unique among themselves.
+    :type names: list[str]
+    :return: Name -> folder name.
+    :rtype: dict[str, str]
+    """
+    keys: dict[str, str] = {}
+    taken: set[str] = set()
+    for name in names:
+        base = sanitize_identifier(name)
+        key, number = base, 1
+        while key in taken:
+            number += 1
+            key = f"{base}_{number}"
+        taken.add(key)
+        keys[name] = key
+    return keys

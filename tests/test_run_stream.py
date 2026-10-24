@@ -278,7 +278,11 @@ def test_only_the_owner_may_watch_a_run(
     run_id = client.post(
         "/api/jobs/pipeline/submit", json=payload, headers=owner
     ).json()["run_id"]
-    url = f"/api/runs/{run_id}/events"
-
-    assert client.get(url).status_code == 401
-    assert client.get(url, headers=stranger).status_code == 404
+    for url in (
+        f"/api/runs/{run_id}/events",
+        f"/api/runs/{run_id}/bundle",
+    ):
+        assert client.get(url).status_code == 401
+        assert client.get(url, headers=stranger).status_code == 404
+    bundle = f"/api/runs/{run_id}/bundle"
+    assert client.post(bundle, headers=stranger).status_code == 404

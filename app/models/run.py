@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     String,
+    Text,
     func,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -43,3 +44,16 @@ class Run(Base):
     # How many job changes the run has announced; each event carries
     # the counter's value so watchers can order them and spot gaps.
     event_seq = Column(BigInteger, nullable=False, default=0)
+    # Where the run's folder lives on the agent's machine: the path,
+    # and the address to rsync it from (none for a laptop or ours).
+    folder_path = Column(String(1024), nullable=True)
+    folder_address = Column(String(255), nullable=True)
+    # When every job reached a final state.
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    # The run's zip: none, requested, packing, ready, too_big, failed,
+    # expired (see app.runs.bundles).
+    bundle_status = Column(String(20), nullable=False, default="none")
+    bundle_size = Column(BigInteger, nullable=True)
+    bundle_requested_at = Column(DateTime(timezone=True), nullable=True)
+    bundle_expires_at = Column(DateTime(timezone=True), nullable=True)
+    bundle_error = Column(Text, nullable=True)

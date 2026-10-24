@@ -15,6 +15,7 @@ import asyncio
 from app.core.broker import create_redis
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
+from app.main import create_store
 from app.services.job_service import clear_all_data
 
 EXIT_OK = 0
@@ -57,7 +58,9 @@ async def wipe_everything() -> dict:
     redis = create_redis()
     try:
         async with AsyncSessionLocal() as session:
-            return await clear_all_data(db=session, redis_queue=redis)
+            return await clear_all_data(
+                db=session, store=create_store(), redis_queue=redis
+            )
     finally:
         await redis.aclose()
 

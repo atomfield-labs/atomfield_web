@@ -133,23 +133,3 @@ class PipelineSubmitResponse(BaseModel):
     pipeline_id: str | None = None
     run_id: UUID | None = None
     job_ids: dict[str, str] = Field(default_factory=dict)
-
-
-class TextArtifactItem(BaseModel):
-    """
-    Individual text-based artifact file representation.
-    """
-
-    filename: str
-    content: str
-    size_bytes: int
-
-
-class TextArtifactsResponse(BaseModel):
-    """
-    Collection of readable text artifacts for a completed job or session.
-    """
-
-    session_id: str | None = None
-    job_id: str | None = None
-    files: list[TextArtifactItem] = Field(default_factory=list)

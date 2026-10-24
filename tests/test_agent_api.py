@@ -17,7 +17,9 @@ from app.core.config import settings
 from app.core.security import hash_api_key
 from app.models.compute_target import HOUSE_TARGET_ID, ComputeTarget
 from app.models.job import Job
+from app.models.run import Run
 from app.queue.job_queue import RedisJobQueue
+from tests.fake_pack import WATER_XYZ
 from tests.graphs import run_counter
 from tests.stores import make_redis
 
@@ -264,6 +266,7 @@ def test_success_queues_the_children(client: TestClient, chain):
         "job_id": first,
         "status": "succeeded",
         "children_queued": 1,
+        "pack": [],
     }
     assert queue_size() == 1
     child = client.get(f"/api/jobs/{second}", headers=headers).json()
@@ -372,7 +375,7 @@ def test_heartbeats_carry_cancel_and_abandon(
             "/api/agent/heartbeat", json=body, headers=HOUSE
         ).json()
 
-    assert beat(1) == {"cancel": [], "abandon": []}
+    assert beat(1) == {"cancel": [], "abandon": [], "pack": []}
 
     async def request_cancel():
         async with make_session() as session:
@@ -386,3 +389,168 @@ def test_heartbeats_carry_cancel_and_abandon(
     asyncio.run(request_cancel())
     assert beat(1)["cancel"] == [{"job_id": first, "attempt": 1}]
     assert beat(7)["abandon"] == [{"job_id": first, "attempt": 7}]
+
+
+def test_a_run_cannot_take_another_users_upload(
+    client: TestClient,
+    make_user_headers: UserHeadersFactory,
+):
+    """
+    Uploads are kept under their owner's folder, chosen from the
+    caller's key, never from the request. A stranger submitting under
+    the same session name and asking for the owner's file gets a link
+    into their own (empty) folder; the owner's run gets the file.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param make_user_headers: Factory registering a user key.
+    :type make_user_headers: UserHeadersFactory
+    """
+    owner, stranger = make_user_headers(), make_user_headers()
+    name = f"owned_{uuid.uuid4().hex[:6]}.xyz"
+    uploaded = client.post(
+        "/api/files/upload",
+        files={"file": (name, WATER_XYZ, "text/plain")},
+        data={"session_id": "shared_name"},
+        headers=owner,
+    )
+    assert uploaded.status_code == 201
+
+    def fetch_input(headers: dict[str, str]):
+        drain_queue()
+        node = {
+            "ui_id": "opt",
+            "script_name": "toy_opt",
+            "inputs": {"structure": [name]},
+        }
+        payload = {"session_id": "shared_name", "nodes": [node], "edges": []}
+        submitted = client.post(
+            "/api/jobs/pipeline/submit", json=payload, headers=headers
+        )
+        assert submitted.status_code == 202
+        link = claim(client).json()["inputs"][0]["url"]
+        return client.get(link)
+
+    assert fetch_input(stranger).status_code == 404
+    mine = fetch_input(owner)
+    assert mine.status_code == 200
+    assert mine.text == WATER_XYZ
+
+
+def test_a_claim_names_the_folder_and_the_parents(
+    client: TestClient,
+    chain,
+):
+    """
+    The second job's assignment carries its folder name and its
+    parent's, so the agent can link ``upstream/first``.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param chain: Owner headers and job ids.
+    :type chain: tuple
+    """
+    _, (first, second) = chain
+    first_assignment = claim(client).json()
+    assert (first_assignment["node_key"], first_assignment["parents"]) == (
+        "first",
+        [],
+    )
+    complete(client, first, first_assignment["attempt"])
+    second_assignment = claim(client).json()
+    assert second_assignment["job_id"] == second
+    assert second_assignment["node_key"] == "second"
+    assert second_assignment["parents"] == ["first"]
+
+
+def test_every_job_of_a_run_receives_the_sessions_uploads(
+    client: TestClient,
+    make_user_headers: UserHeadersFactory,
+):
+    """
+    A file attached to the submission reaches every job's folder, as
+    the session folder did before: scripts with an optional input
+    look for it there.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param make_user_headers: Factory registering a user key.
+    :type make_user_headers: UserHeadersFactory
+    """
+    drain_queue()
+    headers = make_user_headers()
+    payload = {
+        "nodes": [
+            {"ui_id": "first", "script_name": "toy_opt"},
+            {"ui_id": "second", "script_name": "toy_opt"},
+        ],
+        "edges": [{"upstream_ui_id": "first", "downstream_ui_id": "second"}],
+        "files": [{"filename": "water.xyz", "content": WATER_XYZ}],
+    }
+    ids = client.post(
+        "/api/jobs/pipeline/submit", json=payload, headers=headers
+    ).json()["job_ids"]
+
+    first = claim(client).json()
+    complete(client, ids["first"], first["attempt"])
+    second = claim(client).json()
+
+    for assignment in (first, second):
+        (only,) = assignment["inputs"]
+        assert only["name"] == "water.xyz"
+        assert client.get(only["url"]).text == WATER_XYZ
+
+
+def test_a_finished_jobs_log_and_files_come_from_its_report(
+    client: TestClient,
+    chain,
+    make_session: async_sessionmaker,
+):
+    """
+    The agent uploads the log through a link it asked for, then reports
+    every file and where the run's folder is. The UI's log and file
+    list come from there; a stale attempt or a path gets no link.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param chain: Owner headers and job ids.
+    :type chain: tuple
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
+    """
+    headers, (first, _) = chain
+    attempt = claim(client).json()["attempt"]
+    uploads_url = f"/api/agent/jobs/{first}/uploads"
+
+    def ask(names: list[str]):
+        body = {"attempt": attempt, "names": names}
+        return client.post(uploads_url, json=body, headers=HOUSE)
+
+    assert ask(["../escape.log"]).status_code == 422
+    link = ask(["toy_opt.log"]).json()["links"]["toy_opt.log"]
+    assert client.put(link, content=b"converged in 7 steps").status_code == 201
+    cards = [
+        {
+            "path": "toy_opt.log",
+            "size_bytes": 20,
+            "sha256": "a" * 64,
+            "uploaded": True,
+        },
+        {"path": "md/frames.trj", "size_bytes": 10**9, "sha256": "b" * 64},
+    ]
+    folder = {"path": "/scratch/you/runs/r", "address": "you@login.hpc.edu"}
+    finished = complete(client, first, attempt, files=cards, folder=folder)
+    assert finished.status_code == 200
+
+    logs = client.get(f"/api/jobs/{first}/logs", headers=headers).json()
+    assert logs["logs"] == "converged in 7 steps"
+    assert logs["artifacts"] == ["toy_opt.log", "md/frames.trj"]
+    assert ask(["late.log"]).status_code == 409
+
+    async def read_folder():
+        async with make_session() as session:
+            job = await session.get(Job, uuid.UUID(first))
+            run = await session.get(Run, job.run_id)
+            return run.folder_path, run.folder_address
+
+    assert asyncio.run(read_folder()) == (folder["path"], folder["address"])

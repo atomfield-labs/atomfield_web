@@ -1,6 +1,7 @@
 """
 Job folders: a child sees its parents' (and their ancestors') files
-through ``upstream/`` links, and afscripts can find them there.
+through ``upstream/`` links named after their nodes, and afscripts can
+find them there.
 """
 
 import os
@@ -9,54 +10,84 @@ from pathlib import Path
 
 import pytest
 
-from agent.workspace import link_upstream_workspaces
+from agent.workspace import link_parents
 
 
-def test_link_upstream_workspaces():
+def test_a_parent_folder_is_linked_under_upstream(tmp_path: Path):
     """
-    A parent's workspace is symlinked into the child's upstream folder.
+    A parent's folder is symlinked into the child's ``upstream/``,
+    named after the parent's node.
+
+    :param tmp_path: Empty run folder.
+    :type tmp_path: Path
     """
-    with tempfile.TemporaryDirectory() as temp_dir:
-        session_dir = Path(temp_dir)
-        parent_dir = session_dir / "job_parent-uuid"
-        parent_dir.mkdir()
-        (parent_dir / "reactant_optimized.xyz").write_text("dummy xyz")
-        child_dir = session_dir / "job_child-uuid"
-        child_dir.mkdir()
-        params = {"upstream_results": {"parent-uuid": {"status": "done"}}}
+    (tmp_path / "opt").mkdir()
+    (tmp_path / "opt" / "water_optimized.xyz").write_text("xyz")
+    child = tmp_path / "md"
+    child.mkdir()
 
-        link_upstream_workspaces(session_dir, child_dir, params)
+    link_parents(tmp_path, child, ["opt"])
 
-        upstream_link = child_dir / "upstream" / "job_parent-uuid"
-        assert upstream_link.is_symlink()
-        linked_file = upstream_link / "reactant_optimized.xyz"
-        assert linked_file.read_text() == "dummy xyz"
+    link = child / "upstream" / "opt"
+    assert link.is_symlink()
+    assert os.readlink(link) == "../../opt"
+    assert (link / "water_optimized.xyz").read_text() == "xyz"
 
 
-def test_link_upstream_transitive_ancestors():
+def test_links_still_work_after_the_run_folder_moves(tmp_path: Path):
     """
-    Ancestors linked into a parent's upstream folder reach the child.
+    Copying a run folder elsewhere (rsync to a laptop) keeps its
+    ``upstream/`` links working, because they are relative.
+
+    :param tmp_path: Empty folder holding the run.
+    :type tmp_path: Path
     """
-    with tempfile.TemporaryDirectory() as temp_dir:
-        session_dir = Path(temp_dir)
-        job_a = session_dir / "job_aaa"
-        job_a.mkdir()
-        (job_a / "opt.xyz").write_text("opt")
-        job_b = session_dir / "job_bbb"
-        (job_b / "upstream").mkdir(parents=True)
-        (job_b / "traj.xyz").write_text("traj")
-        (job_b / "upstream" / "job_aaa").symlink_to(
-            job_a.resolve(), target_is_directory=True
-        )
-        job_c = session_dir / "job_ccc"
-        job_c.mkdir()
-        params = {"upstream_results": {"bbb": {"status": "success"}}}
+    run = tmp_path / "cluster" / "run"
+    for name in ("opt", "md"):
+        (run / name).mkdir(parents=True)
+    (run / "opt" / "opt.xyz").write_text("opt")
+    link_parents(run, run / "md", ["opt"])
 
-        link_upstream_workspaces(session_dir, job_c, params)
+    moved = tmp_path / "laptop" / "run"
+    moved.parent.mkdir()
+    run.rename(moved)
 
-        upstream_c = job_c / "upstream"
-        assert (upstream_c / "job_aaa" / "opt.xyz").exists()
-        assert (upstream_c / "job_bbb" / "traj.xyz").exists()
+    assert (moved / "md" / "upstream" / "opt" / "opt.xyz").read_text() == "opt"
+
+
+def test_ancestors_reach_the_child_through_the_parent(tmp_path: Path):
+    """
+    Grandparents linked into a parent's ``upstream/`` reach the child.
+
+    :param tmp_path: Empty run folder.
+    :type tmp_path: Path
+    """
+    for name in ("opt", "md", "analysis"):
+        (tmp_path / name).mkdir()
+    (tmp_path / "opt" / "opt.xyz").write_text("opt")
+    (tmp_path / "md" / "traj.xyz").write_text("traj")
+    link_parents(tmp_path, tmp_path / "md", ["opt"])
+
+    link_parents(tmp_path, tmp_path / "analysis", ["md"])
+
+    upstream = tmp_path / "analysis" / "upstream"
+    assert (upstream / "opt" / "opt.xyz").exists()
+    assert (upstream / "md" / "traj.xyz").exists()
+
+
+@pytest.mark.parametrize("name", ["../escape", "a/b", "..", ""])
+def test_a_parent_name_cannot_be_a_path(name: str, tmp_path: Path):
+    """
+    Names from the server are folder names, never paths.
+
+    :param name: A path-like parent name.
+    :type name: str
+    :param tmp_path: Empty run folder.
+    :type tmp_path: Path
+    """
+    (tmp_path / "md").mkdir()
+    with pytest.raises(ValueError):
+        link_parents(tmp_path, tmp_path / "md", [name])
 
 
 def test_find_upstream_files_follows_symlinks():

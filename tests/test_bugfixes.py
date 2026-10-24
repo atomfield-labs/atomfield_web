@@ -155,27 +155,6 @@ def test_path_traversal_prevention_file_upload(
     assert meta["formula"] == "O"
 
 
-def test_path_traversal_prevention_zip_download(
-    client: TestClient,
-    make_user_headers: UserHeadersFactory,
-):
-    """
-    A traversal attempt in the download query returns a safe empty zip.
-
-    :param client: In-process API client.
-    :type client: TestClient
-    :param make_user_headers: Factory registering a user key.
-    :type make_user_headers: UserHeadersFactory
-    """
-    response = client.get(
-        "/api/jobs/artifacts/download",
-        params={"session_id": "../../../../etc"},
-        headers=make_user_headers(),
-    )
-    assert response.status_code == 200
-    assert response.headers.get("content-type") == "application/zip"
-
-
 def test_dag_cycle_detection(
     client: TestClient,
     make_user_headers: UserHeadersFactory,

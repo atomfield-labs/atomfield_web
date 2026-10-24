@@ -18,6 +18,7 @@ from app.events.bus import EventBus
 from app.models.api_key import ApiKey
 from app.models.job import Job
 from app.queue.job_queue import RedisJobQueue
+from app.storage.store import LocalDiskStore
 
 CLOUDFLARE_CLIENT_HEADER = "CF-Connecting-IP"
 UNKNOWN_CLIENT = "unknown"
@@ -58,6 +59,18 @@ async def get_event_bus(request: Request) -> EventBus:
     :rtype: EventBus
     """
     return request.app.state.event_bus
+
+
+async def get_store(request: Request) -> LocalDiskStore:
+    """
+    Provide the file store created at startup.
+
+    :param request: Active FastAPI HTTP request object.
+    :type request: Request
+    :return: Shared store.
+    :rtype: LocalDiskStore
+    """
+    return request.app.state.store
 
 
 async def get_catalog(request: Request) -> Catalog:

@@ -52,6 +52,8 @@ env = [
     "D:REDIS_DB=15",
     "D:ADMIN_API_KEY=af_test_admin_key",
     "D:ARTIFACTS_DIR=.pytest_cache/test-artifacts",
+    "D:STORAGE_DIR=.pytest_cache/test-storage",
+    "D:STORAGE_SIGNING_KEY=test-storage-signing-key",
     # Tests register many keys from one client; the limit itself is
     # tested by lowering it in test_access_control.py.
     "D:KEY_CREATION_LIMIT_PER_HOUR=1000",

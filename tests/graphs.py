@@ -39,6 +39,7 @@ async def build_graph(
         name: Job(
             run_id=run.id,
             script_name="toy_opt",
+            node_key=name,
             pending_parents=parents[name],
             status=JobStatus.WAITING if parents[name] else JobStatus.QUEUED,
         )

@@ -1,116 +1,115 @@
 """
-Job workspaces: one folder per job inside its session folder, with the
-session's uploads copied in and parent workspaces linked under
-``upstream/``.
+Job folders on the agent's machine: one folder per run, one folder per
+job inside it, named after the job's node in the pipeline::
+
+    <artifacts>/runs/<run id>/
+        opt/        water.xyz (downloaded), opt.log, outputs ...
+        md/         md.log, trajectory, upstream/opt -> ../opt
+
+Everything of a job sits together in its folder (inputs, outputs,
+logs). Parents are linked under ``upstream/``, never copied: one run
+runs on one machine, so their folders are right beside.
 
 A retried attempt starts in a fresh folder; the previous attempt's
-folder is renamed ``job_<id>.try<n>``, so a still-running old process
+folder is renamed ``<node>.try<n>``, so a still-running old process
 can never mix its files with the new attempt's.
 """
 
 import os
-import shutil
 from pathlib import Path
 from typing import Any
 
-from app.core.identifiers import sanitize_identifier
+from app.agents.schemas import EXECUTION_LOG, JobAssignment
 
+RUNS_DIR = "runs"
 UPSTREAM_DIR = "upstream"
-EXECUTION_LOG = "execution.log"
 LOG_TAIL_CHARACTERS = 1000
 
 
-def copy_session_inputs(session_dir: Path, job_dir: Path) -> None:
+def require_plain_name(name: str) -> str:
     """
-    Copy the session's uploaded files into one job's workspace.
+    Accept a folder or file name from the server only if it cannot
+    point anywhere else (no separators, not ``.`` or ``..``).
 
-    :param session_dir: Session folder holding uploaded files.
-    :type session_dir: Path
-    :param job_dir: The job's own workspace.
-    :type job_dir: Path
+    :param name: Node key or file name.
+    :type name: str
+    :return: The name, unchanged.
+    :rtype: str
+    :raises ValueError: If the name is a path.
     """
-    if not session_dir.is_dir():
-        return
-    for item in session_dir.iterdir():
-        destination = job_dir / item.name
-        if item.is_file() and not destination.exists():
-            shutil.copy2(item, destination)
+    if name in {"", ".", ".."} or Path(name).name != name or "\\" in name:
+        raise ValueError(f"Not a plain name: {name!r}")
+    return name
+
+
+def run_folder(artifacts_dir: Path, run_id: object) -> Path:
+    """
+    The folder holding every job of one run.
+
+    :param artifacts_dir: Root of all runs on this machine.
+    :type artifacts_dir: Path
+    :param run_id: The run.
+    :type run_id: object
+    :return: ``<artifacts>/runs/<run id>``.
+    :rtype: Path
+    """
+    return artifacts_dir / RUNS_DIR / str(run_id)
 
 
 def link_directory(link: Path, target: Path) -> None:
     """
-    Create a directory symlink unless something already exists there.
+    Create a relative directory symlink unless something already
+    exists there. Relative (``../../opt``), so the run folder can be
+    copied anywhere (rsync to a laptop) with its links still working.
 
     A failed link is skipped: the script then reports the missing file
     itself, with a clearer message than a link error would give.
 
-    :param link: Path of the new symlink.
+    :param link: Where the link goes.
     :type link: Path
-    :param target: Directory it should point to.
+    :param target: Directory it points to.
     :type target: Path
     """
     if link.exists():
         return
+    relative = os.path.relpath(target.resolve(), link.parent.resolve())
     try:
-        link.symlink_to(target.resolve(), target_is_directory=True)
+        link.symlink_to(relative, target_is_directory=True)
     except OSError:
         pass
 
 
-def link_upstream_workspaces(
-    session_dir: Path,
-    job_workspace: Path,
-    parameters: dict[str, Any],
-) -> None:
+def link_parents(run_dir: Path, workspace: Path, parents: list[str]) -> None:
     """
-    Link each parent's workspace, and its own ancestors, under
-    ``upstream/`` so scripts can find upstream files without copies.
+    Link each parent's folder, and its own ancestors, under
+    ``upstream/`` so scripts find upstream files without copies.
 
-    :param session_dir: Session folder holding every job workspace.
-    :type session_dir: Path
-    :param job_workspace: The job's own workspace.
-    :type job_workspace: Path
-    :param parameters: Job parameters with optional ``upstream_results``.
-    :type parameters: dict[str, Any]
+    :param run_dir: The run's folder.
+    :type run_dir: Path
+    :param workspace: This job's folder.
+    :type workspace: Path
+    :param parents: Parent node keys.
+    :type parents: list[str]
     """
-    upstream_results = parameters.get("upstream_results")
-    if not isinstance(upstream_results, dict) or not upstream_results:
+    if not parents:
         return
-    upstream_root = job_workspace / UPSTREAM_DIR
+    upstream_root = workspace / UPSTREAM_DIR
     upstream_root.mkdir(parents=True, exist_ok=True)
-    for parent_id in upstream_results:
-        name = f"job_{sanitize_identifier(str(parent_id))}"
-        parent_workspace = session_dir / name
-        if not parent_workspace.is_dir():
+    for parent in parents:
+        parent_dir = run_dir / require_plain_name(parent)
+        if not parent_dir.is_dir():
             continue
-        link_directory(upstream_root / name, parent_workspace)
-        ancestors = parent_workspace / UPSTREAM_DIR
+        link_directory(upstream_root / parent, parent_dir)
+        ancestors = parent_dir / UPSTREAM_DIR
         for ancestor in ancestors.iterdir() if ancestors.is_dir() else ():
             link_directory(upstream_root / ancestor.name, ancestor)
-
-
-def session_folder(artifacts_dir: Path, parameters: dict[str, Any]) -> Path:
-    """
-    Locate a job's session folder from its stored parameters.
-
-    :param artifacts_dir: Root of all workspaces on this machine.
-    :type artifacts_dir: Path
-    :param parameters: Job parameters with ``pipeline_id``/``user_id``.
-    :type parameters: dict[str, Any]
-    :return: Session folder path.
-    :rtype: Path
-    """
-    folder = artifacts_dir
-    if parameters.get("user_id"):
-        folder /= sanitize_identifier(str(parameters["user_id"]))
-    return folder / sanitize_identifier(str(parameters["pipeline_id"]))
 
 
 def retire_previous_attempt(workspace: Path, attempt: int) -> None:
     """
     Move the last attempt's folder aside so this attempt starts empty.
 
-    :param workspace: The job's workspace path.
+    :param workspace: The job's folder.
     :type workspace: Path
     :param attempt: The attempt about to start.
     :type attempt: int
@@ -121,34 +120,24 @@ def retire_previous_attempt(workspace: Path, attempt: int) -> None:
         )
 
 
-def prepare_workspace(
-    artifacts_dir: Path,
-    parameters: dict[str, Any],
-    job_id: str,
-    attempt: int = 1,
-) -> tuple[str, Path]:
+def prepare_workspace(artifacts_dir: Path, assignment: JobAssignment) -> Path:
     """
-    Create the job's workspace for one attempt inside its session.
+    Create a job's folder for one attempt, with its parents linked.
+    Inputs are downloaded into it afterwards.
 
-    :param artifacts_dir: Root of all workspaces on this machine.
+    :param artifacts_dir: Root of all runs on this machine.
     :type artifacts_dir: Path
-    :param parameters: Job parameters with ``pipeline_id``/``user_id``.
-    :type parameters: dict[str, Any]
-    :param job_id: Job id.
-    :type job_id: str
-    :param attempt: Attempt number; above 1, the old folder is retired.
-    :type attempt: int
-    :return: Pipeline id and the job's workspace path.
-    :rtype: tuple[str, Path]
+    :param assignment: The attempt to prepare for.
+    :type assignment: JobAssignment
+    :return: The job's folder.
+    :rtype: Path
     """
-    parameters = {"pipeline_id": f"job_{job_id}", **parameters}
-    session_dir = session_folder(artifacts_dir, parameters)
-    workspace = session_dir / f"job_{sanitize_identifier(str(job_id))}"
-    retire_previous_attempt(workspace, attempt)
+    run_dir = run_folder(artifacts_dir, assignment.run_id)
+    workspace = run_dir / require_plain_name(assignment.node_key)
+    retire_previous_attempt(workspace, assignment.attempt)
     workspace.mkdir(parents=True, exist_ok=True)
-    copy_session_inputs(session_dir, workspace)
-    link_upstream_workspaces(session_dir, workspace, parameters)
-    return session_dir.name, workspace
+    link_parents(run_dir, workspace, assignment.parents)
+    return workspace
 
 
 def build_environment(pack_source_dir: Path) -> dict[str, str]:

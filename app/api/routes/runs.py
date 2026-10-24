@@ -13,6 +13,7 @@ from app.api.dependencies import (
     get_current_api_key,
     get_event_bus,
     get_owned_job,
+    get_store,
     is_admin_key,
 )
 from app.db.session import AsyncSessionLocal, get_db
@@ -20,13 +21,24 @@ from app.events.bus import EventBus
 from app.events.changes import commit_and_publish
 from app.events.stream import RunStream
 from app.models.api_key import ApiKey
+from app.models.compute_target import ComputeTarget
 from app.models.job import Job
 from app.models.run import Run
+from app.runs.bundles import BundleStatus, bundle_name, request_bundle
 from app.runs.lifecycle import request_cancel
 from app.runs.states import FINAL_STATUSES, JobStatus
-from app.schemas.runs import JobCancelResponse, RunCancelResponse
+from app.schemas.runs import (
+    BundleInfo,
+    FolderInfo,
+    JobCancelResponse,
+    RunCancelResponse,
+)
+from app.storage.keys import bundle_key
+from app.storage.store import ArtifactStore
 
 router = APIRouter(tags=["Runs"])
+# A download link only needs to last until the browser starts.
+DOWNLOAD_LINK_SECONDS = 300
 # Stop proxies from caching the stream or holding frames back.
 STREAM_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 # What a cancel request did, as shown to the caller.
@@ -148,3 +160,119 @@ async def watch_run(
         media_type="text/event-stream",
         headers=STREAM_HEADERS,
     )
+
+
+def folder_info(run: Run) -> FolderInfo | None:
+    """
+    Describe where a run's files stayed, with a copy command when the
+    machine can be reached by rsync.
+
+    :param run: The run.
+    :type run: Run
+    :return: The location, or None if it is not known yet.
+    :rtype: FolderInfo | None
+    """
+    if not run.folder_path:
+        return None
+    command = None
+    if run.folder_address:
+        source = f"{run.folder_address}:{run.folder_path}/"
+        command = f"rsync -avz {source} ./{bundle_name(run)}/"
+    return FolderInfo(
+        path=run.folder_path, address=run.folder_address, copy_command=command
+    )
+
+
+async def describe_bundle(
+    db: AsyncSession,
+    store: ArtifactStore,
+    run: Run,
+) -> BundleInfo:
+    """
+    Everything the UI needs to offer a run's files.
+
+    The folder is shown only for runs whose files stayed on a machine
+    the user can reach; the house agent's folder is ours, not theirs.
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param store: Signs the download link.
+    :type store: ArtifactStore
+    :param run: The run (freshly loaded).
+    :type run: Run
+    :return: Status, link and location.
+    :rtype: BundleInfo
+    """
+    target = await db.get(ComputeTarget, run.target_id)
+    ready = run.bundle_status == BundleStatus.READY
+    link = (
+        store.download_link(
+            bundle_key(run.id), DOWNLOAD_LINK_SECONDS, f"{bundle_name(run)}.zip"
+        )
+        if ready
+        else None
+    )
+    keeps_files = not target.bundles_automatically
+    return BundleInfo(
+        run_id=run.id,
+        finished=run.finished_at is not None,
+        status=run.bundle_status,
+        size_bytes=run.bundle_size,
+        expires_at=run.bundle_expires_at if ready else None,
+        download_url=link,
+        error=run.bundle_error,
+        folder=folder_info(run) if keeps_files else None,
+    )
+
+
+@router.get("/runs/{run_id}/bundle", response_model=BundleInfo)
+async def get_bundle(
+    run: Run = Depends(get_owned_run),
+    db: AsyncSession = Depends(get_db),
+    store: ArtifactStore = Depends(get_store),
+) -> BundleInfo:
+    """
+    How to get a run's files: a download link, or where they are.
+
+    :param run: Run the caller owns.
+    :type run: Run
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param store: Signs the download link.
+    :type store: ArtifactStore
+    :return: Zip status and link, or the folder and copy command.
+    :rtype: BundleInfo
+    """
+    await db.refresh(run)
+    return await describe_bundle(db, store, run)
+
+
+@router.post("/runs/{run_id}/bundle", response_model=BundleInfo)
+async def make_bundle(
+    run: Run = Depends(get_owned_run),
+    db: AsyncSession = Depends(get_db),
+    store: ArtifactStore = Depends(get_store),
+) -> BundleInfo:
+    """
+    Ask for a run's zip ("Make a download link"); the agent holding
+    the files builds and uploads it. Asking again while one is on its
+    way, or ready, changes nothing.
+
+    :param run: Run the caller owns.
+    :type run: Run
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param store: Signs the download link.
+    :type store: ArtifactStore
+    :return: The zip's state after the request.
+    :rtype: BundleInfo
+    :raises HTTPException: 409 while the run is still running.
+    """
+    if run.finished_at is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "The run is still running"
+        )
+    await request_bundle(db, run.id)
+    await db.commit()
+    await db.refresh(run)
+    return await describe_bundle(db, store, run)

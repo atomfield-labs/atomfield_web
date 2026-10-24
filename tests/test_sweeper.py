@@ -14,6 +14,7 @@ from sqlalchemy import func, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.events.bus import InMemoryEventBus
+from app.main import create_store
 from app.models.compute_target import HOUSE_TARGET_ID
 from app.models.job import Job
 from app.queue.job_queue import RedisJobQueue, queue_key
@@ -41,11 +42,13 @@ def with_sweeper(make_session: async_sessionmaker, scenario):
 
     async def wrapper():
         redis = make_redis()
+        store = create_store()
         sweeper = Sweeper(
             make_session,
             RedisJobQueue(redis),
             InMemoryEventBus(),
             redis,
+            store,
             interval_seconds=30,
             lease_timeout=timedelta(minutes=3),
             deadline_grace=timedelta(minutes=10),

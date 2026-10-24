@@ -2,12 +2,8 @@
 HTTP route handlers for simulation jobs and DAG pipelines.
 """
 
-from pathlib import Path
-
 from fastapi import APIRouter, Depends
-from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.background import BackgroundTask
 
 from app.api.dependencies import (
     get_catalog,
@@ -15,6 +11,7 @@ from app.api.dependencies import (
     get_job_queue,
     get_optional_api_key,
     get_owned_job,
+    get_store,
 )
 from app.catalog.catalog import Catalog
 from app.db.session import get_db
@@ -27,13 +24,13 @@ from app.schemas.job import (
     JobSubmitRequest,
     PipelineSubmitRequest,
     PipelineSubmitResponse,
-    TextArtifactsResponse,
 )
 from app.services import job_service
 from app.services.submission_validation import (
     validate_job_request,
     validate_pipeline_request,
 )
+from app.storage.store import ArtifactStore
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
@@ -83,6 +80,7 @@ async def submit_pipeline(
     api_key: ApiKey = Depends(get_current_api_key),
     db: AsyncSession = Depends(get_db),
     queue: RedisJobQueue = Depends(get_job_queue),
+    store: ArtifactStore = Depends(get_store),
     catalog: Catalog = Depends(get_catalog),
 ):
     """
@@ -96,6 +94,8 @@ async def submit_pipeline(
     :type db: AsyncSession
     :param queue: Job queue the root jobs are sent to.
     :type queue: RedisJobQueue
+    :param store: Where attached files are kept for agents.
+    :type store: ArtifactStore
     :param catalog: Task catalog every node is checked against.
     :type catalog: Catalog
     :return: Pipeline submission receipt and job ID mappings.
@@ -106,6 +106,7 @@ async def submit_pipeline(
         db=db,
         request=pipeline_req,
         queue=queue,
+        store=store,
         api_key=api_key,
     )
 
@@ -114,6 +115,7 @@ async def submit_pipeline(
 async def clear_my_jobs(
     api_key: ApiKey = Depends(get_current_api_key),
     db: AsyncSession = Depends(get_db),
+    store: ArtifactStore = Depends(get_store),
 ):
     """
     Delete all of the caller's jobs and files, and nobody else's.
@@ -125,10 +127,14 @@ async def clear_my_jobs(
     :type api_key: ApiKey
     :param db: Asynchronous database session.
     :type db: AsyncSession
+    :param store: The server's file store.
+    :type store: ArtifactStore
     :return: Operation confirmation payload.
     :rtype: dict
     """
-    return await job_service.clear_user_data(db=db, api_key_id=api_key.id)
+    return await job_service.clear_user_data(
+        db=db, store=store, api_key_id=api_key.id
+    )
 
 
 @router.delete("/session/{session_id}")
@@ -136,10 +142,11 @@ async def delete_session(
     session_id: str,
     api_key: ApiKey = Depends(get_current_api_key),
     db: AsyncSession = Depends(get_db),
+    store: ArtifactStore = Depends(get_store),
 ):
     """
-    Delete one of the caller's sessions, including its jobs,
-    dependencies, and artifacts.
+    Delete one of the caller's sessions: its runs, jobs and stored
+    files.
 
     :param session_id: Pipeline session identifier.
     :type session_id: str
@@ -147,11 +154,14 @@ async def delete_session(
     :type api_key: ApiKey
     :param db: Asynchronous database session.
     :type db: AsyncSession
+    :param store: The server's file store.
+    :type store: ArtifactStore
     :return: Operation confirmation payload.
     :rtype: dict
     """
     return await job_service.delete_session(
         db=db,
+        store=store,
         session_id=session_id,
         api_key_id=api_key.id,
     )
@@ -215,6 +225,7 @@ async def get_job_status(job: Job = Depends(get_owned_job)):
 async def get_job_logs(
     job: Job = Depends(get_owned_job),
     db: AsyncSession = Depends(get_db),
+    store: ArtifactStore = Depends(get_store),
 ):
     """
     Fetch live logs and generated artifact file list for a job.
@@ -223,184 +234,11 @@ async def get_job_logs(
     :type job: Job
     :param db: Asynchronous database session.
     :type db: AsyncSession
+    :param store: Where the job's uploaded files are kept.
+    :type store: ArtifactStore
     :return: Dictionary containing logs, status, and artifact listing.
     :rtype: dict
     """
-    return await job_service.get_job_logs_and_artifacts(db=db, job_id=job.id)
-
-
-# -----------------------------------------------------------------------
-# Artifact downloads
-# -----------------------------------------------------------------------
-
-
-def build_zip_response(
-    archive_path: Path,
-    identifier: str,
-) -> FileResponse:
-    """
-    Construct a streamed ZIP FileResponse with background cleanup.
-
-    :param archive_path: Temporary filesystem path of ZIP archive.
-    :type archive_path: Path
-    :param identifier: Session or job identifier for download naming.
-    :type identifier: str
-    :return: Configured FastAPI FileResponse.
-    :rtype: FileResponse
-    """
-    clean_identifier = job_service.sanitize_identifier(identifier)[:16]
-    return FileResponse(
-        archive_path,
-        media_type="application/zip",
-        filename=f"artifacts_{clean_identifier}.zip",
-        background=BackgroundTask(archive_path.unlink, missing_ok=True),
-    )
-
-
-async def artifact_archive_response(
-    *,
-    db: AsyncSession,
-    session_id: str | None,
-    job_id: str | None,
-    api_key: ApiKey,
-) -> FileResponse:
-    """
-    Resolve target workspace and stream it back as a disk-backed ZIP.
-
-    :param db: Asynchronous database session.
-    :type db: AsyncSession
-    :param session_id: Optional pipeline session identifier.
-    :type session_id: str | None
-    :param job_id: Optional job identifier.
-    :type job_id: str | None
-    :param api_key: Authenticated caller.
-    :type api_key: ApiKey
-    :return: Streamed FileResponse binary archive.
-    :rtype: FileResponse
-    """
-    user_id = job_service.user_folder_name(api_key.id)
-    workspace_dir = await job_service.resolve_workspace(
-        db=db,
-        session_id=session_id,
-        job_id=job_id,
-        user_id=user_id,
-    )
-    archive_path = job_service.build_workspace_zip(
-        workspace_dir=workspace_dir,
-        job_id=job_id,
-        session_id=session_id,
-    )
-    target_id = session_id or job_id or "workspace"
-    return build_zip_response(archive_path, target_id)
-
-
-@router.get("/artifacts/download")
-async def download_session_artifacts(
-    session_id: str | None = None,
-    api_key: ApiKey = Depends(get_current_api_key),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Download workspace artifacts for a session as a ZIP archive.
-
-    :param session_id: Optional session identifier string.
-    :type session_id: str | None
-    :param api_key: Authenticated caller.
-    :type api_key: ApiKey
-    :param db: Asynchronous database session.
-    :type db: AsyncSession
-    :return: Streamed ZIP archive file response.
-    :rtype: FileResponse
-    """
-    return await artifact_archive_response(
-        db=db,
-        session_id=session_id,
-        job_id=None,
-        api_key=api_key,
-    )
-
-
-@router.get("/{job_id}/artifacts/download")
-async def download_job_artifacts(
-    job: Job = Depends(get_owned_job),
-    session_id: str | None = None,
-    api_key: ApiKey = Depends(get_current_api_key),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Download workspace artifacts for a job (or its session) as a ZIP.
-
-    :param job: Job the caller owns (any job, for the admin).
-    :type job: Job
-    :param session_id: Optional associated session identifier string.
-    :type session_id: str | None
-    :param api_key: Authenticated caller.
-    :type api_key: ApiKey
-    :param db: Asynchronous database session.
-    :type db: AsyncSession
-    :return: Streamed ZIP archive file response.
-    :rtype: FileResponse
-    """
-    return await artifact_archive_response(
-        db=db,
-        session_id=session_id,
-        job_id=str(job.id),
-        api_key=api_key,
-    )
-
-
-@router.get("/artifacts/text", response_model=TextArtifactsResponse)
-async def get_session_text_artifacts(
-    session_id: str | None = None,
-    api_key: ApiKey = Depends(get_current_api_key),
-    db: AsyncSession = Depends(get_db),
-) -> TextArtifactsResponse:
-    """
-    Fetch readable text artifacts from session workspace.
-
-    :param session_id: Optional session identifier.
-    :type session_id: Optional[str]
-    :param api_key: Authenticated caller.
-    :type api_key: ApiKey
-    :param db: Database session.
-    :type db: AsyncSession
-    :return: Structured text artifacts response.
-    :rtype: TextArtifactsResponse
-    """
-    user_id = job_service.user_folder_name(api_key.id)
-    workspace = await job_service.resolve_workspace(
-        db=db, session_id=session_id, job_id=None, user_id=user_id
-    )
-    files = job_service.read_text_artifacts(workspace)
-    return TextArtifactsResponse(session_id=session_id, files=files)
-
-
-@router.get("/{job_id}/artifacts/text", response_model=TextArtifactsResponse)
-async def get_job_text_artifacts(
-    job: Job = Depends(get_owned_job),
-    session_id: str | None = None,
-    api_key: ApiKey = Depends(get_current_api_key),
-    db: AsyncSession = Depends(get_db),
-) -> TextArtifactsResponse:
-    """
-    Fetch readable text artifacts for a specific job.
-
-    :param job: Job the caller owns (any job, for the admin).
-    :type job: Job
-    :param session_id: Optional session identifier.
-    :type session_id: Optional[str]
-    :param api_key: Authenticated caller.
-    :type api_key: ApiKey
-    :param db: Database session.
-    :type db: AsyncSession
-    :return: Structured text artifacts response.
-    :rtype: TextArtifactsResponse
-    """
-    user_id = job_service.user_folder_name(api_key.id)
-    workspace = await job_service.resolve_workspace(
-        db=db, session_id=session_id, job_id=str(job.id), user_id=user_id
-    )
-    files = job_service.read_text_artifacts(workspace)
-    return TextArtifactsResponse(
-        session_id=session_id, job_id=str(job.id), files=files
+    return await job_service.get_job_logs_and_artifacts(
+        db=db, store=store, job_id=job.id
     )

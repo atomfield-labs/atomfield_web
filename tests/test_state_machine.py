@@ -34,7 +34,9 @@ async def insert_job(session: AsyncSession, status: JobStatus) -> uuid.UUID:
     :rtype: uuid.UUID
     """
     run = await create_run(session, None, f"test_{uuid.uuid4().hex[:8]}")
-    job = Job(run_id=run.id, script_name="toy_opt", status=status)
+    job = Job(
+        run_id=run.id, script_name="toy_opt", node_key="opt", status=status
+    )
     session.add(job)
     await commit_changes(session)
     return job.id

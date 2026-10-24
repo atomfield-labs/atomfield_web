@@ -5,25 +5,37 @@ results. Routes stay thin; this module holds the rules.
 
 import asyncio
 import uuid
+from dataclasses import dataclass
 
-from sqlalchemy import func, tuple_, update
+from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.auth import touch_target
 from app.agents.schemas import (
+    UI_FILE_MAX_BYTES,
+    BundleReport,
     CompletionRequest,
     HeartbeatResponse,
+    InputFile,
     JobAssignment,
     JobReference,
+    PackRequest,
+    UploadLinksRequest,
+    UploadLinksResponse,
 )
 from app.catalog.catalog import Catalog, UnknownTaskError
+from app.catalog.models import TaskDefinition
 from app.events.bus import EventBus
 from app.events.changes import commit_and_publish
 from app.models.compute_target import ComputeTarget
-from app.models.job import Job
+from app.models.job import Job, JobDependency
+from app.models.run import Run
 from app.queue.job_queue import RedisJobQueue
+from app.runs.bundles import record_bundle, take_pack_requests
 from app.runs.lifecycle import Completion, complete_attempt, start_attempt
 from app.runs.states import JobStatus
+from app.storage.keys import job_file_key, upload_folder
+from app.storage.store import ArtifactStore
 
 # Columns an outcome may record; anything else in a report is ignored.
 OUTCOME_FIELDS = {
@@ -31,12 +43,116 @@ OUTCOME_FIELDS = {
     JobStatus.FAILED: ("error_message", "execution_time_seconds"),
     JobStatus.CANCELLED: ("error_message", "execution_time_seconds"),
 }
+# Inputs are fetched right after the claim; an hour is ample.
+INPUT_LINK_SECONDS = 3600
+# Small files are uploaded right before the report.
+UPLOAD_LINK_SECONDS = 600
+
+
+@dataclass(frozen=True, slots=True)
+class AgentServices:
+    """
+    The shared parts the agent API works with, passed as one object
+    instead of one argument each.
+    """
+
+    queue: RedisJobQueue
+    bus: EventBus
+    catalog: Catalog
+    store: ArtifactStore
+
+
+async def input_links(
+    store: ArtifactStore,
+    run: Run,
+    input_files: dict[str, list[str]],
+) -> list[InputFile]:
+    """
+    Sign a download link for every file the job's folder starts with:
+    all files uploaded to the session (as scripts with an optional
+    input expect), plus any declared input. A declared file that is
+    missing gets a link anyway, so the job fails naming it.
+
+    :param store: Where uploads are kept.
+    :type store: ArtifactStore
+    :param run: The job's run (owner and session name the uploads).
+    :type run: Run
+    :param input_files: Port -> declared file names.
+    :type input_files: dict[str, list[str]]
+    :return: One link per distinct file, by name.
+    :rtype: list[InputFile]
+    """
+    folder = upload_folder(run.owner_id, run.session_id)
+    declared = {name for names in input_files.values() for name in names}
+    names = sorted(declared.union(await store.list_names(folder)))
+    return [
+        InputFile(
+            name=name,
+            url=store.download_link(f"{folder}/{name}", INPUT_LINK_SECONDS),
+        )
+        for name in names
+    ]
+
+
+async def parent_keys(db: AsyncSession, job_id: uuid.UUID) -> list[str]:
+    """
+    Folder names of a job's parents.
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param job_id: The child.
+    :type job_id: uuid.UUID
+    :return: Parent node keys, sorted.
+    :rtype: list[str]
+    """
+    query = (
+        select(Job.node_key)
+        .join(JobDependency, JobDependency.upstream_id == Job.id)
+        .where(JobDependency.downstream_id == job_id)
+        .order_by(Job.node_key)
+    )
+    return list((await db.execute(query)).scalars())
+
+
+async def build_assignment(
+    db: AsyncSession,
+    store: ArtifactStore,
+    job: Job,
+    task: TaskDefinition,
+) -> JobAssignment:
+    """
+    Describe a started attempt for its agent.
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param store: Where the inputs are kept.
+    :type store: ArtifactStore
+    :param job: The job, just started.
+    :type job: Job
+    :param task: Its catalog task.
+    :type task: TaskDefinition
+    :return: The assignment.
+    :rtype: JobAssignment
+    """
+    run = await db.get(Run, job.run_id)
+    input_files = job.input_files or {}
+    return JobAssignment(
+        job_id=job.id,
+        attempt=job.attempt,
+        run_id=job.run_id,
+        node_key=job.node_key,
+        parents=await parent_keys(db, job.id),
+        task=task,
+        parameters=job.parameters or {},
+        input_files=input_files,
+        inputs=await input_links(store, run, input_files),
+        deadline_at=job.deadline_at,
+    )
 
 
 async def try_start(
     db: AsyncSession,
-    bus: EventBus,
-    catalog: Catalog,
+    services: AgentServices,
     target: ComputeTarget,
     job_id: uuid.UUID,
 ) -> JobAssignment | None:
@@ -49,10 +165,8 @@ async def try_start(
 
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param bus: Where the changes are announced.
-    :type bus: EventBus
-    :param catalog: Loaded task catalog.
-    :type catalog: Catalog
+    :param services: Queue, bus, catalog and store.
+    :type services: AgentServices
     :param target: Calling agent's target.
     :type target: ComputeTarget
     :param job_id: Job id from the queue.
@@ -64,35 +178,25 @@ async def try_start(
     if job is None or job.status != JobStatus.QUEUED:
         return None
     try:
-        task = catalog.get(job.script_name)
+        task = services.catalog.get(job.script_name)
     except UnknownTaskError:
         message = f"Task {job.script_name!r} is no longer in the catalog"
         await complete_attempt(
             db, job_id, JobStatus.FAILED, error_message=message
         )
-        await commit_and_publish(db, bus)
+        await commit_and_publish(db, services.bus)
         return None
     walltime = task.resources.walltime_minutes
     started = await start_attempt(db, job_id, walltime, agent_id=target.id)
-    await commit_and_publish(db, bus)
+    await commit_and_publish(db, services.bus)
     if started is None:
         return None
-    return JobAssignment(
-        job_id=started.id,
-        attempt=started.attempt,
-        run_id=started.run_id,
-        task=task,
-        parameters=started.parameters or {},
-        input_files=started.input_files or {},
-        deadline_at=started.deadline_at,
-    )
+    return await build_assignment(db, services.store, started, task)
 
 
 async def claim_next(
     db: AsyncSession,
-    queue: RedisJobQueue,
-    bus: EventBus,
-    catalog: Catalog,
+    services: AgentServices,
     target: ComputeTarget,
     wait_seconds: float,
 ) -> JobAssignment | None:
@@ -101,12 +205,8 @@ async def claim_next(
 
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param queue: Job queue.
-    :type queue: RedisJobQueue
-    :param bus: Where the changes are announced.
-    :type bus: EventBus
-    :param catalog: Loaded task catalog.
-    :type catalog: Catalog
+    :param services: Queue, bus, catalog and store.
+    :type services: AgentServices
     :param target: Calling agent's target.
     :type target: ComputeTarget
     :param wait_seconds: Longest time to wait.
@@ -119,10 +219,10 @@ async def claim_next(
     loop = asyncio.get_running_loop()
     give_up_at = loop.time() + wait_seconds
     while (remaining := give_up_at - loop.time()) > 0:
-        job_id = await queue.pop(target.id, remaining)
+        job_id = await services.queue.pop(target.id, remaining)
         if job_id is None:
             return None
-        assignment = await try_start(db, bus, catalog, target, job_id)
+        assignment = await try_start(db, services, target, job_id)
         if assignment is not None:
             return assignment
     return None
@@ -130,14 +230,18 @@ async def claim_next(
 
 async def record_heartbeat(
     db: AsyncSession,
+    store: ArtifactStore,
     target: ComputeTarget,
     reports: list[JobReference],
 ) -> HeartbeatResponse:
     """
-    Renew the leases an agent still holds, and tell it what to stop.
+    Renew the leases an agent still holds, tell it what to stop, and
+    hand it any runs waiting to be zipped.
 
     :param db: Asynchronous database session.
     :type db: AsyncSession
+    :param store: Signs upload links for zips.
+    :type store: ArtifactStore
     :param target: Calling agent's target.
     :type target: ComputeTarget
     :param reports: Attempts the agent says it is running.
@@ -160,9 +264,11 @@ async def record_heartbeat(
             .returning(Job.id, Job.attempt, Job.cancel_requested)
         )
         rows = (await db.execute(statement)).all()
+    packs = await take_pack_requests(db, store, target.id)
     await db.commit()
     alive = {(job_id, attempt) for job_id, attempt, _ in rows}
     return HeartbeatResponse(
+        pack=packs,
         cancel=[
             JobReference(job_id=job_id, attempt=attempt)
             for job_id, attempt, cancel_requested in rows
@@ -178,8 +284,7 @@ async def record_heartbeat(
 
 async def report_completion(
     db: AsyncSession,
-    queue: RedisJobQueue,
-    bus: EventBus,
+    services: AgentServices,
     target: ComputeTarget,
     job_id: uuid.UUID,
     report: CompletionRequest,
@@ -189,10 +294,8 @@ async def report_completion(
 
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param queue: Job queue.
-    :type queue: RedisJobQueue
-    :param bus: Where the changes are announced.
-    :type bus: EventBus
+    :param services: Queue, bus, catalog and store.
+    :type services: AgentServices
     :param target: Calling agent's target.
     :type target: ComputeTarget
     :param job_id: Finished job.
@@ -207,16 +310,139 @@ async def report_completion(
     values = {
         field: getattr(report, field) for field in OUTCOME_FIELDS[outcome]
     }
+    files = [card.model_dump() for card in report.files]
     completion = await complete_attempt(
         db,
         job_id,
         outcome,
         expected_attempt=report.attempt,
         expected_agent=target.id,
+        output_files=files,
         **values,
     )
-    await commit_and_publish(db, bus)
+    if completion and report.folder:
+        await record_folder(db, completion.job.run_id, report)
+    await commit_and_publish(db, services.bus)
     if completion and completion.ready:
         ready_ids = [child.id for child in completion.ready]
-        await queue.add(target.id, ready_ids)
+        await services.queue.add(target.id, ready_ids)
     return completion
+
+
+async def record_folder(
+    db: AsyncSession,
+    run_id: uuid.UUID,
+    report: CompletionRequest,
+) -> None:
+    """
+    Remember where the run's folder is on the agent's machine.
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param run_id: The run.
+    :type run_id: uuid.UUID
+    :param report: A completion that carries the folder location.
+    :type report: CompletionRequest
+    """
+    await db.execute(
+        update(Run)
+        .where(Run.id == run_id)
+        .values(
+            folder_path=report.folder.path,
+            folder_address=report.folder.address,
+        )
+    )
+
+
+async def upload_links(
+    db: AsyncSession,
+    services: AgentServices,
+    target: ComputeTarget,
+    job_id: uuid.UUID,
+    request: UploadLinksRequest,
+) -> UploadLinksResponse | None:
+    """
+    Sign one upload link per small file of a finished attempt, if that
+    attempt (on this agent) still holds the job.
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param services: Queue, bus, catalog and store.
+    :type services: AgentServices
+    :param target: Calling agent's target.
+    :type target: ComputeTarget
+    :param job_id: The job whose files these are.
+    :type job_id: uuid.UUID
+    :param request: Attempt and file names.
+    :type request: UploadLinksRequest
+    :return: The links, or None if the attempt no longer holds the job.
+    :rtype: UploadLinksResponse | None
+    :raises InvalidKeyError: If a name is not a plain file name.
+    """
+    query = select(Job.run_id).where(
+        Job.id == job_id,
+        Job.status == JobStatus.RUNNING,
+        Job.attempt == request.attempt,
+        Job.agent_id == target.id,
+    )
+    run_id = (await db.execute(query)).scalar_one_or_none()
+    if run_id is None:
+        return None
+    links = {
+        name: services.store.upload_link(
+            job_file_key(run_id, job_id, name),
+            UI_FILE_MAX_BYTES,
+            UPLOAD_LINK_SECONDS,
+        )
+        for name in request.names
+    }
+    return UploadLinksResponse(links=links, max_bytes=UI_FILE_MAX_BYTES)
+
+
+async def hand_out_packs(
+    db: AsyncSession,
+    store: ArtifactStore,
+    target: ComputeTarget,
+) -> list[PackRequest]:
+    """
+    Take the target's requested zips (e.g. the run a report just
+    finished) so the reply can carry them without waiting for the next
+    heartbeat.
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param store: Signs upload links for zips.
+    :type store: ArtifactStore
+    :param target: Calling agent's target.
+    :type target: ComputeTarget
+    :return: Runs to zip and upload.
+    :rtype: list[PackRequest]
+    """
+    packs = await take_pack_requests(db, store, target.id)
+    await db.commit()
+    return packs
+
+
+async def report_bundle(
+    db: AsyncSession,
+    target: ComputeTarget,
+    run_id: uuid.UUID,
+    report: BundleReport,
+) -> bool:
+    """
+    Record how packing a run ended.
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param target: Calling agent's target.
+    :type target: ComputeTarget
+    :param run_id: The run.
+    :type run_id: uuid.UUID
+    :param report: The outcome.
+    :type report: BundleReport
+    :return: False if this target was not packing the run.
+    :rtype: bool
+    """
+    recorded = await record_bundle(db, target.id, run_id, report)
+    await db.commit()
+    return recorded

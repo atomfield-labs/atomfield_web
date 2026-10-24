@@ -51,18 +51,3 @@ def install_fake_pack(root: Path) -> Path:
     (package / "__init__.py").write_text("")
     (package / "opt_driver.py").write_text(FAKE_DRIVER)
     return root / "pack"
-
-
-def create_session(artifacts_dir: Path) -> Path:
-    """
-    Create session ``user_1/session_1`` holding an uploaded water.xyz.
-
-    :param artifacts_dir: Root of job workspaces.
-    :type artifacts_dir: Path
-    :return: The session folder.
-    :rtype: Path
-    """
-    session = artifacts_dir / "user_1" / "session_1"
-    session.mkdir(parents=True)
-    (session / "water.xyz").write_text(WATER_XYZ)
-    return session

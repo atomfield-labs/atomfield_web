@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -47,9 +48,15 @@ class Job(Base):
     """
 
     __tablename__ = "jobs"
+    # A job's folder is runs/<run>/<node_key>: names must not repeat.
+    __table_args__ = (
+        UniqueConstraint("run_id", "node_key", name="jobs_run_id_node_key_key"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     script_name = Column(String(255), nullable=False, index=True)
+    # The node's name in its pipeline, cleaned for use as a folder name.
+    node_key = Column(String(80), nullable=False)
     status = Column(
         String(50),
         nullable=False,
@@ -82,6 +89,9 @@ class Job(Base):
     # Input port name -> file names in the session workspace.
     input_files = Column(JSONB, nullable=True)
     output_data = Column(JSONB, nullable=True)
+    # Every file the job left: path, size, sha256, and whether a copy
+    # is in the store (the small files the UI shows).
+    output_files = Column(JSONB, nullable=True)
     error_message = Column(Text, nullable=True)
 
     api_key_id = Column(

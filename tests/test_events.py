@@ -92,10 +92,13 @@ def test_a_failure_announces_every_descendant(
 
     first, *rest = asyncio.run(scenario())
     assert first == ("A", JobStatus.FAILED, 1)
-    assert sorted(rest) == [
-        ("B", JobStatus.UPSTREAM_FAILED, 2),
-        ("C", JobStatus.UPSTREAM_FAILED, 3),
+    # One UPDATE marks both descendants; Postgres returns its rows in
+    # no fixed order, so which of them gets 2 and which 3 may vary.
+    assert sorted((name, status) for name, status, _ in rest) == [
+        ("B", JobStatus.UPSTREAM_FAILED),
+        ("C", JobStatus.UPSTREAM_FAILED),
     ]
+    assert sorted(seq for *_, seq in rest) == [2, 3]
 
 
 def test_only_the_final_state_of_a_job_is_announced(

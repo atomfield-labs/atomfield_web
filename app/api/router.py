@@ -13,6 +13,7 @@ from app.api.routes.files import router as files_router
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.mock import router as mock_router
 from app.api.routes.runs import router as runs_router
+from app.api.routes.storage import router as storage_router
 
 api_router = APIRouter(prefix="/api")
 
@@ -23,6 +24,7 @@ api_router.include_router(catalog_router)
 api_router.include_router(jobs_router)
 api_router.include_router(runs_router)
 api_router.include_router(files_router)
+api_router.include_router(storage_router)
 api_router.include_router(mock_router)
 
 __all__ = ["api_router"]

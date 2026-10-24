@@ -50,6 +50,13 @@ class Settings(BaseSettings):
 
     # --- Workspaces and Filesystem ---
     ARTIFACTS_DIR: str = str(_BASE_DIR / "artifacts")
+    # Files kept by the server: uploads, UI files, run zips.
+    STORAGE_DIR: str = str(_BASE_DIR / "storage")
+    # Signs storage links; the same value in every API process.
+    STORAGE_SIGNING_KEY: str | None = None
+    # Largest run zip uploaded, and how long a zip is kept.
+    BUNDLE_MAX_BYTES: int = 1024**3
+    BUNDLE_KEEP_DAYS: int = 7
 
     # --- Task catalog, written by the domain pack (afscripts) ---
     CATALOG_PATH: str = str(_BASE_DIR / "scripts_repo" / "catalog.json")

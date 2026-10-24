@@ -2,15 +2,21 @@
 Helpers that create, reset and drop test-only stores.
 
 Every destructive helper checks its target first: database names must
-end in ``_test`` and Redis must not be database 0. One wrong
-environment variable must never be able to wipe development data.
+end in ``_test``, Redis must not be database 0, and the storage folder
+must sit inside ``.pytest_cache``. One wrong environment variable must
+never be able to wipe development data.
 """
+
+import shutil
+from pathlib import Path
 
 import asyncpg
 from redis.asyncio import Redis
 from sqlalchemy.engine import make_url
 
 from app.core.config import settings
+
+TEST_STORAGE_PARENT = ".pytest_cache"
 
 TEST_DATABASE_SUFFIX = "_test"
 MAINTENANCE_DATABASE = "postgres"
@@ -122,3 +128,19 @@ async def reset_test_stores() -> None:
     """
     await recreate_test_database()
     await flush_test_redis()
+    empty_test_storage()
+
+
+def empty_test_storage() -> None:
+    """
+    Delete the storage folder reserved for tests.
+
+    :raises RuntimeError: If the folder is not inside ``.pytest_cache``.
+    """
+    folder = Path(settings.STORAGE_DIR).resolve()
+    if TEST_STORAGE_PARENT not in folder.parts:
+        raise RuntimeError(
+            f"Refusing to empty {folder}: test storage must be inside "
+            f"{TEST_STORAGE_PARENT}"
+        )
+    shutil.rmtree(folder, ignore_errors=True)

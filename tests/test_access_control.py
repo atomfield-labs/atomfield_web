@@ -3,11 +3,8 @@ Access control: every user sees and deletes only their own work, and
 key creation is rate-limited per client address.
 """
 
-import io
 import uuid
-import zipfile
 from collections.abc import Callable
-from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,7 +12,7 @@ from starlette.requests import Request
 
 from app.api.dependencies import client_address
 from app.core.config import settings
-from app.services.job_service import user_folder_name
+from app.storage.keys import upload_key
 
 UserHeadersFactory = Callable[..., dict[str, str]]
 XYZ_WATER = "3\nwater\nO 0 0 0\nH 0.76 0.59 0\nH -0.76 0.59 0\n"
@@ -51,12 +48,7 @@ def job_paths(job_id: str) -> list[str]:
     :rtype: list[str]
     """
     base = f"/api/jobs/{job_id}"
-    return [
-        base,
-        f"{base}/logs",
-        f"{base}/artifacts/download",
-        f"{base}/artifacts/text",
-    ]
+    return [base, f"{base}/logs"]
 
 
 def count_jobs(client: TestClient, headers: dict[str, str]) -> int:
@@ -130,62 +122,6 @@ def test_admin_can_read_any_job(
     assert response.status_code == 200
 
 
-def test_session_files_are_scoped_to_their_owner(
-    client: TestClient,
-    admin_headers: dict[str, str],
-    make_user_headers: UserHeadersFactory,
-):
-    """
-    A stranger cannot read or download another user's session files,
-    not even by naming the owner's folder as the session id.
-
-    :param client: In-process API client.
-    :type client: TestClient
-    :param admin_headers: Headers carrying the administrator key.
-    :type admin_headers: dict[str, str]
-    :param make_user_headers: Factory registering a user key.
-    :type make_user_headers: UserHeadersFactory
-    """
-    owner_label = f"files_owner_{uuid.uuid4().hex[:6]}"
-    owner = make_user_headers(owner_label)
-    stranger = make_user_headers("files_stranger")
-    file_name = f"{owner_label}.xyz"
-    client.post(
-        "/api/files/upload",
-        files={"file": (file_name, XYZ_WATER, "text/plain")},
-        data={"session_id": "shared_name"},
-        headers=owner,
-    )
-    users = client.get("/api/admin/users", headers=admin_headers).json()
-    owner_id = next(
-        u["id"] for u in users["users"] if u["label"] == owner_label
-    )
-
-    def can_download(session_id: str, headers: dict[str, str]) -> bool:
-        """
-        Check whether the owner's file is in a caller's session zip.
-
-        :param session_id: Session to download.
-        :type session_id: str
-        :param headers: Caller's key headers.
-        :type headers: dict[str, str]
-        :return: True if the zip contains the owner's file.
-        :rtype: bool
-        """
-        response = client.get(
-            "/api/jobs/artifacts/download",
-            params={"session_id": session_id},
-            headers=headers,
-        )
-        archive = zipfile.ZipFile(io.BytesIO(response.content))
-        return any(file_name in name for name in archive.namelist())
-
-    owner_folder = user_folder_name(UUID(owner_id))
-    assert can_download("shared_name", owner)
-    assert not can_download("shared_name", stranger)
-    assert not can_download(owner_folder, stranger)
-
-
 def test_clear_deletes_only_the_callers_jobs(
     client: TestClient,
     make_user_headers: UserHeadersFactory,
@@ -213,29 +149,47 @@ def test_clear_deletes_only_the_callers_jobs(
 
 def test_delete_session_cannot_touch_other_users(
     client: TestClient,
+    admin_headers: dict[str, str],
     make_user_headers: UserHeadersFactory,
 ):
     """
-    Deleting a session by name deletes only the caller's session.
+    Deleting a session by name deletes only the caller's session: the
+    stranger's delete leaves the owner's job and uploaded file; the
+    owner's delete removes both.
 
     :param client: In-process API client.
     :type client: TestClient
+    :param admin_headers: Headers carrying the administrator key.
+    :type admin_headers: dict[str, str]
     :param make_user_headers: Factory registering a user key.
     :type make_user_headers: UserHeadersFactory
     """
-    owner = make_user_headers("session_owner")
+    owner_label = f"session_owner_{uuid.uuid4().hex[:6]}"
+    owner = make_user_headers(owner_label)
     stranger = make_user_headers("session_stranger")
     payload = {
         "session_id": "same_session_name",
         "nodes": [{"ui_id": "a", "script_name": "toy_opt", "parameters": {}}],
         "edges": [],
+        "files": [{"filename": "water.xyz", "content": XYZ_WATER}],
     }
     client.post("/api/jobs/pipeline/submit", json=payload, headers=owner)
+    users = client.get("/api/admin/users", headers=admin_headers).json()
+    owner_id = next(
+        user["id"] for user in users["users"] if user["label"] == owner_label
+    )
+    store = client.app.state.store
+    upload = upload_key(uuid.UUID(owner_id), "same_session_name", "water.xyz")
 
     path = "/api/jobs/session/same_session_name"
     assert client.delete(path).status_code == 401
     assert client.delete(path, headers=stranger).status_code == 200
     assert count_jobs(client, owner) == 1
+    assert store.existing_path(upload) is not None
+
+    assert client.delete(path, headers=owner).status_code == 200
+    assert count_jobs(client, owner) == 0
+    assert store.existing_path(upload) is None
 
 
 def test_key_creation_is_rate_limited(

@@ -30,6 +30,7 @@ from app.events.bus import EventBus
 from app.events.models import JobEvent
 from app.models.job import Job
 from app.models.run import Run
+from app.runs.bundles import close_run_if_finished
 from app.runs.states import JobStatus
 
 CHANGES_KEY = "atomfield.job_changes"
@@ -130,7 +131,8 @@ async def number_changes(
     changes: Sequence[JobChange],
 ) -> list[JobEvent]:
     """
-    Number changes run by run.
+    Number changes run by run, and close each run whose jobs are now
+    all final.
 
     :param session: Session holding the transaction.
     :type session: AsyncSession
@@ -147,6 +149,9 @@ async def number_changes(
     # them can never each hold a run the other is waiting for.
     for run_id in sorted(by_run):
         events += await number_run_changes(session, run_id, by_run[run_id])
+        # The run's row is locked now: checking here, never earlier,
+        # is what lets the last finished job close the run.
+        await close_run_if_finished(session, run_id)
     return events
 
 

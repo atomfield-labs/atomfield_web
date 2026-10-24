@@ -25,6 +25,8 @@ from app.events.redis_bus import RedisEventBus
 from app.models.api_key import ApiKey
 from app.queue.job_queue import RedisJobQueue
 from app.scheduler.sweeper import Sweeper
+from app.storage.links import LinkSigner
+from app.storage.store import LocalDiskStore
 
 ADMIN_QUOTA = 999999
 
@@ -45,6 +47,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Load (and validate) the catalog first: a broken catalog must stop
     # the server here, not fail someone's submission later.
     app.state.catalog = Catalog.from_path(Path(settings.CATALOG_PATH))
+    app.state.store = create_store()
 
     async with AsyncSessionLocal() as session:
         await provision_admin_key(session)
@@ -64,6 +67,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 await sweeper_task
         await app.state.redis.aclose()
         await engine.dispose()
+
+
+def create_store() -> LocalDiskStore:
+    """
+    Open the server's file store.
+
+    :return: Store in ``STORAGE_DIR``, signing with
+        ``STORAGE_SIGNING_KEY``.
+    :rtype: LocalDiskStore
+    :raises RuntimeError: If no signing key is configured: links signed
+        with a made-up key would break across processes and restarts.
+    """
+    if not settings.STORAGE_SIGNING_KEY:
+        raise RuntimeError("Set STORAGE_SIGNING_KEY (openssl rand -hex 32)")
+    signer = LinkSigner(settings.STORAGE_SIGNING_KEY)
+    return LocalDiskStore(Path(settings.STORAGE_DIR), signer)
 
 
 async def provision_admin_key(session: AsyncSession) -> None:
@@ -110,6 +129,7 @@ def start_sweeper(app: FastAPI) -> asyncio.Task:
         app.state.job_queue,
         app.state.event_bus,
         app.state.redis,
+        app.state.store,
         interval_seconds=settings.SWEEP_INTERVAL_SECONDS,
         lease_timeout=timedelta(seconds=settings.LEASE_TIMEOUT_SECONDS),
         deadline_grace=timedelta(seconds=settings.DEADLINE_GRACE_SECONDS),

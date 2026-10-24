@@ -3,11 +3,8 @@ Business logic and persistence layer for jobs and DAG pipelines.
 """
 
 import logging
-import os
 import shutil
-import tempfile
 import uuid as _uuid
-import zipfile
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -15,233 +12,35 @@ from redis.asyncio import Redis
 from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.schemas import EXECUTION_LOG
 from app.core.config import settings
-from app.core.identifiers import sanitize_identifier
-from app.models import ApiKey, Job, JobDependency
+from app.core.identifiers import (
+    assign_node_keys,
+    sanitize_identifier,
+    user_folder_name,
+)
+from app.models import ApiKey, Job, JobDependency, Run
 from app.queue.job_queue import RedisJobQueue
 from app.runs.lifecycle import create_run, dispatch
 from app.runs.states import JobStatus
 from app.schemas.job import (
     JobSubmitRequest,
     PipelineSubmitRequest,
-    TextArtifactItem,
 )
+from app.storage.keys import (
+    RUNS,
+    UPLOADS,
+    job_file_key,
+    owner_uploads_folder,
+    run_files_folder,
+    upload_folder,
+    upload_key,
+)
+from app.storage.store import ArtifactStore, InvalidKeyError
 
 ARTIFACTS_DIR = Path(settings.ARTIFACTS_DIR)
 DEFAULT_MAX_LOG_BYTES = 131072
 logger = logging.getLogger(__name__)
-
-
-def user_folder_name(api_key_id: _uuid.UUID) -> str:
-    """
-    Name the workspace folder (and ``user_id`` parameter) of one user.
-
-    :param api_key_id: Owner's API key id.
-    :type api_key_id: _uuid.UUID
-    :return: Folder name such as ``user_1a2b3c4d5e6f``.
-    :rtype: str
-    """
-    return f"user_{api_key_id.hex[:12]}"
-
-
-# -----------------------------------------------------------------------
-# Workspace path safety
-# -----------------------------------------------------------------------
-
-
-def _is_within(base_dir: Path, target_path: Path) -> bool:
-    """
-    Verify target path resolves strictly inside base directory.
-
-    :param base_dir: Permitted root directory boundary.
-    :type base_dir: Path
-    :param target_path: Candidate filesystem path.
-    :type target_path: Path
-    :return: True if target is safely within base_dir.
-    :rtype: bool
-    """
-    return target_path.resolve().is_relative_to(base_dir.resolve())
-
-
-def resolve_safe_directory(
-    base_dir: Path,
-    identifier: str | None,
-) -> Path | None:
-    """
-    Sanitize identifier and resolve validated directory inside base path.
-
-    :param base_dir: Permitted root directory.
-    :type base_dir: Path
-    :param identifier: Subdirectory identifier.
-    :type identifier: Optional[str]
-    :return: Resolved directory Path if existing and safe, else None.
-    :rtype: Optional[Path]
-    """
-    if not identifier:
-        return None
-    target_path = (base_dir / sanitize_identifier(identifier)).resolve()
-    if _is_within(base_dir, target_path) and target_path.is_dir():
-        return target_path
-    return None
-
-
-async def _resolve_pipeline_job_workspace(
-    db: AsyncSession,
-    job_id: str,
-    base_dir: Path,
-) -> Path | None:
-    """
-    Retrieve pipeline workspace directory associated with job metadata.
-
-    :param db: Asynchronous database session.
-    :type db: AsyncSession
-    :param job_id: Unique job UUID string.
-    :type job_id: str
-    :param base_dir: Base directory for artifact workspaces.
-    :type base_dir: Path
-    :return: Workspace Path if found, else None.
-    :rtype: Optional[Path]
-    """
-    try:
-        job = await get_job_by_id(db, _uuid.UUID(job_id))
-        pipeline_id = (job.parameters or {}).get("pipeline_id")
-        return resolve_safe_directory(base_dir, pipeline_id)
-    except (ValueError, HTTPException):
-        return None
-
-
-async def resolve_workspace(
-    db: AsyncSession,
-    session_id: str | None = None,
-    job_id: str | None = None,
-    base_dir: Path = ARTIFACTS_DIR,
-    user_id: str | None = None,
-) -> Path | None:
-    """
-    Resolve artifact workspace directory for a session or job.
-
-    :param db: Asynchronous database session.
-    :type db: AsyncSession
-    :param session_id: Optional pipeline session identifier.
-    :type session_id: Optional[str]
-    :param job_id: Optional job identifier.
-    :type job_id: Optional[str]
-    :param base_dir: Root storage directory.
-    :type base_dir: Path
-    :param user_id: Optional user identifier string.
-    :type user_id: Optional[str]
-    :return: Resolved path if existing, else None.
-    :rtype: Optional[Path]
-    """
-    # A caller only ever sees their own folder, even before it exists:
-    # falling back to the shared root would expose other users' folders.
-    target_base = base_dir
-    if user_id:
-        target_base = base_dir / sanitize_identifier(str(user_id))
-
-    if job_id:
-        try:
-            job = await get_job_by_id(db, _uuid.UUID(job_id))
-            job_user = (job.parameters or {}).get("user_id")
-            if job_user:
-                user_folder = base_dir / sanitize_identifier(str(job_user))
-                if user_folder.is_dir():
-                    target_base = user_folder
-        except (ValueError, HTTPException):
-            pass
-
-    if session_id and not job_id:
-        session_workspace = resolve_safe_directory(target_base, session_id)
-        if session_workspace:
-            return session_workspace
-    if not job_id:
-        return None
-    pipeline_dir = await _resolve_pipeline_job_workspace(
-        db, job_id, target_base
-    )
-    if pipeline_dir:
-        job_subdir = pipeline_dir / f"job_{sanitize_identifier(job_id)}"
-        if job_subdir.is_dir():
-            return job_subdir
-        return pipeline_dir
-    fallback_dir = resolve_safe_directory(target_base, f"job_{job_id}")
-    return fallback_dir or resolve_safe_directory(target_base, job_id)
-
-
-def _compress_directory_files(
-    archive: zipfile.ZipFile,
-    workspace_dir: Path | None,
-) -> int:
-    """
-    Write all workspace directory files recursively into zip archive.
-
-    :param archive: Open writable ZipFile handle.
-    :type archive: zipfile.ZipFile
-    :param workspace_dir: Directory containing artifact files.
-    :type workspace_dir: Optional[Path]
-    :return: Number of files added to the archive.
-    :rtype: int
-    """
-    if not workspace_dir or not workspace_dir.is_dir():
-        return 0
-    added_count = 0
-    for file_path in workspace_dir.rglob("*"):
-        if file_path.is_file():
-            relative_name = str(file_path.relative_to(workspace_dir))
-            archive.write(file_path, arcname=relative_name)
-            added_count += 1
-    return added_count
-
-
-def _write_empty_archive_manifest(
-    archive: zipfile.ZipFile,
-    job_id: str | None,
-    session_id: str | None,
-) -> None:
-    """
-    Inject informational manifest into empty zip archive.
-
-    :param archive: Open writable ZipFile handle.
-    :type archive: zipfile.ZipFile
-    :param job_id: Associated job identifier.
-    :type job_id: Optional[str]
-    :param session_id: Associated session identifier.
-    :type session_id: Optional[str]
-    """
-    manifest_lines = [
-        "AtomField Workspace Artifacts Archive\n",
-        f"Job: {job_id or 'N/A'}",
-        f"Session: {session_id or 'N/A'}",
-        "Status: No output artifacts generated yet or execution pending.\n",
-    ]
-    archive.writestr("README.txt", "\n".join(manifest_lines))
-
-
-def build_workspace_zip(
-    workspace_dir: Path | None,
-    job_id: str | None = None,
-    session_id: str | None = None,
-) -> Path:
-    """
-    Compress workspace files into a disk-backed temporary ZIP archive.
-
-    :param workspace_dir: Directory containing artifacts.
-    :type workspace_dir: Optional[Path]
-    :param job_id: Identifier of target job.
-    :type job_id: Optional[str]
-    :param session_id: Identifier of target session.
-    :type session_id: Optional[str]
-    :return: Path to generated ZIP archive on disk.
-    :rtype: Path
-    """
-    file_descriptor, archive_name = tempfile.mkstemp(suffix=".zip")
-    os.close(file_descriptor)
-    archive_path = Path(archive_name)
-    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
-        file_count = _compress_directory_files(archive, workspace_dir)
-        if file_count == 0:
-            _write_empty_archive_manifest(archive, job_id, session_id)
-    return archive_path
 
 
 # -----------------------------------------------------------------------
@@ -286,6 +85,7 @@ async def create_job(
         id=job_id,
         run_id=run.id,
         script_name=request.script_name,
+        node_key=sanitize_identifier(request.script_name),
         parameters=params,
         input_files=request.inputs or None,
         status=JobStatus.QUEUED,
@@ -484,51 +284,34 @@ def _validate_pipeline_graph(request: PipelineSubmitRequest) -> dict[str, int]:
     return _calculate_root_in_degrees(request.nodes, request.edges)
 
 
-def _write_workspace_attachments(workspace_dir: Path, files) -> None:
+async def store_attachments(
+    store: ArtifactStore,
+    files,
+    api_key: ApiKey | None,
+    session_id: str,
+) -> None:
     """
-    Write submitted attachment files into the provisioned workspace.
+    Keep the files attached to a submission in the store, where agents
+    fetch them through signed links.
 
-    :param workspace_dir: Provisioned workspace path.
-    :type workspace_dir: Path
-    :param files: Attached file list with filename and content.
-    :type files: list
+    :param store: The server's file store.
+    :type store: ArtifactStore
+    :param files: Attachments (name and text content).
+    :type files: list[PipelineSubmitFile] | None
+    :param api_key: Submitting user.
+    :type api_key: ApiKey | None
+    :param session_id: Session the files belong to.
+    :type session_id: str
+    :raises HTTPException: 400 for a file name that is not plain.
     """
+    owner_id = api_key.id if api_key else None
     for attachment in files or []:
-        clean_name = Path(attachment.filename).name
-        file_path = (workspace_dir / clean_name).resolve()
-        if not _is_within(workspace_dir, file_path):
-            error_msg = f"Invalid file path for '{attachment.filename}'"
-            raise HTTPException(status_code=400, detail=error_msg)
-        file_path.write_text(attachment.content, encoding="utf-8")
-
-
-def _provision_pipeline_workspace(
-    request: PipelineSubmitRequest,
-    api_key: ApiKey | None = None,
-) -> str:
-    """
-    Provision workspace folder and write attached input files.
-
-    :param request: Pipeline submission request.
-    :type request: PipelineSubmitRequest
-    :param api_key: Optional authenticated user API key.
-    :type api_key: Optional[ApiKey]
-    :return: Sanitized pipeline identifier.
-    :rtype: str
-    """
-    raw_session_id = request.session_id or f"pipeline_{_uuid.uuid4().hex[:8]}"
-    pipeline_id = sanitize_identifier(raw_session_id)
-    if api_key:
-        user_str = sanitize_identifier(user_folder_name(api_key.id))
-        workspace_dir = (ARTIFACTS_DIR / user_str / pipeline_id).resolve()
-    else:
-        workspace_dir = (ARTIFACTS_DIR / pipeline_id).resolve()
-
-    if not _is_within(ARTIFACTS_DIR, workspace_dir):
-        raise HTTPException(status_code=400, detail="Invalid workspace path.")
-    workspace_dir.mkdir(parents=True, exist_ok=True)
-    _write_workspace_attachments(workspace_dir, request.files)
-    return pipeline_id
+        try:
+            key = upload_key(owner_id, session_id, attachment.filename)
+        except InvalidKeyError:
+            detail = f"Invalid file name {attachment.filename!r}"
+            raise HTTPException(status_code=400, detail=detail) from None
+        await store.write(key, attachment.content.encode("utf-8"))
 
 
 async def create_blocked_pipeline_jobs(
@@ -556,6 +339,7 @@ async def create_blocked_pipeline_jobs(
         sanitize_identifier(user_folder_name(api_key.id)) if api_key else None
     )
     run = await create_run(db, api_key.id if api_key else None, pipeline_id)
+    node_keys = assign_node_keys([node.ui_id for node in nodes])
     for node in nodes:
         params = dict(node.parameters or {})
         params["pipeline_id"] = pipeline_id
@@ -563,6 +347,7 @@ async def create_blocked_pipeline_jobs(
             params["user_id"] = user_str
         new_job = Job(
             script_name=node.script_name,
+            node_key=node_keys[node.ui_id],
             parameters=params,
             input_files=node.inputs or None,
             run_id=run.id,
@@ -651,8 +436,8 @@ def record_parents(
     ui_to_db_map: dict[str, _uuid.UUID],
 ) -> None:
     """
-    Note each job's parents in ``upstream_results``, which the worker
-    uses to link parent workspaces under ``upstream/``.
+    Note each job's parents in ``upstream_results``, for people reading
+    the job. Agents get parents from the dependency table instead.
 
     :param db_jobs: List of (ui_id, Job) tuples.
     :type db_jobs: list[tuple[str, Job]]
@@ -707,6 +492,7 @@ async def submit_pipeline(
     db: AsyncSession,
     request: PipelineSubmitRequest,
     queue: RedisJobQueue,
+    store: ArtifactStore,
     api_key: ApiKey | None = None,
 ) -> dict:
     """
@@ -735,7 +521,10 @@ async def submit_pipeline(
             raise HTTPException(status_code=429, detail=error_msg)
         api_key.quota_used += needed_quota
 
-    pipeline_id = _provision_pipeline_workspace(request, api_key)
+    pipeline_id = sanitize_identifier(
+        request.session_id or f"pipeline_{_uuid.uuid4().hex[:8]}"
+    )
+    await store_attachments(store, request.files, api_key, pipeline_id)
     db_jobs, ui_to_db_map = await _persist_pipeline_jobs(
         db, request, pipeline_id, api_key
     )
@@ -753,79 +542,28 @@ async def submit_pipeline(
 # -----------------------------------------------------------------------
 
 
-def _tail_log_file(
-    filepath: Path,
-    max_bytes: int = DEFAULT_MAX_LOG_BYTES,
-) -> str:
+async def read_job_log(store: ArtifactStore, job: Job) -> str:
     """
-    Read tail of a log file up to max_bytes without loading entire file.
+    The end of a finished job's log, from the copy its agent uploaded:
+    the script's own log if there is one, else the command's output.
 
-    :param filepath: Target log file path.
-    :type filepath: Path
-    :param max_bytes: Maximum byte window to read from tail.
-    :type max_bytes: int
-    :return: Decoded trailing string content.
+    :param store: Where uploaded job files are kept.
+    :type store: ArtifactStore
+    :param job: The job.
+    :type job: Job
+    :return: Up to the last ``DEFAULT_MAX_LOG_BYTES`` of the log, or ""
+        while the job runs (nothing is uploaded until it ends).
     :rtype: str
     """
-    try:
-        with open(filepath, "rb") as log_file:
-            log_file.seek(0, os.SEEK_END)
-            total_size = log_file.tell()
-            log_file.seek(max(0, total_size - max_bytes))
-            raw_bytes = log_file.read()
-            return raw_bytes.decode("utf-8", errors="ignore")
-    except (OSError, UnicodeDecodeError):
-        return ""
-
-
-def _find_candidate_logs(
-    workspace_dir: Path | None,
-    script_name: str,
-    job_id: _uuid.UUID,
-) -> str:
-    """
-    Search candidate log files in workspace and return first non-empty tail.
-
-    :param workspace_dir: Resolved workspace path.
-    :type workspace_dir: Optional[Path]
-    :param script_name: Simulation script filename.
-    :type script_name: str
-    :param job_id: Primary key UUID of job.
-    :type job_id: _uuid.UUID
-    :return: Extracted tail log string.
-    :rtype: str
-    """
-    if not workspace_dir:
-        return ""
-    stripped_name = script_name.replace(".py", "")
-    candidates = [
-        workspace_dir / "nanoreactor.log",
-        workspace_dir / f"{stripped_name}.log",
-        workspace_dir / f"{job_id}.log",
-        workspace_dir / "execution.log",
-    ]
-    for log_path in candidates:
-        if log_path.exists() and log_path.is_file():
-            tail_content = _tail_log_file(log_path)
-            if tail_content.strip():
-                return tail_content
+    uploaded = {
+        card["path"] for card in job.output_files or [] if card["uploaded"]
+    }
+    for name in (f"{job.script_name}.log", EXECUTION_LOG):
+        if name in uploaded:
+            data = await store.read(job_file_key(job.run_id, job.id, name))
+            if data:
+                return data[-DEFAULT_MAX_LOG_BYTES:].decode("utf-8", "ignore")
     return ""
-
-
-def _collect_workspace_artifacts(workspace_dir: Path | None) -> list[str]:
-    """
-    Enumerate all file names present in workspace directory.
-
-    :param workspace_dir: Resolved workspace path.
-    :type workspace_dir: Optional[Path]
-    :return: Sorted list of filenames.
-    :rtype: list[str]
-    """
-    if not workspace_dir:
-        return []
-    return sorted(
-        item.name for item in workspace_dir.iterdir() if item.is_file()
-    )
 
 
 def _format_job_logs_payload(
@@ -858,37 +596,26 @@ def _format_job_logs_payload(
 
 async def get_job_logs_and_artifacts(
     db: AsyncSession,
+    store: ArtifactStore,
     job_id: _uuid.UUID,
 ) -> dict:
     """
-    Fetch tailed log output and artifact file listing for a job.
+    A job's state, the end of its log, and the files it left.
 
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param job_id: Primary key UUID of job.
-    :type job_id: _uuid.UUID
-    :return: Dictionary containing logs, status, and artifact listing.
+    :param store: Where uploaded job files are kept.
+    :type store: ArtifactStore
+    :param job_id: The job.
+    :type job_id: uuid.UUID
+    :return: Status, log tail, file names and outputs.
     :rtype: dict
     """
     job = await get_job_by_id(db, job_id)
-    pipeline_id = (job.parameters or {}).get("pipeline_id", f"job_{job.id}")
-    user_id = (job.parameters or {}).get("user_id")
-    if user_id:
-        user_base = ARTIFACTS_DIR / sanitize_identifier(str(user_id))
-        workspace_dir = resolve_safe_directory(user_base, pipeline_id)
-    else:
-        workspace_dir = resolve_safe_directory(ARTIFACTS_DIR, pipeline_id)
-
-    clean_job_id = sanitize_identifier(str(job.id))
-    job_dir = (
-        workspace_dir / f"job_{clean_job_id}"
-        if workspace_dir and (workspace_dir / f"job_{clean_job_id}").is_dir()
-        else workspace_dir
-    )
-    logs = _find_candidate_logs(job_dir, job.script_name, job.id)
+    logs = await read_job_log(store, job)
     if not logs and job.error_message:
         logs = f"[ERROR]\n{job.error_message}"
-    artifacts = _collect_workspace_artifacts(job_dir)
+    artifacts = [card["path"] for card in job.output_files or []]
     return _format_job_logs_payload(job, logs, artifacts)
 
 
@@ -899,26 +626,31 @@ async def get_job_logs_and_artifacts(
 
 async def clear_all_data(
     db: AsyncSession,
+    store: ArtifactStore,
     redis_queue: Redis | None = None,
 ) -> dict:
     """
-    Purge all job records, dependency edges, and workspace artifacts.
+    Purge every run, job and stored file (operator wipe).
+
+    The house agent's run folders live on this server too and go with
+    them; folders on users' own machines are theirs and never touched.
 
     :param db: Asynchronous database session.
     :type db: AsyncSession
+    :param store: The server's file store.
+    :type store: ArtifactStore
     :param redis_queue: Optional Redis client to flush.
     :type redis_queue: Optional[Redis]
-    :return: Summary dictionary of cleared resources.
+    :return: Summary.
     :rtype: dict
     """
-    await db.execute(text("TRUNCATE TABLE job_dependencies, jobs CASCADE;"))
+    await db.execute(
+        text("TRUNCATE TABLE job_dependencies, jobs, runs CASCADE;")
+    )
     await db.commit()
-    if ARTIFACTS_DIR.exists():
-        for item in ARTIFACTS_DIR.iterdir():
-            if item.is_dir():
-                shutil.rmtree(item, ignore_errors=True)
-            elif item.is_file():
-                item.unlink(missing_ok=True)
+    for folder in (UPLOADS, RUNS):
+        await store.delete_folder(folder)
+    shutil.rmtree(ARTIFACTS_DIR, ignore_errors=True)
     if redis_queue:
         try:
             await redis_queue.flushdb()
@@ -926,7 +658,7 @@ async def clear_all_data(
             logger.warning("Failed to flush redis queue: %s", queue_exc)
     return {
         "status": "success",
-        "message": "All database records, jobs, and artifacts cleared.",
+        "message": "All runs, jobs and stored files cleared.",
     }
 
 
@@ -937,7 +669,7 @@ async def delete_jobs(db: AsyncSession, job_ids: list[_uuid.UUID]) -> None:
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :param job_ids: Jobs to delete.
-    :type job_ids: list[_uuid.UUID]
+    :type job_ids: list[uuid.UUID]
     """
     if not job_ids:
         return
@@ -950,177 +682,96 @@ async def delete_jobs(db: AsyncSession, job_ids: list[_uuid.UUID]) -> None:
     await db.commit()
 
 
-def remove_user_workspace(
-    api_key_id: _uuid.UUID,
-    session_id: str | None = None,
-) -> None:
+async def delete_runs(
+    db: AsyncSession,
+    store: ArtifactStore,
+    run_ids: list[_uuid.UUID],
+) -> int:
     """
-    Delete one user's workspace folder, or one session inside it.
+    Delete runs with their jobs, edges and stored files (UI files and
+    zips). Files on the machines that ran them stay: they are the
+    user's.
 
-    Only the owner's folder is touched, never another user's folder
-    that happens to hold a session with the same name.
-
-    :param api_key_id: Owner's API key id.
-    :type api_key_id: _uuid.UUID
-    :param session_id: Session to delete; None deletes the whole folder.
-    :type session_id: str | None
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param store: The server's file store.
+    :type store: ArtifactStore
+    :param run_ids: Runs to delete.
+    :type run_ids: list[uuid.UUID]
+    :return: How many jobs went with them.
+    :rtype: int
     """
-    target = ARTIFACTS_DIR / user_folder_name(api_key_id)
-    if session_id is not None:
-        target = target / sanitize_identifier(session_id)
-    if target.is_dir() and _is_within(ARTIFACTS_DIR, target):
-        shutil.rmtree(target, ignore_errors=True)
+    query = select(Job.id).where(Job.run_id.in_(run_ids))
+    job_ids = list((await db.execute(query)).scalars())
+    await delete_jobs(db, job_ids)
+    await db.execute(delete(Run).where(Run.id.in_(run_ids)))
+    await db.commit()
+    for run_id in run_ids:
+        await store.delete_folder(run_files_folder(run_id))
+    return len(job_ids)
 
 
 async def delete_session(
     db: AsyncSession,
+    store: ArtifactStore,
     session_id: str,
     api_key_id: _uuid.UUID,
 ) -> dict:
     """
-    Delete one of the caller's sessions: its jobs, edges and files.
+    Delete one of the caller's sessions: its runs, jobs and files.
+
+    Only the caller's runs and uploads are touched, never another
+    user's that happen to share the session's name.
 
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param session_id: Pipeline session identifier.
+    :param store: The server's file store.
+    :type store: ArtifactStore
+    :param session_id: Session to delete.
     :type session_id: str
-    :param api_key_id: Caller's API key id; only their jobs are deleted.
-    :type api_key_id: _uuid.UUID
-    :return: Summary dictionary of operation.
+    :param api_key_id: The caller.
+    :type api_key_id: uuid.UUID
+    :return: Summary.
     :rtype: dict
     """
     clean_session_id = sanitize_identifier(session_id)
-    query = select(Job.id).where(
-        Job.parameters.op("->>")("pipeline_id") == clean_session_id,
-        Job.api_key_id == api_key_id,
+    query = select(Run.id).where(
+        Run.owner_id == api_key_id, Run.session_id == clean_session_id
     )
-    job_ids = list((await db.execute(query)).scalars())
-    await delete_jobs(db, job_ids)
-    remove_user_workspace(api_key_id, clean_session_id)
+    run_ids = list((await db.execute(query)).scalars())
+    deleted = await delete_runs(db, store, run_ids)
+    await store.delete_folder(upload_folder(api_key_id, clean_session_id))
     return {
         "status": "success",
-        "message": (
-            f"Session {clean_session_id} and {len(job_ids)} jobs deleted."
-        ),
+        "message": f"Session {clean_session_id} and {deleted} jobs deleted.",
     }
 
 
-async def clear_user_data(db: AsyncSession, api_key_id: _uuid.UUID) -> dict:
+async def clear_user_data(
+    db: AsyncSession,
+    store: ArtifactStore,
+    api_key_id: _uuid.UUID,
+) -> dict:
     """
-    Delete all of one user's jobs and workspace files.
+    Delete all of one user's runs, jobs and stored files.
 
     Other users' data and the shared queue are left alone; wiping the
     whole system is an operator task (``python -m app.cli wipe``).
 
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param api_key_id: Caller's API key id.
-    :type api_key_id: _uuid.UUID
-    :return: Summary dictionary of operation.
+    :param store: The server's file store.
+    :type store: ArtifactStore
+    :param api_key_id: The caller.
+    :type api_key_id: uuid.UUID
+    :return: Summary.
     :rtype: dict
     """
-    query = select(Job.id).where(Job.api_key_id == api_key_id)
-    job_ids = list((await db.execute(query)).scalars())
-    await delete_jobs(db, job_ids)
-    remove_user_workspace(api_key_id)
+    query = select(Run.id).where(Run.owner_id == api_key_id)
+    run_ids = list((await db.execute(query)).scalars())
+    deleted = await delete_runs(db, store, run_ids)
+    await store.delete_folder(owner_uploads_folder(api_key_id))
     return {
         "status": "success",
-        "message": f"Deleted your {len(job_ids)} jobs and their files.",
+        "message": f"Deleted your {deleted} jobs and their files.",
     }
-
-
-def _load_single_text_artifact(
-    file_path: Path,
-    max_bytes: int = 500_000,
-) -> TextArtifactItem | None:
-    """
-    Read content of a single text artifact within size limit.
-
-    :param file_path: File path on disk.
-    :type file_path: Path
-    :param max_bytes: Maximum size allowed for loading in memory.
-    :type max_bytes: int
-    :return: Text artifact item if readable, else None.
-    :rtype: Optional[TextArtifactItem]
-    """
-    try:
-        size = file_path.stat().st_size
-        if size > max_bytes:
-            return None
-        content = file_path.read_text(encoding="utf-8", errors="replace")
-        return TextArtifactItem(
-            filename=file_path.name,
-            content=content,
-            size_bytes=size,
-        )
-    except (OSError, UnicodeError):
-        return None
-
-
-def _collect_workspace_text_files(workspace_dir: Path) -> list[Path]:
-    """
-    Gather text-compatible files located in workspace.
-
-    :param workspace_dir: Directory to scan for text artifacts.
-    :type workspace_dir: Path
-    :return: List of candidate text file paths.
-    :rtype: list[Path]
-    """
-    allowed_exts = {".txt", ".log", ".json", ".out", ".csv"}
-    matched: list[Path] = []
-    for candidate in workspace_dir.glob("**/*"):
-        if candidate.is_file() and candidate.suffix.lower() in allowed_exts:
-            matched.append(candidate)
-    return sorted(matched, key=lambda p: p.name)
-
-
-def _default_nanoreactor_artifacts() -> list[TextArtifactItem]:
-    """
-    Provide fallback realistic artifacts for nanoreactor demo runs.
-
-    :return: List of pre-generated text artifacts.
-    :rtype: list[TextArtifactItem]
-    """
-    from app.api.routes.mock import (
-        DEFAULT_NANOREACTOR_LOG,
-        DEFAULT_NANOREACTOR_NETWORK_JSON,
-        DEFAULT_NANOREACTOR_SUMMARY_TXT,
-    )
-
-    return [
-        TextArtifactItem(
-            filename="reaction_network.json",
-            content=DEFAULT_NANOREACTOR_NETWORK_JSON,
-            size_bytes=len(DEFAULT_NANOREACTOR_NETWORK_JSON),
-        ),
-        TextArtifactItem(
-            filename="summary.txt",
-            content=DEFAULT_NANOREACTOR_SUMMARY_TXT,
-            size_bytes=len(DEFAULT_NANOREACTOR_SUMMARY_TXT),
-        ),
-        TextArtifactItem(
-            filename="nanoreactor.log",
-            content=DEFAULT_NANOREACTOR_LOG,
-            size_bytes=len(DEFAULT_NANOREACTOR_LOG),
-        ),
-    ]
-
-
-def read_text_artifacts(workspace_dir: Path | None) -> list[TextArtifactItem]:
-    """
-    Read text files from workspace or return default simulation artifacts.
-
-    :param workspace_dir: Directory containing simulation artifacts.
-    :type workspace_dir: Optional[Path]
-    :return: List of loaded text artifacts.
-    :rtype: list[TextArtifactItem]
-    """
-    if not workspace_dir or not workspace_dir.is_dir():
-        return _default_nanoreactor_artifacts()
-    candidates = _collect_workspace_text_files(workspace_dir)
-    items: list[TextArtifactItem] = []
-    for path in candidates:
-        loaded = _load_single_text_artifact(path)
-        if loaded:
-            items.append(loaded)
-    return items if items else _default_nanoreactor_artifacts()

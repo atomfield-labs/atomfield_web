@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+TRUE_WORDS = {"1", "true", "yes"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +34,13 @@ class AgentConfig:
     :type heartbeat_seconds: float
     :param claim_wait_seconds: Long-poll wait per claim.
     :type claim_wait_seconds: float
+    :param ssh_address: What a user types before ':' to rsync results
+        from this machine (``you@login.hpc.edu``); None where results
+        are local (a laptop) or uploaded (the house agent).
+    :type ssh_address: str | None
+    :param delete_after_upload: Remove a run's folder once its zip is
+        uploaded (the house agent: our disk, not the user's).
+    :type delete_after_upload: bool
     """
 
     api_url: str
@@ -44,6 +52,8 @@ class AgentConfig:
     state_file: Path = Path.home() / ".atomfield" / "agent-state.json"
     heartbeat_seconds: float = 30.0
     claim_wait_seconds: float = 25.0
+    ssh_address: str | None = None
+    delete_after_upload: bool = False
 
     @classmethod
     def from_environment(cls) -> "AgentConfig":
@@ -70,4 +80,9 @@ class AgentConfig:
             state_file=Path(
                 environ.get("ATOMFIELD_AGENT_STATE", defaults.state_file)
             ),
+            ssh_address=environ.get("ATOMFIELD_SSH_ADDRESS") or None,
+            delete_after_upload=environ.get(
+                "ATOMFIELD_DELETE_AFTER_UPLOAD", ""
+            ).lower()
+            in TRUE_WORDS,
         )

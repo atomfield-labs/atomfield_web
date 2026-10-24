@@ -4,7 +4,15 @@ SQLAlchemy ORM model for compute targets: the machines agents run on.
 
 import uuid
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.base import Base
@@ -36,4 +44,7 @@ class ComputeTarget(Base):
     token_hash = Column(String(64), nullable=True, unique=True)
     max_jobs = Column(Integer, nullable=False, default=4)
     last_seen_at = Column(DateTime(timezone=True), nullable=True)
+    # Zip and upload each finished run. Only for machines users cannot
+    # reach themselves (ours); elsewhere results stay where they ran.
+    bundles_automatically = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

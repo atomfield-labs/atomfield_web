@@ -31,8 +31,11 @@ from app.events.changes import commit_and_publish
 from app.models.job import Job
 from app.models.run import Run
 from app.queue.job_queue import RedisJobQueue
+from app.runs.bundles import expire_bundles, requeue_stuck_packs
 from app.runs.lifecycle import complete_attempt, lease_expired, requeue_lost
 from app.runs.states import JobStatus
+from app.storage.keys import bundle_key
+from app.storage.store import ArtifactStore
 
 logger = logging.getLogger(__name__)
 LOCK_KEY = "sweeper:lock"
@@ -49,6 +52,8 @@ class SweepReport:
     cancelled: int = 0
     failed: int = 0
     overdue: int = 0
+    expired: int = 0
+    repacked: int = 0
 
     @property
     def changed_anything(self) -> bool:
@@ -58,7 +63,14 @@ class SweepReport:
         :return: True if any count is non-zero.
         :rtype: bool
         """
-        counts = (self.retried, self.cancelled, self.failed, self.overdue)
+        counts = (
+            self.retried,
+            self.cancelled,
+            self.failed,
+            self.overdue,
+            self.expired,
+            self.repacked,
+        )
         return any(counts)
 
 
@@ -73,6 +85,7 @@ class Sweeper:
         queue: RedisJobQueue,
         bus: EventBus,
         redis: Redis,
+        store: ArtifactStore,
         interval_seconds: float,
         lease_timeout: timedelta,
         deadline_grace: timedelta,
@@ -88,6 +101,8 @@ class Sweeper:
         :type bus: EventBus
         :param redis: Redis client for the round lock.
         :type redis: Redis
+        :param store: Where expired zips are deleted from.
+        :type store: ArtifactStore
         :param interval_seconds: Time between passes.
         :type interval_seconds: float
         :param lease_timeout: Silence after which a job counts as lost.
@@ -99,6 +114,7 @@ class Sweeper:
         self.queue = queue
         self.bus = bus
         self.redis = redis
+        self.store = store
         self.interval_seconds = interval_seconds
         self.lease_timeout = lease_timeout
         self.deadline_grace = deadline_grace
@@ -145,7 +161,35 @@ class Sweeper:
         report.resent = await self.resend_queued()
         await self.handle_lost_leases(report)
         report.overdue = await self.fail_overdue()
+        report.expired = await self.delete_expired_bundles()
+        report.repacked = await self.requeue_silent_packing()
         return report
+
+    async def delete_expired_bundles(self) -> int:
+        """
+        Mark zips past their keep time expired, then delete their files.
+
+        :return: How many expired.
+        :rtype: int
+        """
+        async with self.session_factory() as session:
+            expired = await expire_bundles(session)
+            await session.commit()
+        for run_id in expired:
+            await self.store.delete(bundle_key(run_id))
+        return len(expired)
+
+    async def requeue_silent_packing(self) -> int:
+        """
+        Request again the zips whose agent went quiet while packing.
+
+        :return: How many were requested again.
+        :rtype: int
+        """
+        async with self.session_factory() as session:
+            count = await requeue_stuck_packs(session)
+            await session.commit()
+        return count
 
     async def resend_queued(self) -> int:
         """
