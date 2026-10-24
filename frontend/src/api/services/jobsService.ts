@@ -3,6 +3,7 @@ import type {
   PipelineSubmitRequest,
   PipelineSubmitResponse,
   JobLogsResponse,
+  BundleInfo,
 } from '../../types/api';
 
 export const jobsService = {
@@ -16,26 +17,6 @@ export const jobsService = {
 
   async getJobLogs(jobId: string): Promise<JobLogsResponse> {
     const response = await apiClient.get<JobLogsResponse>(`/api/jobs/${jobId}/logs`);
-    return response.data;
-  },
-
-  async downloadJobArtifacts(jobId: string, sessionId: string): Promise<Blob> {
-    const response = await apiClient.get(`/api/jobs/${jobId}/artifacts/download`, {
-      params: { session_id: sessionId },
-      responseType: 'blob',
-    });
-    return new Blob([response.data], { type: 'application/zip' });
-  },
-
-  async getTextArtifacts(params?: { jobId?: string; sessionId?: string }): Promise<{
-    session_id?: string;
-    job_id?: string;
-    files: Array<{ filename: string; content: string; size_bytes: number }>;
-  }> {
-    const url = params?.jobId ? `/api/jobs/${params.jobId}/artifacts/text` : '/api/jobs/artifacts/text';
-    const response = await apiClient.get(url, {
-      params: { session_id: params?.sessionId },
-    });
     return response.data;
   },
 
@@ -57,6 +38,22 @@ export const jobsService = {
   async deleteSession(sessionId: string): Promise<{ status: string; message: string }> {
     const response = await apiClient.delete<{ status: string; message: string }>(
       `/api/jobs/session/${sessionId}`
+    );
+    return response.data;
+  },
+
+  // How to get a run's files: a download link, or where they are.
+  async getBundle(runId: string): Promise<BundleInfo> {
+    const response = await apiClient.get<BundleInfo>(
+      `/api/runs/${runId}/bundle`
+    );
+    return response.data;
+  },
+
+  // Ask for a run's zip ("Make a download link").
+  async requestBundle(runId: string): Promise<BundleInfo> {
+    const response = await apiClient.post<BundleInfo>(
+      `/api/runs/${runId}/bundle`
     );
     return response.data;
   },

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Trash2, Download, RotateCcw, FileText, Upload } from 'lucide-react';
-import { jobsService } from '../../api/services';
 import { triggerFileDownload } from '../../utils/downloadHelper';
+import RunFilesButton from './RunFilesButton';
 import YamlParamEditor from './YamlParamEditor';
 import CH4Icon from '../icons/CH4Icon';
 import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
@@ -23,6 +23,8 @@ interface InspectorDrawerProps {
   onDelete?: () => void;
   onUpdateParameters?: (newParams: Record<string, any>) => void;
   defaultParameters?: Record<string, any>;
+  // The run the node belongs to, for downloading its files.
+  runId?: string | null;
 }
 
 export default function InspectorDrawer({
@@ -31,6 +33,7 @@ export default function InspectorDrawer({
   onDelete,
   onUpdateParameters,
   defaultParameters,
+  runId,
 }: InspectorDrawerProps) {
   const [cachedNode, setCachedNode] = useState(propNode);
   const [isMounted, setIsMounted] = useState(!!propNode);
@@ -40,7 +43,6 @@ export default function InspectorDrawer({
 
   // Tabs for script nodes: params | logs | artifacts
   const [scriptTab, setScriptTab] = useState<'params' | 'logs' | 'artifacts'>('params');
-  const [isDownloading, setIsDownloading] = useState(false);
   const { taskById } = useTaskDefinitions();
 
   const handleClose = useCallback(() => {
@@ -142,30 +144,6 @@ export default function InspectorDrawer({
   const handleResetDefaults = () => {
     if (onUpdateParameters && hasDefaults) {
       onUpdateParameters({ ...fallbackDefaults });
-    }
-  };
-
-  const handleDownloadArtifacts = async () => {
-    try {
-      setIsDownloading(true);
-      const jobId = node.job_id || node.data?.job_id || node.id || node.ui_id || '';
-      const sessionId =
-        node.pipeline_id ||
-        node.data?.pipeline_id ||
-        node.session_id ||
-        node.parameters?.pipeline_id ||
-        '';
-      const blob = await jobsService.downloadJobArtifacts(jobId, sessionId);
-      const cleanName = (isStructureNode ? filename || 'structure' : scriptName || 'workspace').replace(
-        /[^a-zA-Z0-9_-]/g,
-        '_'
-      );
-      triggerFileDownload(blob, `artifacts_${cleanName}.zip`, 'application/zip');
-    } catch (err) {
-      console.error('Failed to download artifacts:', err);
-      alert('Artifacts are not available yet.');
-    } finally {
-      setIsDownloading(false);
     }
   };
 
@@ -436,20 +414,7 @@ export default function InspectorDrawer({
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleDownloadArtifacts}
-              disabled={isDownloading}
-              title="Download artifacts as compressed ZIP"
-              className="py-1.5 px-3 border border-slate-200 bg-white hover:bg-orange-50 hover:border-orange-200 text-slate-700 hover:text-orange-600 text-xs font-semibold rounded-lg transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-            >
-              {isDownloading ? (
-                <span className="w-3.5 h-3.5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Download className="w-3.5 h-3.5 text-orange-500" />
-              )}
-              <span>Download ZIP</span>
-            </button>
+            <RunFilesButton runId={runId ?? null} />
 
             <button
               type="button"

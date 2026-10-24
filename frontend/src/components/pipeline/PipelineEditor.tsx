@@ -342,6 +342,7 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
             onClose={() => setSelectedNode(null)}
             onDelete={handleDeleteNode}
             onUpdateParameters={handleUpdateParameters}
+            runId={activeRunId}
           />
         </ReactFlowProvider>
       </div>

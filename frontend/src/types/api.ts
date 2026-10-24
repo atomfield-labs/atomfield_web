@@ -272,3 +272,30 @@ export interface RunSnapshot {
   seq: number;
   jobs: JobState[];
 }
+
+// Where a run's files stayed (a cluster or laptop), with a command
+// ready to copy them when the machine can be reached by rsync.
+export interface FolderInfo {
+  path: string;
+  address?: string | null;
+  copy_command?: string | null;
+}
+
+// How to get a run's files: a zip download, or where they are.
+export interface BundleInfo {
+  run_id: string;
+  finished: boolean;
+  status:
+    | 'none'
+    | 'requested'
+    | 'packing'
+    | 'ready'
+    | 'too_big'
+    | 'failed'
+    | 'expired';
+  size_bytes?: number | null;
+  expires_at?: string | null;
+  download_url?: string | null;
+  error?: string | null;
+  folder?: FolderInfo | null;
+}
