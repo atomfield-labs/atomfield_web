@@ -30,6 +30,8 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
   const [activeJobMap, setActiveJobMap] = useState<Record<string, string>>({});
   const [activePipelineId, setActivePipelineId] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  // Where to run; null means the shared AtomField server.
+  const [targetId, setTargetId] = useState<string | null>(null);
 
   const currentGraphRef = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] });
   const deleteNodeRef = useRef<((nodeId: string) => void) | null>(null);
@@ -178,6 +180,7 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
       alert(errorMessage || 'Invalid pipeline configuration.');
       return;
     }
+    payload.target_id = targetId;
 
     setIsDeploying(true);
     setSaveStatus('saving');
@@ -302,6 +305,8 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
         quota={quota}
         isDeploying={isDeploying}
         onDeploy={handleDeploy}
+        targetId={targetId}
+        onTargetChange={setTargetId}
       />
 
       <div className="flex flex-1 overflow-hidden relative">

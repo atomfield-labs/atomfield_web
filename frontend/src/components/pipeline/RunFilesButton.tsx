@@ -133,6 +133,14 @@ export default function RunFilesButton({ runId }: { runId: string | null }) {
                 The files stayed on the machine that ran them, in{' '}
                 <code className="font-mono break-all">{folder.path}</code>
               </p>
+              {info?.made_with && (
+                <p className="text-slate-500">
+                  Made with{' '}
+                  <code className="font-mono">
+                    {[info.made_with, ...(info.data_packs ?? [])].join(' · ')}
+                  </code>
+                </p>
+              )}
               {folder.copy_command && (
                 <div className="flex items-start gap-2">
                   <code className={COMMAND}>

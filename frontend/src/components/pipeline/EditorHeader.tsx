@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { authService } from '../../api/services/authService';
 import ApiKeyModal from '../auth/ApiKeyModal';
+import RunOnPicker from './RunOnPicker';
 import type { SaveStatus } from '../../types/api';
 
 interface EditorHeaderProps {
@@ -9,6 +10,9 @@ interface EditorHeaderProps {
   quota?: number | null;
   isDeploying: boolean;
   onDeploy: () => void;
+  // Where the pipeline runs; null means the shared AtomField server.
+  targetId: string | null;
+  onTargetChange: (targetId: string | null) => void;
 }
 
 export default function EditorHeader({
@@ -17,6 +21,8 @@ export default function EditorHeader({
   quota: _quota,
   isDeploying,
   onDeploy,
+  targetId,
+  onTargetChange,
 }: EditorHeaderProps) {
   const isNanoreactor =
     activeSessionId === 'nanoreactor' || activeSessionId.startsWith('nanoreactor_');
@@ -122,6 +128,10 @@ export default function EditorHeader({
               <span className="w-2 h-2 rounded-full bg-red-500" />
               Disconnected
             </button>
+          )}
+
+          {isAuthenticated && (
+            <RunOnPicker value={targetId} onChange={onTargetChange} />
           )}
 
           <button

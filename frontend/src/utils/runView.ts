@@ -30,7 +30,7 @@ export class RunView {
   applySnapshot(snapshot: RunSnapshot): StatusChange[] {
     this.jobIds = snapshot.jobs.map((job) => job.job_id);
     return snapshot.jobs.flatMap((job) =>
-      this.apply(job.job_id, job.status, snapshot.seq, true)
+      this.apply(job.job_id, job.status, snapshot.seq, true, job.started)
     );
   }
 
@@ -38,7 +38,13 @@ export class RunView {
    * Take one live event.
    */
   applyEvent(event: JobEvent): StatusChange[] {
-    return this.apply(event.job_id, event.status, event.seq, false);
+    return this.apply(
+      event.job_id,
+      event.status,
+      event.seq,
+      false,
+      event.started
+    );
   }
 
   /**
@@ -50,12 +56,13 @@ export class RunView {
     jobId: string,
     serverStatus: ServerJobStatus,
     seq: number,
-    fromSnapshot: boolean
+    fromSnapshot: boolean,
+    started = true
   ): StatusChange[] {
     const last = this.shownSeq.get(jobId) ?? -1;
     if (fromSnapshot ? seq < last : seq <= last) return [];
     this.shownSeq.set(jobId, seq);
-    const status = toDisplayStatus(serverStatus);
+    const status = toDisplayStatus(serverStatus, started);
     if (this.shown.get(jobId) === status) return [];
     this.shown.set(jobId, status);
     return [{ jobId, status }];

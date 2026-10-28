@@ -69,11 +69,26 @@ export interface TaskDefinition {
   description: string;
   category: string;
   module: string;
-  resources: { cpus: number; memory_mb: number; walltime_minutes: number };
+  resources: {
+    cpus: number;
+    memory_mb: number;
+    walltime_minutes: number;
+    // MPI processes rather than threads (Quantum ESPRESSO).
+    mpi?: boolean;
+  };
   platform_flags: { job_name: string | null; cpus: string | null };
   inputs: InputPort[];
   outputs: OutputPort[];
   parameters: ParameterSpec[];
+  // Data packs the agent puts in place first (pseudopotentials...).
+  data?: DataNeed[];
+}
+
+// A data pack a task reads, and the variable that names its folder.
+export interface DataNeed {
+  name: string;
+  version: string;
+  env: string;
 }
 
 // Input port name -> uploaded file names.
@@ -136,6 +151,8 @@ export interface PipelineSubmitRequest {
   nodes: PipelineSubmitNode[];
   edges: PipelineSubmitEdge[];
   files: PipelineSubmitFile[];
+  // Where to run; the shared AtomField server if absent.
+  target_id?: string | null;
 }
 
 export interface PipelineSubmitResponse {
@@ -256,6 +273,8 @@ export interface JobEvent {
   status: ServerJobStatus;
   attempt: number;
   error_message?: string | null;
+  // False while a "running" job still waits in a cluster's queue.
+  started?: boolean;
 }
 
 // One job's state inside a snapshot.
@@ -264,6 +283,7 @@ export interface JobState {
   status: ServerJobStatus;
   attempt: number;
   error_message?: string | null;
+  started?: boolean;
 }
 
 // Every job of a run plus the run's counter (live stream "snapshot").
@@ -298,4 +318,25 @@ export interface BundleInfo {
   download_url?: string | null;
   error?: string | null;
   folder?: FolderInfo | null;
+  // The scripts release the run used, e.g. "afscripts 0.2.0+g2e6d386",
+  // and the data packs its tasks read.
+  made_with?: string | null;
+  data_packs?: string[];
+}
+
+// A place runs can execute: the shared AtomField server, or one of the
+// user's own clusters or computers.
+export interface ComputeTarget {
+  id: string;
+  name: string;
+  kind: string;
+  shared: boolean;
+  last_seen_at?: string | null;
+  online: boolean;
+}
+
+// A target with its agent token, returned once when created.
+export interface TargetToken {
+  target: ComputeTarget;
+  token: string;
 }

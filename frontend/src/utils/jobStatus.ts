@@ -19,9 +19,15 @@ const FINISHED: ReadonlySet<JobStatus> = new Set([
 ]);
 
 /**
- * The UI label for a status reported by the API.
+ * The UI label for a status reported by the API. A job claimed by a
+ * cluster agent but still waiting in the cluster's queue is "running"
+ * for the server, yet not started: it shows as Pending.
  */
-export function toDisplayStatus(status: ServerJobStatus): JobStatus {
+export function toDisplayStatus(
+  status: ServerJobStatus,
+  started = true
+): JobStatus {
+  if (status === 'running' && !started) return 'Pending';
   return DISPLAY_STATUS[status] ?? 'Pending';
 }
 
