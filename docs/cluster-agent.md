@@ -21,18 +21,30 @@ your cluster, and AtomField never sees your cluster password.
 
 ## 1. Copy the agent to the cluster
 
-From your own computer (replace the address with yours):
+The agent is the `agent` folder plus six small files of `app`;
+nothing else of AtomField runs on the cluster. From your own computer,
+in the AtomField folder (replace the address with yours):
 
 ```bash
-rsync -avz --exclude .env --exclude backups --exclude .git \
-  --exclude .venv --exclude frontend --exclude storage \
-  --exclude artifacts --exclude scripts_repo \
-  ~/atomfield/ you@login.cluster.edu:~/atomfield/code/
+FILES=(agent/*.py app/__init__.py app/agents/{__init__,schemas}.py
+       app/catalog/{__init__,argv,models}.py)
+ssh you@login.cluster.edu 'mkdir -p ~/atomfield/code'
+tar -czf - "${FILES[@]}" | ssh you@login.cluster.edu \
+  'tar -xzf - -C ~/atomfield/code'
 ```
 
-The agent needs only the code. The excludes keep your secrets
-(`.env` holds the server's keys) and database backups off the
-cluster, and skip what the agent never uses. The scripts themselves
+Run the same lines again to update the agent later. If your cluster's
+SSH listens on another port, add a shortcut to `~/.ssh/config`:
+
+```
+Host mycluster
+    HostName login.cluster.edu
+    User you
+    Port 2222
+```
+
+and use `mycluster` instead of the address, here and in the answer
+"Address to copy results from" in step 4. The scripts themselves
 (afscripts) are not copied either: each job brings the release it
 needs (see "Where the scripts come from").
 
