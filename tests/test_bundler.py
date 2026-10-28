@@ -7,6 +7,8 @@ import asyncio
 import uuid
 from pathlib import Path
 
+import httpx
+
 from agent.bundler import Bundler
 from agent.config import AgentConfig
 from agent.workspace import run_folder
@@ -85,3 +87,60 @@ def test_a_run_asked_for_twice_is_zipped_once(tmp_path: Path):
 
     asyncio.run(two_requests())
     assert (client.uploads, client.reports) == (1, ["ready"])
+
+
+class SizeLimitedServer(SlowUploads):
+    """
+    Like a Cloudflare tunnel: refuses any upload bigger than its limit
+    with 413 Payload Too Large.
+    """
+
+    async def upload_file(self, url: str, source: Path) -> None:
+        """
+        Refuse the zip, as a proxy would.
+
+        :param url: Signed link.
+        :type url: str
+        :param source: The zip (ignored).
+        :type source: Path
+        :raises httpx.HTTPStatusError: Always, 413.
+        """
+        request = httpx.Request("PUT", "https://tunnel.example" + url)
+        response = httpx.Response(413, request=request)
+        raise httpx.HTTPStatusError("413", request=request, response=response)
+
+
+def test_a_zip_refused_for_its_size_is_too_big_and_the_folder_stays(
+    tmp_path: Path,
+):
+    """
+    A 413 means "too big to upload here", reported as such with the
+    zip's size; even on the house agent, the run's folder is kept.
+
+    :param tmp_path: Empty directory for this test.
+    :type tmp_path: Path
+    """
+    run_id = uuid.uuid4()
+    job_dir = run_folder(tmp_path, run_id) / "opt"
+    job_dir.mkdir(parents=True)
+    (job_dir / "opt.log").write_text("done\n")
+    request = PackRequest(
+        run_id=run_id,
+        bundle_name="water_run",
+        upload_url="/fake-store/bundle.zip",
+        max_bytes=10_000_000,
+        manifest={"run_id": str(run_id), "jobs": [{"node": "opt"}]},
+    )
+    client = SizeLimitedServer()
+    config = AgentConfig(
+        api_url="http://unused",
+        token="",
+        artifacts_dir=tmp_path,
+        delete_after_upload=True,
+    )
+
+    report = asyncio.run(Bundler(config, client).build_and_upload(request))
+
+    assert report.status == "too_big"
+    assert report.size_bytes and report.size_bytes > 0
+    assert job_dir.is_dir()

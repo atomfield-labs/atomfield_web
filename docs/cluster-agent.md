@@ -85,7 +85,7 @@ it):
 | How jobs run here | `slurm` |
 | Work folder | `/home/you/atomfield` (must be visible to compute nodes) |
 | Python that runs the job scripts | `/home/you/atomfield/env/bin/python` |
-| Address to copy results from | `you@login.cluster.edu` |
+| Address to copy results from | your `ssh` target, e.g. `mycluster` |
 | Agent token | the token from step 3 (not shown as you type) |
 | Extra `#SBATCH` options | `--account=my_project` |
 | Setup line for each job | `module load quantum-espresso/7.2`, then Enter |
@@ -191,3 +191,11 @@ Delete old runs you no longer need.
   run the pipeline again.
 - **The cluster shows offline**: `python -m agent status`, then look
   at the log it names (`~/atomfield/agent.log`).
+- **`pw.x` stops with "OMPI was not built with SLURM's PMI support"**:
+  the program's module did not put its own `mpirun` on the PATH, so
+  the job fell back to `srun`. Find that MPI with
+  `ldd $(which pw.x) | grep libmpi` and add a setup line putting its
+  `bin` folder first: `export PATH=/path/to/that/mpi/bin:$PATH`.
+- **"Make a download link" says the run is too big**: the server, or
+  a Cloudflare tunnel in front of it (at most 100 MB per upload),
+  refused the zip. Copy the folder with the rsync command instead.

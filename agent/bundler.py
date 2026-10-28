@@ -20,6 +20,9 @@ from agent.workspace import run_folder
 from app.agents.schemas import BundleReport, PackRequest
 
 logger = logging.getLogger("agent")
+# A server, or a proxy in front of it (a Cloudflare tunnel takes at
+# most 100 MB per request), refusing a body this big.
+PAYLOAD_TOO_LARGE = 413
 
 
 class BundleApi(Protocol):
@@ -137,13 +140,38 @@ class Bundler:
                 partial,
                 request.max_bytes,
             )
-            await self.client.upload_file(request.upload_url, partial)
+            report = await self.upload(request, partial, size)
         except BundleTooLargeError as error:
             return BundleReport(status="too_big", size_bytes=error.size_bytes)
         finally:
             partial.unlink(missing_ok=True)
-        if self.config.delete_after_upload:
+        if report.status == "ready" and self.config.delete_after_upload:
             await asyncio.to_thread(shutil.rmtree, run_dir, True)
+        return report
+
+    async def upload(
+        self, request: PackRequest, partial: Path, size: int
+    ) -> BundleReport:
+        """
+        Upload a finished zip. One refused for its size is "too big",
+        not a failure: the run's folder is still there to copy.
+
+        :param request: Where to upload it.
+        :type request: PackRequest
+        :param partial: The zip.
+        :type partial: Path
+        :param size: Its size in bytes.
+        :type size: int
+        :return: Ready, or too big.
+        :rtype: BundleReport
+        :raises httpx.HTTPError: For any other upload trouble.
+        """
+        try:
+            await self.client.upload_file(request.upload_url, partial)
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code != PAYLOAD_TOO_LARGE:
+                raise
+            return BundleReport(status="too_big", size_bytes=size)
         return BundleReport(status="ready", size_bytes=size)
 
     async def deliver(self, run_id: uuid.UUID, outcome: BundleReport) -> None:

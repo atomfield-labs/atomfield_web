@@ -197,12 +197,20 @@ export default function RunFilesButton({ runId }: { runId: string | null }) {
  */
 function describe(info: BundleInfo): string {
   if (info.status === 'too_big') {
-    const size = ((info.size_bytes ?? 0) / GIGABYTE).toFixed(1);
-    return `Too big to download from here (over ${size} GB).`;
+    const size = formatSize(info.size_bytes ?? 0);
+    return `Too big to download from here (${size}); copy the folder instead.`;
   }
   if (info.status === 'failed') {
     return `The zip could not be made: ${info.error ?? 'unknown error'}`;
   }
   if (info.status === 'expired') return 'The last zip has expired.';
   return '';
+}
+
+/**
+ * A size people can read: MB below a gigabyte, GB above.
+ */
+function formatSize(bytes: number): string {
+  if (bytes < GIGABYTE) return `${Math.round(bytes / (1024 * 1024))} MB`;
+  return `${(bytes / GIGABYTE).toFixed(1)} GB`;
 }

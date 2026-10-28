@@ -10,7 +10,6 @@ Settings already in the file are offered as the defaults, so running
 import getpass
 import shlex
 import shutil
-import socket
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -27,7 +26,10 @@ QUESTIONS = {
     "runner": "How jobs run here: slurm or process",
     "work_folder": "Work folder (job folders, log, state)",
     "python": "Python that runs the job scripts",
-    "ssh_address": "Address to copy results from (you@login.host)",
+    "ssh_address": (
+        "Address to copy results from: what you type after ssh on your "
+        "own computer (an ssh shortcut, or you@cluster.address)"
+    ),
 }
 Ask = Callable[[str], str]
 
@@ -52,7 +54,8 @@ def suggested_settings(existing: dict[str, Any]) -> dict[str, Any]:
         "runner": "slurm" if shutil.which("sbatch") else "process",
         "work_folder": str(Path.home() / "atomfield"),
         "python": sys.executable,
-        "ssh_address": f"{getpass.getuser()}@{socket.getfqdn()}",
+        # No guess for the copy address: this machine's own name (a
+        # login node's) is rarely what works from your own computer.
         "max_jobs": 4,
     }
     return {**guesses, **existing}
