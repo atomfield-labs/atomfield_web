@@ -23,17 +23,16 @@ your cluster, and AtomField never sees your cluster password.
 
 The agent is the `agent` folder plus six small files of `app`;
 nothing else of AtomField runs on the cluster. From your own computer,
-in the AtomField folder (replace the address with yours):
+in the AtomField folder (use what you type after `ssh`):
 
 ```bash
-FILES=(agent/*.py app/__init__.py app/agents/{__init__,schemas}.py
-       app/catalog/{__init__,argv,models}.py)
-ssh you@login.cluster.edu 'mkdir -p ~/atomfield/code'
-tar -czf - "${FILES[@]}" | ssh you@login.cluster.edu \
-  'tar -xzf - -C ~/atomfield/code'
+uv run --python 3.11 python -m agent.ship you@login.cluster.edu
 ```
 
-Run the same lines again to update the agent later. If your cluster's
+It copies exactly the files the agent loads into `~/atomfield/code`,
+replacing any older copy, and prints how many arrived.
+
+Run it again to update the agent later. If your cluster's
 SSH listens on another port, add a shortcut to `~/.ssh/config`:
 
 ```
