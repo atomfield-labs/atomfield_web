@@ -9,6 +9,7 @@ import { useQuota } from '../../hooks/useQuota';
 import { useBlueprint } from '../../hooks/useBlueprint';
 import { useSessionDraft, serializeGraphToBlueprint } from '../../hooks/useSessionDraft';
 import { useRunEvents } from '../../hooks/useRunEvents';
+import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
 import { buildPipelineSubmitPayload } from '../../utils/pipelinePayload';
 import type { SessionMetadata } from '../../types/api';
 
@@ -32,6 +33,8 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   // Where to run; null means the shared AtomField server.
   const [targetId, setTargetId] = useState<string | null>(null);
+  // Which input of each task a connected structure file belongs to.
+  const { taskById } = useTaskDefinitions();
 
   const currentGraphRef = useRef<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] });
   const deleteNodeRef = useRef<((nodeId: string) => void) | null>(null);
@@ -173,7 +176,8 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
 
     const { isValid, errorMessage, payload } = buildPipelineSubmitPayload(
       currentGraphRef.current,
-      targetSessionId
+      targetSessionId,
+      taskById
     );
 
     if (!isValid || !payload) {

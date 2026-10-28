@@ -248,6 +248,7 @@ export default function GraphCanvas({
     const isSuccess = norm === 'success' || norm === 'completed';
     const isRunning = norm === 'running';
     const isFailed = norm === 'failed';
+    const isPending = norm === 'pending';
     const cleanStatus = isSuccess ? 'Success' : isRunning ? 'Running' : isFailed ? 'Failed' : status;
 
     setNodes((nds) =>
@@ -259,7 +260,7 @@ export default function GraphCanvas({
           (n.data as any)?.originalData?.id === nodeId
         ) {
           const bg = isSuccess ? '#ecfdf5' : isRunning ? '#eff6ff' : isFailed ? '#fff1f2' : (statusColors[cleanStatus] || '#f8fafc');
-          const border = isSuccess ? '2px solid #10b981' : isRunning ? '2px solid #3b82f6' : isFailed ? '2px solid #ef4444' : '2px solid #94a3b8';
+          const border = isSuccess ? '2px solid #10b981' : isRunning ? '2px solid #3b82f6' : isFailed ? '2px solid #ef4444' : isPending ? '2px solid #f59e0b' : '2px solid #94a3b8';
           return {
             ...n,
             data: {

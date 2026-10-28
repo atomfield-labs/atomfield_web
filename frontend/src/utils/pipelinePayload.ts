@@ -1,6 +1,11 @@
-import { withoutPlatformKeys } from './taskCatalog';
+import { inputPortForFile, withoutPlatformKeys } from './taskCatalog';
 import type { Node, Edge } from '@xyflow/react';
-import type { PipelineSubmitRequest, PipelineSubmitFile } from '../types/api';
+import type {
+  InputFiles,
+  PipelineSubmitRequest,
+  PipelineSubmitFile,
+  TaskDefinition,
+} from '../types/api';
 
 export interface PayloadBuildResult {
   isValid: boolean;
@@ -9,11 +14,36 @@ export interface PayloadBuildResult {
 }
 
 /**
+ * The files a task reads from the structure nodes connected to it:
+ * each file goes to the task's input that accepts its type. Worked out
+ * when deploying, so it does not matter whether the file was uploaded
+ * before or after the nodes were connected.
+ */
+function connectedStructureInputs(
+  nodeId: string,
+  graph: { nodes: Node[]; edges: Edge[] },
+  task: TaskDefinition | undefined
+): InputFiles {
+  const inputs: InputFiles = {};
+  if (!task) return inputs;
+  for (const edge of graph.edges || []) {
+    if (edge.target !== nodeId) continue;
+    const source = (graph.nodes || []).find((node) => node.id === edge.source);
+    const filename = (source?.data as any)?.filename;
+    if (source?.type !== 'structure' || !filename) continue;
+    const port = inputPortForFile(task, filename);
+    if (port) inputs[port] = [...(inputs[port] ?? []), filename];
+  }
+  return inputs;
+}
+
+/**
  * Builds and validates the DAG execution payload from the active ReactFlow graph.
  */
 export function buildPipelineSubmitPayload(
   graph: { nodes: Node[]; edges: Edge[] },
-  sessionId: string
+  sessionId: string,
+  taskById: Map<string, TaskDefinition>
 ): PayloadBuildResult {
   const executableNodes = (graph.nodes || []).filter(
     (node) => node.type !== 'structure' && node.type !== 'branchExpander' && node.type !== 'branchDots'
@@ -55,11 +85,16 @@ export function buildPipelineSubmitPayload(
       const taskId =
         data.task_id || data.filename || data.script_id || data.label;
 
+      const connected = connectedStructureInputs(
+        node.id,
+        graph,
+        taskById.get(taskId)
+      );
       return {
         ui_id: node.id,
         script_name: taskId,
         parameters: withoutPlatformKeys(data.parameters || {}),
-        inputs: data.inputs || {},
+        inputs: { ...(data.inputs || {}), ...connected },
       };
     }),
     edges: executableEdges.map((edge) => ({

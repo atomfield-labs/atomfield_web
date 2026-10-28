@@ -27,6 +27,8 @@ function CalculationNode({
   const isSuccess = status === 'success' || status === 'completed';
   const isRunning = status === 'running';
   const isFailed = status === 'failed';
+  // Waiting in a cluster's queue (or for a free agent).
+  const isPending = status === 'pending';
 
   return (
     <div
@@ -37,6 +39,8 @@ function CalculationNode({
           ? 'bg-blue-50 text-blue-950 ring-2 ring-blue-500 animate-pulse shadow-sm'
           : isFailed
           ? 'bg-rose-50 text-rose-950 ring-2 ring-rose-500 shadow-sm'
+          : isPending
+          ? 'bg-amber-50 text-amber-950 ring-2 ring-amber-400 shadow-sm'
           : 'bg-white text-slate-800'
       }`}
     >
@@ -124,6 +128,12 @@ function CalculationNode({
           <span
             className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0 inline-block"
             title="Failed"
+          />
+        )}
+        {isPending && (
+          <span
+            className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0 inline-block"
+            title="Pending: waiting to start"
           />
         )}
         <span className="truncate leading-tight font-bold text-center pointer-events-none">
