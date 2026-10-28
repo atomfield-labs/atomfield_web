@@ -24,6 +24,8 @@ from app.db.session import AsyncSessionLocal, engine
 from app.events.redis_bus import RedisEventBus
 from app.models.api_key import ApiKey
 from app.queue.job_queue import RedisJobQueue
+from app.releases.catalogs import ReleaseCatalogs
+from app.runs.lifecycle import SilenceLimits
 from app.scheduler.sweeper import Sweeper
 from app.storage.links import LinkSigner
 from app.storage.store import LocalDiskStore
@@ -45,8 +47,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # which run before the server starts.
 
     # Load (and validate) the catalog first: a broken catalog must stop
-    # the server here, not fail someone's submission later.
-    app.state.catalog = Catalog.from_path(Path(settings.CATALOG_PATH))
+    # the server here, not fail someone's submission later. Releases
+    # bring their own catalogs; this file serves runs without one.
+    unreleased = Catalog.from_path(Path(settings.CATALOG_PATH))
+    app.state.catalogs = ReleaseCatalogs(unreleased)
     app.state.store = create_store()
 
     async with AsyncSessionLocal() as session:
@@ -131,7 +135,12 @@ def start_sweeper(app: FastAPI) -> asyncio.Task:
         app.state.redis,
         app.state.store,
         interval_seconds=settings.SWEEP_INTERVAL_SECONDS,
-        lease_timeout=timedelta(seconds=settings.LEASE_TIMEOUT_SECONDS),
+        limits=SilenceLimits(
+            local=timedelta(seconds=settings.LEASE_TIMEOUT_SECONDS),
+            scheduled=timedelta(
+                seconds=settings.SCHEDULED_LEASE_TIMEOUT_SECONDS
+            ),
+        ),
         deadline_grace=timedelta(seconds=settings.DEADLINE_GRACE_SECONDS),
     )
     return asyncio.create_task(sweeper.run_forever())

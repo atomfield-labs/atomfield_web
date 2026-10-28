@@ -47,4 +47,7 @@ class ComputeTarget(Base):
     # Zip and upload each finished run. Only for machines users cannot
     # reach themselves (ours); elsewhere results stay where they ran.
     bundles_automatically = Column(Boolean, nullable=False, default=False)
+    # Deleted by its owner: no longer listed and its token no longer
+    # works, but past runs keep pointing at it.
+    retired_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

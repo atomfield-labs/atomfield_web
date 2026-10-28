@@ -59,7 +59,7 @@ def test_the_real_catalog_loads():
     """
     loaded = Catalog.from_path(REAL_CATALOG)
     assert "xtb_opt" in loaded.tasks
-    assert len(loaded.tasks) == 7
+    assert len(loaded.tasks) == 11
 
 
 @pytest.mark.parametrize(

@@ -80,7 +80,9 @@ class LinkSigner:
         :return: HMAC-SHA256 as hex.
         :rtype: str
         """
-        return hmac.new(self.secret, grant.message(), hashlib.sha256).hexdigest()
+        return hmac.new(
+            self.secret, grant.message(), hashlib.sha256
+        ).hexdigest()
 
     def verify(self, grant: LinkGrant, signature: str, now: float) -> bool:
         """

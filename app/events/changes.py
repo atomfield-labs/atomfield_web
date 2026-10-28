@@ -54,6 +54,7 @@ class JobChange(NamedTuple):
     status: JobStatus
     attempt: int
     error_message: str | None
+    started: bool
 
 
 def record_changes(session: AsyncSession, jobs: Iterable[Job]) -> None:
@@ -76,6 +77,7 @@ def record_changes(session: AsyncSession, jobs: Iterable[Job]) -> None:
             JobStatus(job.status),
             job.attempt,
             job.error_message,
+            job.started_at is not None,
         )
 
 

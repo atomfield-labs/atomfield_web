@@ -76,35 +76,47 @@ class AgentClient:
         links = httpx.AsyncClient(base_url=api_url, timeout=http.timeout)
         return cls(http, links)
 
-    async def claim(self, wait_seconds: float) -> JobAssignment | None:
+    async def claim(
+        self, wait_seconds: float, scheduled: bool = False
+    ) -> JobAssignment | None:
         """
         Ask for one job, letting the server wait up to ``wait_seconds``.
 
         :param wait_seconds: Long-poll wait.
         :type wait_seconds: float
+        :param scheduled: Jobs go to a scheduler and may queue there.
+        :type scheduled: bool
         :return: An assignment, or None if no job arrived.
         :rtype: JobAssignment | None
         :raises httpx.HTTPError: On network or server errors.
         """
         response = await self.http.post(
-            "/api/agent/claims", json={"wait_seconds": wait_seconds}
+            "/api/agent/claims",
+            json={"wait_seconds": wait_seconds, "scheduled": scheduled},
         )
         if response.status_code == NO_JOB:
             return None
         response.raise_for_status()
         return JobAssignment.model_validate(response.json())
 
-    async def heartbeat(self, held: list[JobReference]) -> HeartbeatResponse:
+    async def heartbeat(
+        self,
+        held: list[JobReference],
+        started: list[JobReference] | None = None,
+    ) -> HeartbeatResponse:
         """
         Report the attempts this agent is running.
 
         :param held: Attempts in progress.
         :type held: list[JobReference]
+        :param started: Those that have begun running.
+        :type started: list[JobReference] | None
         :return: Attempts to cancel or abandon.
         :rtype: HeartbeatResponse
         :raises httpx.HTTPError: On network or server errors.
         """
-        body = HeartbeatRequest(jobs=held).model_dump(mode="json")
+        request = HeartbeatRequest(jobs=held, started=started or [])
+        body = request.model_dump(mode="json")
         response = await self.http.post("/api/agent/heartbeat", json=body)
         response.raise_for_status()
         return HeartbeatResponse.model_validate(response.json())

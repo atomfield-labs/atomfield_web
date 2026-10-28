@@ -82,6 +82,12 @@ class Job(Base):
         index=True,
     )
     last_heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+    # When the job really began running. Empty while it waits in a
+    # cluster scheduler's queue; its deadline starts from here.
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    # Its agent handed it to a scheduler (Slurm): it may queue there,
+    # and it keeps running if the agent goes quiet.
+    scheduled = Column(Boolean, nullable=False, default=False)
     deadline_at = Column(DateTime(timezone=True), nullable=True)
     cancel_requested = Column(Boolean, nullable=False, default=False)
 

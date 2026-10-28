@@ -7,6 +7,7 @@ number and agent identity.
 import asyncio
 import uuid
 from collections.abc import Callable
+from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -554,3 +555,43 @@ def test_a_finished_jobs_log_and_files_come_from_its_report(
             return run.folder_path, run.folder_address
 
     assert asyncio.run(read_folder()) == (folder["path"], folder["address"])
+
+
+def test_a_scheduled_claim_starts_the_clock_only_when_reported(
+    client: TestClient,
+    chain,
+    make_session: async_sessionmaker,
+):
+    """
+    A job claimed by an agent whose jobs queue (Slurm) has no start
+    time or deadline yet; the first heartbeat that reports it started
+    sets both, a walltime apart; repeating the report changes nothing.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param chain: Owner headers and job ids.
+    :type chain: tuple
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
+    """
+    _, (first, _) = chain
+    claimed = client.post(
+        "/api/agent/claims",
+        json={**SHORT_WAIT, "scheduled": True},
+        headers=HOUSE,
+    ).json()
+
+    async def clock():
+        async with make_session() as session:
+            job = await session.get(Job, uuid.UUID(first))
+            return job.started_at, job.deadline_at
+
+    assert asyncio.run(clock()) == (None, None)
+    reference = {"job_id": first, "attempt": claimed["attempt"]}
+    beat = {"jobs": [reference], "started": [reference]}
+    client.post("/api/agent/heartbeat", json=beat, headers=HOUSE)
+    started_at, deadline_at = asyncio.run(clock())
+    walltime = claimed["task"]["resources"]["walltime_minutes"]
+    assert deadline_at - started_at == timedelta(minutes=walltime)
+    client.post("/api/agent/heartbeat", json=beat, headers=HOUSE)
+    assert asyncio.run(clock()) == (started_at, deadline_at)

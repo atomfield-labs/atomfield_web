@@ -47,6 +47,11 @@ class JobSubmitRequest(BaseModel):
         "their defaults.",
     )
     inputs: InputFiles = input_files_field()
+    target_id: UUID | None = Field(
+        default=None,
+        description="Where to run: one of your compute targets; the "
+        "shared AtomField server if omitted.",
+    )
 
 
 class JobResponse(BaseModel):
@@ -120,6 +125,11 @@ class PipelineSubmitRequest(BaseModel):
     nodes: list[JobNode]
     edges: list[JobEdge]
     files: list[PipelineFile] | None = None
+    target_id: UUID | None = Field(
+        default=None,
+        description="Where to run: one of your compute targets; the "
+        "shared AtomField server if omitted.",
+    )
 
 
 class PipelineSubmitResponse(BaseModel):

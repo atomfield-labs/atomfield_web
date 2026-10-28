@@ -30,3 +30,14 @@ def generate_api_key() -> tuple[str, str, str]:
     display_prefix = f"{raw_key[:12]}..."
     key_hash = hash_api_key(raw_key)
     return raw_key, display_prefix, key_hash
+
+
+def generate_agent_token() -> tuple[str, str]:
+    """
+    Generate an agent's bearer token and the hash that is stored.
+
+    :return: (token shown once to the user, its SHA-256 hash).
+    :rtype: tuple[str, str]
+    """
+    token = f"af_agent_{secrets.token_urlsafe(32)}"
+    return token, hash_api_key(token)

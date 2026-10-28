@@ -29,6 +29,8 @@ class JobEvent(BaseModel):
     status: JobStatus
     attempt: int
     error_message: str | None = None
+    # Running in name only until a scheduler actually starts it.
+    started: bool = False
 
 
 class JobState(BaseModel):
@@ -40,6 +42,7 @@ class JobState(BaseModel):
     status: JobStatus
     attempt: int
     error_message: str | None = None
+    started: bool = False
 
 
 class RunSnapshot(BaseModel):

@@ -109,6 +109,27 @@ class ArtifactStore(Protocol):
         :rtype: str
         """
 
+    async def save_stream(
+        self,
+        key: str,
+        chunks: AsyncIterable[bytes],
+        max_bytes: int,
+    ) -> int:
+        """
+        Store a big file as it arrives, never all in memory; it appears
+        only when complete.
+
+        :param key: Where to store it.
+        :type key: str
+        :param chunks: Its bytes, in pieces.
+        :type chunks: AsyncIterable[bytes]
+        :param max_bytes: Size limit.
+        :type max_bytes: int
+        :return: Bytes stored.
+        :rtype: int
+        :raises TooLargeError: If it passes the limit.
+        """
+
     async def write(self, key: str, data: bytes) -> None:
         """
         Store a small file (replacing any file with that key).
@@ -315,7 +336,9 @@ class LocalDiskStore:
         :rtype: bytes | None
         """
         path = self.existing_path(key)
-        return None if path is None else await asyncio.to_thread(path.read_bytes)
+        return (
+            None if path is None else await asyncio.to_thread(path.read_bytes)
+        )
 
     async def delete(self, key: str) -> None:
         """

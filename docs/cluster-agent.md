@@ -1,0 +1,178 @@
+# Running AtomField jobs on your Slurm cluster
+
+AtomField runs your pipelines on computers you already use. On a
+cluster, a small program called the **agent** runs on the login node.
+It asks AtomField for work, hands each job to Slurm with `sbatch`,
+watches it, and reports back. Your results stay on the cluster; the
+web app shows where they are and how to copy them.
+
+The agent only makes outgoing HTTPS requests. Nothing connects into
+your cluster, and AtomField never sees your cluster password.
+
+## What you need
+
+- SSH access to the cluster's login node.
+- Outgoing HTTPS from the login node. Check with
+  `curl -sI https://www.cloudflare.com | head -1` (expect `200`).
+- Python 3.11 or newer. If the system Python is older, use a conda
+  module (`module avail conda miniconda`).
+- A Slurm account to charge, if your cluster asks for one
+  (`sacctmgr -n show assoc user=$USER format=account`).
+
+## 1. Copy the agent to the cluster
+
+From your own computer (replace the address with yours):
+
+```bash
+rsync -avz --exclude .venv --exclude node_modules --exclude storage \
+  --exclude artifacts --exclude scripts_repo \
+  ~/atomfield/ you@login.cluster.edu:~/atomfield/code/
+```
+
+The scripts themselves (afscripts) are not copied: each job brings
+the release it needs (see "Where the scripts come from").
+
+## 2. Make a Python environment
+
+On the login node:
+
+```bash
+module load miniconda3      # your cluster's name
+conda create -y -p ~/atomfield/env --override-channels -c conda-forge \
+  python=3.11 ase numpy httpx pydantic
+conda clean -a -y
+```
+
+`--override-channels -c conda-forge` uses only the free, community
+conda-forge packages. Simulation engines (Quantum ESPRESSO, ORCA...)
+usually come from your cluster's own modules instead; step 4 loads
+them for every job.
+
+## 3. Add the cluster in the web app
+
+In the pipeline editor, open **Run on**, choose **+ Add a cluster…**,
+give it a name, and copy the **agent token**. It is shown only once;
+if you lose it, make a new one (the old one stops working).
+
+## 4. Log the agent in
+
+```bash
+cd ~/atomfield/code
+~/atomfield/env/bin/python -m agent login
+```
+
+It asks for each setting, offering a default in brackets (Enter keeps
+it):
+
+| Question | Example answer |
+|---|---|
+| Address of the AtomField API | `https://atomfield.example.org` |
+| How jobs run here | `slurm` |
+| Work folder | `/home/you/atomfield` (must be visible to compute nodes) |
+| Python that runs the job scripts | `/home/you/atomfield/env/bin/python` |
+| Address to copy results from | `you@login.cluster.edu` |
+| Agent token | the token from step 3 (not shown as you type) |
+| Extra `#SBATCH` options | `--account=my_project` |
+| Setup line for each job | `module load quantum-espresso/7.2`, then Enter |
+
+The settings are saved in `~/.config/atomfield/agent.toml`, readable
+only by you (it holds the token). Run `login` again to change them.
+
+Each job's script runs in a login shell (`#!/bin/bash -l`), so
+`module` works in the setup lines as it does when you log in. Quantum
+ESPRESSO tasks start `pw.x` with `mpirun -np N` from the loaded
+module. If your cluster wants `srun` instead, add one more setup
+line: `export AFSCRIPTS_MPI_LAUNCHER="srun"`.
+
+## 5. Start the agent
+
+```bash
+~/atomfield/env/bin/python -m agent start
+~/atomfield/env/bin/python -m agent status
+```
+
+The agent keeps running after you log out, and restarts itself if it
+crashes. In the web app, your cluster now shows **●** (online) under
+**Run on**. Note which login node you are on (`hostname`): to check
+on the agent later, log in to that one (`ssh login1`).
+
+To stop it: `python -m agent stop`. Your Slurm jobs keep running.
+
+## Where the scripts come from
+
+Every run uses one **release** of the scripts: a version published
+to AtomField, such as `afscripts 0.2.0+g2e6d386` (the part after `+g`
+is the git commit it was built from). The first job that needs a
+release downloads it into `~/atomfield/releases/`, checks its
+fingerprint (sha256), and unpacks it there; later jobs reuse it.
+
+- All jobs of a run, retries included, use the release the run
+  started with, even if a newer one is published meanwhile.
+- Each job folder has a small `.af_made_with` note saying exactly
+  which scripts and data packs ran there.
+- Releases are small (about 50 KB) and stay side by side.
+
+Data the scripts read, such as Quantum ESPRESSO pseudopotentials,
+arrives the same way as **data packs**: downloaded once into
+`~/atomfield/data/` when a job first needs them (a few hundred MB for
+a full set of pseudopotentials; mind your quota). There is nothing to
+download or unpack by hand.
+
+To run your own copy of the scripts instead (for example, while you
+edit them on the cluster), point the agent at it:
+
+```bash
+python -m agent login --pack-dir ~/afscripts/src
+```
+
+Every job then runs that copy, and its `.af_made_with` says so. Remove
+`pack_dir` from `~/.config/atomfield/agent.toml` to go back to
+releases.
+
+## If the login node reboots
+
+Nothing restarts the agent by itself after a reboot. When the web app
+shows the cluster offline, log in and run `python -m agent start`
+again. Nothing is lost meanwhile:
+
+- Slurm keeps your jobs running without the agent.
+- New jobs wait in AtomField's queue for your cluster.
+- The new agent takes over the jobs that were running and reports
+  them as they finish.
+
+AtomField waits **24 hours** for a silent cluster agent before trying
+its jobs again, so a night-long outage costs no work.
+
+## Your results
+
+Each run gets a folder in your work folder, one sub-folder per step
+of the pipeline: `~/atomfield/runs/<run>/<step>/`, holding its inputs,
+outputs, logs and Slurm's batch script (`job.sbatch`).
+
+In the web app, **Get files** shows that folder and a command to copy
+it to your own computer, for example:
+
+```bash
+rsync -avz you@login.cluster.edu:/home/you/atomfield/runs/<run>/ ./run/
+```
+
+Run that on your own computer. For runs up to 1 GB you can also choose
+**Make a download link**: the agent zips the folder and uploads it.
+
+Your home folder has a quota (`lfs quota -hu $USER /home` on Lustre).
+Delete old runs you no longer need.
+
+## When something goes wrong
+
+- **A job fails at once with "sbatch refused the job"**: the message
+  is Slurm's own. Usually a missing or wrong `--account` or
+  `--partition`; fix it with `python -m agent login`.
+- **A job stays "Pending"**: it is waiting in Slurm's queue. Check
+  with `squeue --user=$USER`.
+- **A job fails with "does not match its fingerprint"**: the release
+  was damaged on the way. Nothing was run; retry the job.
+- **A job fails with "no scripts release"**: nothing was published
+  when the run started; publish a release (see `docs/releases.md`) and
+  run the pipeline again.
+- **The cluster shows offline**: `python -m agent status`, then look
+  at the log it names (`~/atomfield/agent.log`).

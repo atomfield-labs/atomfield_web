@@ -18,7 +18,7 @@ from app.main import create_store
 from app.models.compute_target import HOUSE_TARGET_ID
 from app.models.job import Job
 from app.queue.job_queue import RedisJobQueue, queue_key
-from app.runs.lifecycle import requeue_lost, start_attempt
+from app.runs.lifecycle import SilenceLimits, requeue_lost, start_attempt
 from app.runs.states import JobStatus
 from app.scheduler.sweeper import Sweeper
 from tests.graphs import build_graph, commit_changes, snapshot
@@ -26,6 +26,9 @@ from tests.stores import make_redis
 
 UserHeadersFactory = Callable[..., dict[str, str]]
 LONG_AGO = timedelta(minutes=10)
+LIMITS = SilenceLimits(
+    local=timedelta(minutes=3), scheduled=timedelta(hours=24)
+)
 
 
 def with_sweeper(make_session: async_sessionmaker, scenario):
@@ -50,7 +53,7 @@ def with_sweeper(make_session: async_sessionmaker, scenario):
             redis,
             store,
             interval_seconds=30,
-            lease_timeout=timedelta(minutes=3),
+            limits=LIMITS,
             deadline_grace=timedelta(minutes=10),
         )
         try:
@@ -368,12 +371,80 @@ def test_a_heartbeat_just_before_the_requeue_wins(make_session):
             ids = await build_graph(session, [("A", "B")])
         await start_running(make_session, ids["A"])  # fresh heartbeat
         async with make_session() as session:
-            moved = await requeue_lost(
-                session, ids["A"], 1, timedelta(minutes=3)
-            )
+            moved = await requeue_lost(session, ids["A"], 1, LIMITS)
             await commit_changes(session)
         return moved, await read(make_session, ids)
 
     moved, state = with_sweeper(make_session, scenario)
     assert moved is None
     assert state["A"][0] == JobStatus.RUNNING
+
+
+def test_a_job_waiting_in_a_cluster_queue_is_never_overdue(make_session):
+    """
+    A job a scheduled agent claimed long ago but Slurm has not started
+    has no deadline yet, so the sweeper leaves it alone.
+
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
+    """
+
+    async def scenario(sweeper, redis):
+        async with make_session() as session:
+            ids = await build_graph(session, [("A", "B")])
+            await start_attempt(
+                session, ids["A"], 1, agent_id=HOUSE_TARGET_ID, scheduled=True
+            )
+            await session.execute(
+                update(Job)
+                .where(Job.id == ids["A"])
+                .values(last_heartbeat_at=func.now())
+            )
+            await commit_changes(session)
+        report = await sweeper.sweep_once()
+        return report.overdue, (await read(make_session, ids))["A"][0]
+
+    assert with_sweeper(make_session, scenario) == (0, JobStatus.RUNNING)
+
+
+def test_a_silent_cluster_agent_gets_a_day_before_its_jobs_are_retried(
+    make_session,
+):
+    """
+    A Slurm job keeps running while its agent is down, so two hours of
+    silence change nothing; only after a full day is it queued again.
+
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
+    """
+
+    async def silent_for(job_id, silence: timedelta) -> None:
+        async with make_session() as session:
+            await session.execute(
+                update(Job)
+                .where(Job.id == job_id)
+                .values(last_heartbeat_at=func.now() - silence)
+            )
+            await session.commit()
+
+    async def scenario(sweeper, redis):
+        async with make_session() as session:
+            ids = await build_graph(session, [("A", "B")])
+            await start_attempt(
+                session, ids["A"], 10, agent_id=HOUSE_TARGET_ID, scheduled=True
+            )
+            await commit_changes(session)
+        await silent_for(ids["A"], timedelta(hours=2))
+        after_two_hours = (await sweeper.sweep_once()).retried
+        state_then = (await read(make_session, ids))["A"][0]
+        await silent_for(ids["A"], timedelta(hours=25))
+        after_a_day = (await sweeper.sweep_once()).retried
+        state_now = (await read(make_session, ids))["A"][0]
+        return after_two_hours, state_then, after_a_day, state_now
+
+    assert with_sweeper(make_session, scenario) == (
+        0,
+        JobStatus.RUNNING,
+        1,
+        JobStatus.QUEUED,
+    )

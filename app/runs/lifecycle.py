@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import ColumnElement, case, func, select, update
+from sqlalchemy import ColumnElement, case, func, literal, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.events.changes import record_changes
@@ -34,6 +34,24 @@ DESCENDANT_STATUS = {
     JobStatus.FAILED: (JobStatus.UPSTREAM_FAILED, UPSTREAM_FAILED_MESSAGE),
     JobStatus.CANCELLED: (JobStatus.CANCELLED, UPSTREAM_CANCELLED_MESSAGE),
 }
+
+
+@dataclass(frozen=True, slots=True)
+class SilenceLimits:
+    """
+    How long an agent may stay silent before its jobs count as lost.
+
+    :param local: For jobs that die with their agent (its own child
+        processes): retry quickly.
+    :type local: timedelta
+    :param scheduled: For jobs a scheduler (Slurm) keeps running
+        without the agent: wait, so a crashed agent can come back and
+        take them over instead of losing hours of work.
+    :type scheduled: timedelta
+    """
+
+    local: timedelta
+    scheduled: timedelta
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,9 +74,11 @@ async def create_run(
     owner_id: uuid.UUID | None,
     session_id: str,
     target_id: uuid.UUID = HOUSE_TARGET_ID,
+    release_id: uuid.UUID | None = None,
 ) -> Run:
     """
-    Record a new submission and the machine all its jobs will run on.
+    Record a new submission, the machine all its jobs will run on, and
+    the scripts release they all use.
 
     :param session: Open database session; the caller commits.
     :type session: AsyncSession
@@ -68,6 +88,8 @@ async def create_run(
     :type session_id: str
     :param target_id: Compute target; the house agent by default.
     :type target_id: uuid.UUID
+    :param release_id: Scripts release; None before the first release.
+    :type release_id: uuid.UUID | None
     :return: The new run, flushed so its id is usable.
     :rtype: Run
     """
@@ -76,6 +98,7 @@ async def create_run(
         owner_id=owner_id,
         session_id=session_id,
         target_id=target_id,
+        release_id=release_id,
     )
     session.add(run)
     await session.flush()
@@ -87,6 +110,7 @@ async def start_attempt(
     job_id: uuid.UUID,
     walltime_minutes: int,
     agent_id: uuid.UUID | None = None,
+    scheduled: bool = False,
 ) -> Job | None:
     """
     Claim a queued job: new attempt number, fresh lease, deadline.
@@ -99,6 +123,10 @@ async def start_attempt(
     :type walltime_minutes: int
     :param agent_id: Compute target that took the job.
     :type agent_id: uuid.UUID | None
+    :param scheduled: The agent hands jobs to a scheduler: the job may
+        queue there, so its start time and deadline are set when the
+        agent reports it running (``mark_started``).
+    :type scheduled: bool
     :return: The running job, or None if it was no longer queued
         (already claimed, or cancelled).
     :rtype: Job | None
@@ -110,8 +138,62 @@ async def start_attempt(
         attempt=Job.attempt + 1,
         agent_id=agent_id,
         last_heartbeat_at=func.now(),
-        deadline_at=func.now() + timedelta(minutes=walltime_minutes),
+        scheduled=scheduled,
+        started_at=None if scheduled else func.now(),
+        deadline_at=(
+            None
+            if scheduled
+            else func.now() + timedelta(minutes=walltime_minutes)
+        ),
     )
+
+
+async def mark_started(
+    session: AsyncSession,
+    job_id: uuid.UUID,
+    attempt: int,
+    agent_id: uuid.UUID,
+    walltime_minutes: int,
+) -> Job | None:
+    """
+    Record that a scheduler began running a job the agent submitted:
+    its start time, and its deadline from now. Only the first report
+    counts, and only from the attempt and agent that hold the job.
+
+    :param session: Open database session; the caller commits with
+        ``commit_and_publish``, which announces the change.
+    :type session: AsyncSession
+    :param job_id: The job.
+    :type job_id: uuid.UUID
+    :param attempt: The attempt that started.
+    :type attempt: int
+    :param agent_id: The reporting agent's target.
+    :type agent_id: uuid.UUID
+    :param walltime_minutes: The task's time limit.
+    :type walltime_minutes: int
+    :return: The job, or None if nothing changed.
+    :rtype: Job | None
+    """
+    statement = (
+        update(Job)
+        .where(
+            Job.id == job_id,
+            Job.status == JobStatus.RUNNING,
+            Job.attempt == attempt,
+            Job.agent_id == agent_id,
+            Job.started_at.is_(None),
+        )
+        .values(
+            started_at=func.now(),
+            deadline_at=func.now() + timedelta(minutes=walltime_minutes),
+        )
+        .returning(Job)
+        .execution_options(synchronize_session=False, populate_existing=True)
+    )
+    job = (await session.execute(statement)).scalars().first()
+    if job is not None:
+        record_changes(session, [job])
+    return job
 
 
 async def release_children(
@@ -256,7 +338,7 @@ async def requeue_lost(
     session: AsyncSession,
     job_id: uuid.UUID,
     attempt: int,
-    lease_timeout: timedelta,
+    limits: SilenceLimits,
 ) -> Job | None:
     """
     Put a job whose agent went silent back in the queue.
@@ -271,8 +353,8 @@ async def requeue_lost(
     :type job_id: uuid.UUID
     :param attempt: The attempt that was lost.
     :type attempt: int
-    :param lease_timeout: Silence longer than this means "lost".
-    :type lease_timeout: timedelta
+    :param limits: Allowed silence, by kind of job.
+    :type limits: SilenceLimits
     :return: The queued job, or None if it was not lost after all.
     :rtype: Job | None
     """
@@ -281,26 +363,30 @@ async def requeue_lost(
         job_id,
         JobStatus.QUEUED,
         expected_attempt=attempt,
-        extra_conditions=[lease_expired(lease_timeout)],
+        extra_conditions=[lease_expired(limits)],
         agent_id=None,
         last_heartbeat_at=None,
         deadline_at=None,
     )
 
 
-def lease_expired(lease_timeout: timedelta) -> ColumnElement[bool]:
+def lease_expired(limits: SilenceLimits) -> ColumnElement[bool]:
     """
-    Condition: the job's agent has been silent for ``lease_timeout``.
+    Condition: the job's agent has been silent longer than allowed for
+    its kind of job.
 
     Uses the database clock, the same clock that stamped the heartbeat,
     so a skewed server clock cannot expire leases early.
 
-    :param lease_timeout: Allowed silence.
-    :type lease_timeout: timedelta
+    :param limits: Allowed silence for local and scheduled jobs.
+    :type limits: SilenceLimits
     :return: SQL condition for use in a WHERE clause.
     :rtype: ColumnElement[bool]
     """
-    return Job.last_heartbeat_at < func.now() - lease_timeout
+    allowed = case(
+        (Job.scheduled, literal(limits.scheduled)), else_=literal(limits.local)
+    )
+    return Job.last_heartbeat_at < func.now() - allowed
 
 
 async def request_cancel(

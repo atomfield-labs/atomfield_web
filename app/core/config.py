@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     SWEEP_INTERVAL_SECONDS: float = 30.0
     # An agent silent this long has lost its jobs.
     LEASE_TIMEOUT_SECONDS: float = 180.0
+    # Jobs a cluster scheduler keeps running without their agent: wait
+    # a day for a crashed agent to come back before giving up.
+    SCHEDULED_LEASE_TIMEOUT_SECONDS: float = 24 * 3600.0
     DEADLINE_GRACE_SECONDS: float = 600.0
 
     # --- Abuse limits ---

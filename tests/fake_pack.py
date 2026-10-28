@@ -4,7 +4,8 @@ A one-module domain pack for tests: real subprocesses, no chemistry.
 ``toy.opt_driver`` mirrors the fixture catalog's ``toy_opt`` flags. It
 copies its input to ``<jobname>_optimized.xyz``, refuses a negative
 charge (exit 3), and with charge 99 sleeps for a minute, which gives
-tests a job they can cancel, abandon or time out.
+tests a job they can cancel, abandon or time out. Given a data pack in
+``TOY_DATA``, it copies the pack's ``table.txt`` to ``data_used.txt``.
 """
 
 from pathlib import Path
@@ -12,7 +13,7 @@ from pathlib import Path
 WATER_XYZ = "3\nwater\nO 0 0 0\nH 0.76 0.59 0\nH -0.76 0.59 0\n"
 SLOW_CHARGE = 99
 FAKE_DRIVER = """
-import argparse, json, sys, time
+import argparse, json, os, shutil, sys, time
 parser = argparse.ArgumentParser()
 parser.add_argument("-i", dest="input")
 parser.add_argument("-JOBNAME", dest="jobname")
@@ -34,6 +35,9 @@ with open(f"{options.jobname}_optimized.xyz", "w") as out:
     out.write(open(options.input).read())
 with open("received.json", "w") as out:
     json.dump(vars(options), out)
+if os.environ.get("TOY_DATA"):
+    table = os.path.join(os.environ["TOY_DATA"], "table.txt")
+    shutil.copyfile(table, "data_used.txt")
 """
 
 
@@ -47,7 +51,7 @@ def install_fake_pack(root: Path) -> Path:
     :rtype: Path
     """
     package = root / "pack" / "toy"
-    package.mkdir(parents=True)
+    package.mkdir(parents=True, exist_ok=True)
     (package / "__init__.py").write_text("")
     (package / "opt_driver.py").write_text(FAKE_DRIVER)
     return root / "pack"

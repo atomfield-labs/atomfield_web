@@ -9,11 +9,13 @@ import uuid
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.models.compute_target import HOUSE_TARGET_ID
 from app.models.job import Job
 from app.runs import lifecycle
 from app.runs.lifecycle import (
     UPSTREAM_FAILED_MESSAGE,
     complete_attempt,
+    mark_started,
     start_attempt,
 )
 from app.runs.states import JobStatus
@@ -205,3 +207,43 @@ def test_a_crash_mid_completion_leaves_nothing_half_done(
     state = asyncio.run(scenario())
     assert state["A"] == (JobStatus.RUNNING, 0)
     assert state["B"] == (JobStatus.WAITING, 1)
+
+
+def test_only_the_first_start_report_sets_the_clock(
+    make_session: async_sessionmaker,
+):
+    """
+    ``mark_started`` re-checks "not started yet" inside its UPDATE, so
+    a second report (or two racing past an earlier read) never moves
+    the start time or the deadline.
+
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
+    """
+
+    async def scenario():
+        async with make_session() as session:
+            ids = await build_graph(session, [("A", "B")])
+            await start_attempt(
+                session,
+                ids["A"],
+                WALLTIME,
+                agent_id=HOUSE_TARGET_ID,
+                scheduled=True,
+            )
+            first = await mark_started(
+                session, ids["A"], 1, HOUSE_TARGET_ID, WALLTIME
+            )
+            await commit_changes(session)
+            clock = (first.started_at, first.deadline_at)
+            await asyncio.sleep(0.05)
+            again = await mark_started(
+                session, ids["A"], 1, HOUSE_TARGET_ID, WALLTIME
+            )
+            await commit_changes(session)
+            job = await session.get(Job, ids["A"], populate_existing=True)
+            return again, clock, (job.started_at, job.deadline_at)
+
+    again, clock, later = asyncio.run(scenario())
+    assert again is None
+    assert later == clock

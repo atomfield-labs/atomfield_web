@@ -31,6 +31,12 @@ class ClaimRequest(BaseModel):
         description="How long the server may hold the request open "
         "waiting for a job (long polling).",
     )
+    scheduled: bool = Field(
+        default=False,
+        description="This agent hands jobs to a scheduler (Slurm): they "
+        "may wait in its queue, so their clock starts only when the "
+        "agent reports them started.",
+    )
 
 
 class InputFile(BaseModel):
@@ -40,6 +46,36 @@ class InputFile(BaseModel):
 
     name: str
     url: str
+
+
+class ArchiveRef(BaseModel):
+    """
+    A zip file an agent downloads once and keeps: its name, version and
+    fingerprint, and a signed link to it.
+    """
+
+    name: str
+    version: str
+    sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$",
+        description="Fingerprint the downloaded file must match.",
+    )
+    url: str
+
+
+class ReleaseRef(ArchiveRef):
+    """
+    The scripts release a job runs (a wheel).
+    """
+
+
+class DataRef(ArchiveRef):
+    """
+    A data pack a job reads, and the environment variable that gets
+    its folder.
+    """
+
+    env: str
 
 
 class JobAssignment(BaseModel):
@@ -65,7 +101,20 @@ class JobAssignment(BaseModel):
         default_factory=list,
         description="Files to download into the job's folder first.",
     )
-    deadline_at: datetime
+    release: ReleaseRef | None = Field(
+        default=None,
+        description="The scripts to run; none for a run from before the "
+        "first release (the agent then needs its own copy).",
+    )
+    data: list[DataRef] = Field(
+        default_factory=list,
+        description="Data packs to have in place before the job starts.",
+    )
+    deadline_at: datetime | None = Field(
+        default=None,
+        description="When the job must be done; none for a job handed "
+        "to a scheduler, which enforces the time limit itself.",
+    )
 
 
 class JobReference(BaseModel):
@@ -83,6 +132,11 @@ class HeartbeatRequest(BaseModel):
     """
 
     jobs: list[JobReference] = Field(default_factory=list)
+    started: list[JobReference] = Field(
+        default_factory=list,
+        description="Attempts that have begun running (not merely "
+        "waiting in a scheduler's queue).",
+    )
 
 
 class PackRequest(BaseModel):

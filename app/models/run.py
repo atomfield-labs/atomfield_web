@@ -40,6 +40,13 @@ class Run(Base):
         ForeignKey("compute_targets.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    # The scripts release every job of the run uses, retries included;
+    # none for runs from before the first release.
+    release_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("script_releases.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     # How many job changes the run has announced; each event carries
     # the counter's value so watchers can order them and spot gaps.

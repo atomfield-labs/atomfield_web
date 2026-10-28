@@ -10,7 +10,29 @@ from collections import Counter
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, PositiveInt, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PositiveInt,
+    model_validator,
+)
+
+# Names and versions of what agents download (releases, data packs):
+# they become folder names on agents' machines.
+PACKAGE_NAME_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._+!-]{0,99}"
+ENVIRONMENT_NAME_PATTERN = r"[A-Z][A-Z0-9_]{0,63}"
+# Variables the agent sets for every job; a data pack may not take one.
+RESERVED_ENVIRONMENT = frozenset(
+    {
+        "HOME",
+        "LD_LIBRARY_PATH",
+        "OMP_NUM_THREADS",
+        "PATH",
+        "PYTHONPATH",
+        "PYTHONUNBUFFERED",
+    }
+)
 
 
 class ParameterKind(StrEnum):
@@ -40,6 +62,10 @@ class Resources(ContractModel):
     cpus: PositiveInt
     memory_mb: PositiveInt
     walltime_minutes: PositiveInt
+    # The task runs ``cpus`` MPI processes (Quantum ESPRESSO, GROMACS)
+    # rather than one process with ``cpus`` threads (xTB); schedulers
+    # are asked for them differently.
+    mpi: bool = False
 
 
 class PlatformFlags(ContractModel):
@@ -109,6 +135,30 @@ class ParameterSpec(ContractModel):
         return self
 
 
+class DataNeed(ContractModel):
+    """
+    A data pack a task reads (pseudopotentials, model weights...), and
+    the environment variable that tells the task where it is.
+    """
+
+    name: str = Field(pattern=f"^{PACKAGE_NAME_PATTERN}$")
+    version: str = Field(pattern=f"^{PACKAGE_NAME_PATTERN}$")
+    env: str = Field(pattern=f"^{ENVIRONMENT_NAME_PATTERN}$")
+
+    @model_validator(mode="after")
+    def check_variable_is_free(self) -> "DataNeed":
+        """
+        Reject a variable the agent sets itself.
+
+        :return: The validated need.
+        :rtype: DataNeed
+        :raises ValueError: If the variable is reserved.
+        """
+        if self.env in RESERVED_ENVIRONMENT:
+            raise ValueError(f"{self.env} is set by the agent; use another")
+        return self
+
+
 class TaskDefinition(ContractModel):
     """
     Everything the platform needs to show, check and run one task.
@@ -124,6 +174,25 @@ class TaskDefinition(ContractModel):
     inputs: list[InputPort]
     outputs: list[OutputPort]
     parameters: list[ParameterSpec]
+    # Data packs the agent puts in place before the task starts.
+    data: list[DataNeed] = []
+
+    @model_validator(mode="after")
+    def check_data_variables_are_unique(self) -> "TaskDefinition":
+        """
+        Reject two data packs handed over in the same variable.
+
+        :return: The validated definition.
+        :rtype: TaskDefinition
+        :raises ValueError: If a variable is used twice.
+        """
+        counts = Counter(need.env for need in self.data)
+        repeated = sorted(env for env, n in counts.items() if n > 1)
+        if repeated:
+            raise ValueError(
+                f"{self.id}: data variables used twice: {repeated}"
+            )
+        return self
 
     @model_validator(mode="after")
     def check_flags_are_unique(self) -> "TaskDefinition":

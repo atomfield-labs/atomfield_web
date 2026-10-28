@@ -19,7 +19,8 @@ import httpx
 
 from agent.agent import Agent
 from agent.config import AgentConfig
-from agent.runner import ProcessRunner, group_is_alive
+from agent.runner import ProcessRunner, Runner, group_is_alive
+from agent.slurm import SlurmRunner, SlurmSettings
 from agent.state import StateFile
 from agent.workspace import prepare_workspace, run_folder
 from app.agents.schemas import (
@@ -36,6 +37,7 @@ from app.agents.schemas import (
 )
 from app.catalog.catalog import Catalog
 from tests.fake_pack import SLOW_CHARGE, WATER_XYZ, install_fake_pack
+from tests.fake_slurm import install_fake_slurm
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "catalog.json"
 CATALOG = Catalog.from_path(FIXTURE)
@@ -86,35 +88,53 @@ class FakeClient:
         self.reports: dict[uuid.UUID, CompletionRequest] = {}
         self.cancel: set[uuid.UUID] = set()
         self.abandon: set[uuid.UUID] = set()
+        self.started: set[uuid.UUID] = set()
+        self.scheduled: bool | None = None
         self.uploads: dict[str, bytes] = {}
         self.stale_uploads = False
         self.packs: list[PackRequest] = []
         self.files: dict[str, bytes] = {}
         self.bundles: dict[uuid.UUID, BundleReport] = {}
+        # What links serve besides water.xyz, and every link fetched.
+        self.served: dict[str, bytes] = {}
+        self.downloads: list[str] = []
 
-    async def claim(self, wait_seconds: float) -> JobAssignment | None:
+    async def claim(
+        self, wait_seconds: float, scheduled: bool = False
+    ) -> JobAssignment | None:
         """
         Hand out the next assignment, or wait briefly and return None.
 
         :param wait_seconds: Ignored long-poll wait.
         :type wait_seconds: float
+        :param scheduled: Recorded: whether the agent's jobs queue.
+        :type scheduled: bool
         :return: The next assignment, if any.
         :rtype: JobAssignment | None
         """
+        self.scheduled = scheduled
         if self.pending:
             return self.pending.pop(0)
         await asyncio.sleep(0.02)
         return None
 
-    async def heartbeat(self, held: list[JobReference]) -> HeartbeatResponse:
+    async def heartbeat(
+        self,
+        held: list[JobReference],
+        started: list[JobReference] | None = None,
+    ) -> HeartbeatResponse:
         """
-        Echo back which held attempts to cancel or abandon.
+        Echo back which held attempts to cancel or abandon; remember
+        which were reported running.
 
         :param held: Attempts the agent is running.
         :type held: list[JobReference]
+        :param started: Those that have begun running.
+        :type started: list[JobReference] | None
         :return: Instructions.
         :rtype: HeartbeatResponse
         """
+        self.started.update(ref.job_id for ref in started or [])
         return HeartbeatResponse(
             cancel=[ref for ref in held if ref.job_id in self.cancel],
             abandon=[ref for ref in held if ref.job_id in self.abandon],
@@ -122,7 +142,8 @@ class FakeClient:
 
     async def download(self, url: str, destination: Path) -> None:
         """
-        Serve water.xyz for any link except ``MISSING_URL`` (404).
+        Serve what ``served`` holds for a link, else water.xyz; a 404
+        for ``MISSING_URL``.
 
         :param url: Signed link.
         :type url: str
@@ -130,6 +151,10 @@ class FakeClient:
         :type destination: Path
         :raises httpx.HTTPStatusError: For the missing file.
         """
+        self.downloads.append(url)
+        if url in self.served:
+            destination.write_bytes(self.served[url])
+            return
         if url == MISSING_URL:
             request = httpx.Request("GET", url)
             response = httpx.Response(404, request=request)
@@ -231,20 +256,35 @@ class RecordingState(StateFile):
         super().__init__(path)
         self.groups: list[int] = []
 
-    def record(self, job_id: str, attempt: int, process_group: int) -> None:
+    def record(
+        self,
+        job_id: str,
+        attempt: int,
+        handle: str,
+        assignment: dict | None = None,
+    ) -> None:
         """
+        Remember the job, noting its process group.
+
         :param job_id: Job id.
         :type job_id: str
         :param attempt: Attempt number.
         :type attempt: int
-        :param process_group: Its process group.
-        :type process_group: int
+        :param handle: Its process group.
+        :type handle: str
+        :param assignment: The assignment as JSON.
+        :type assignment: dict | None
         """
-        self.groups.append(process_group)
-        super().record(job_id, attempt, process_group)
+        self.groups.append(int(handle))
+        super().record(job_id, attempt, handle, assignment)
 
 
-def make_agent(tmp_path: Path, client: FakeClient) -> Agent:
+def make_agent(
+    tmp_path: Path,
+    client: FakeClient,
+    runner: Runner | None = None,
+    own_copy: bool = True,
+) -> Agent:
     """
     An agent with fast timers, running the fake pack in tmp_path.
 
@@ -252,6 +292,11 @@ def make_agent(tmp_path: Path, client: FakeClient) -> Agent:
     :type tmp_path: Path
     :param client: Fake API client.
     :type client: FakeClient
+    :param runner: How jobs run; local processes by default.
+    :type runner: Runner | None
+    :param own_copy: Run the fake pack as the owner's own copy; else
+        jobs run the release they name.
+    :type own_copy: bool
     :return: Ready agent.
     :rtype: Agent
     """
@@ -259,14 +304,14 @@ def make_agent(tmp_path: Path, client: FakeClient) -> Agent:
         api_url="http://unused",
         token="unused",
         python_bin=sys.executable,
-        pack_source_dir=install_fake_pack(tmp_path),
+        pack_source_dir=install_fake_pack(tmp_path) if own_copy else None,
         artifacts_dir=tmp_path / "jobs",
         state_file=tmp_path / "state.json",
         heartbeat_seconds=0.05,
         claim_wait_seconds=0.05,
     )
     state = RecordingState(config.state_file)
-    return Agent(config, client, ProcessRunner(), state)
+    return Agent(config, client, runner or ProcessRunner(), state)
 
 
 def run_until(agent: Agent, condition, timeout: float = 20.0) -> None:
@@ -406,10 +451,10 @@ def test_orphans_of_a_crashed_agent_are_stopped_on_restart(tmp_path: Path):
     """
     orphan = subprocess.Popen(["sleep", "60"], start_new_session=True)
     state = StateFile(tmp_path / "state.json")
-    state.record("crashed-job", 1, orphan.pid)
+    state.record("crashed-job", 1, str(orphan.pid))
     agent = make_agent(tmp_path, FakeClient())
 
-    asyncio.run(agent.recover_orphans())
+    asyncio.run(agent.recover_jobs())
 
     assert orphan.wait(timeout=5) != 0
     assert state.load() == {}
@@ -582,3 +627,115 @@ def test_a_zip_over_the_limit_is_reported_too_big(tmp_path: Path):
 
     assert client.bundles[job.run_id].status == "too_big"
     assert client.files == {}
+
+
+def slurm(tmp_path: Path, **switches: str) -> SlurmRunner:
+    """
+    A Slurm runner on fake Slurm commands, polling fast.
+
+    :param tmp_path: Empty directory for this test.
+    :type tmp_path: Path
+    :param switches: ``FAKE_SLURM_*`` settings.
+    :type switches: str
+    :return: Runner.
+    :rtype: SlurmRunner
+    """
+    environment = {**install_fake_slurm(tmp_path / "slurm"), **switches}
+    return SlurmRunner(
+        SlurmSettings(poll_seconds=0.05, environment=environment)
+    )
+
+
+def test_a_job_runs_through_slurm_to_success(tmp_path: Path):
+    """
+    The claim says this agent's jobs queue; the job goes through
+    Slurm (its batch script in the job's folder) and the report carries
+    its files.
+
+    :param tmp_path: Empty directory for this test.
+    :type tmp_path: Path
+    """
+    job = assign(charge=1)
+    client = FakeClient(job)
+    run_until(
+        make_agent(tmp_path, client, slurm(tmp_path)), lambda: client.reports
+    )
+
+    report = client.reports[job.job_id]
+    assert client.scheduled is True
+    assert report.outcome == "succeeded"
+    assert any(card.path == "toy_opt_optimized.xyz" for card in report.files)
+    folder = run_folder(tmp_path / "jobs", job.run_id) / "opt"
+    assert (folder / "job.sbatch").exists()
+
+
+def test_a_running_slurm_job_is_reported_started_and_can_be_cancelled(
+    tmp_path: Path,
+):
+    """
+    Once Slurm runs the job, heartbeats say so (the server then starts
+    its clock); a cancel goes through ``scancel``.
+
+    :param tmp_path: Empty directory for this test.
+    :type tmp_path: Path
+    """
+    job = assign(charge=SLOW_CHARGE)
+    client = FakeClient(job)
+
+    def started_then_cancelled() -> bool:
+        if job.job_id in client.started:
+            client.cancel.add(job.job_id)
+        return job.job_id in client.reports
+
+    run_until(
+        make_agent(tmp_path, client, slurm(tmp_path)), started_then_cancelled
+    )
+
+    assert job.job_id in client.started
+    assert client.reports[job.job_id].outcome == "cancelled"
+
+
+def test_a_slurm_job_outlives_its_agent_and_is_adopted(tmp_path: Path):
+    """
+    The agent stops while its job waits in Slurm's queue: the job is
+    left running and remembered. A new agent takes it over and reports
+    it, though it never claimed it.
+
+    :param tmp_path: Empty directory for this test.
+    :type tmp_path: Path
+    """
+    job = assign(charge=1)
+    first_client = FakeClient(job)
+    runner = slurm(tmp_path, FAKE_SLURM_PENDING_SECONDS="1")
+    first = make_agent(tmp_path, first_client, runner)
+    run_until(first, lambda: first.state.load())
+
+    assert first_client.reports == {}
+    assert str(job.job_id) in first.state.load()
+
+    second_client = FakeClient()
+    second = make_agent(tmp_path, second_client, SlurmRunner(runner.settings))
+    run_until(second, lambda: second_client.reports)
+
+    assert second_client.reports[job.job_id].outcome == "succeeded"
+    assert second.state.load() == {}
+
+
+def test_slurm_stopping_a_job_at_its_limit_fails_it_as_timed_out(
+    tmp_path: Path,
+):
+    """
+    When Slurm ends a job at ``--time`` (state TIMEOUT), the report is
+    the usual time-limit failure.
+
+    :param tmp_path: Empty directory for this test.
+    :type tmp_path: Path
+    """
+    job = assign(charge=1)
+    client = FakeClient(job)
+    runner = slurm(tmp_path, FAKE_SLURM_FINAL_STATE="TIMEOUT")
+    run_until(make_agent(tmp_path, client, runner), lambda: client.reports)
+
+    report = client.reports[job.job_id]
+    assert report.outcome == "failed"
+    assert "limit" in report.error_message

@@ -6,18 +6,18 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
-    get_catalog,
     get_current_api_key,
+    get_current_catalog,
     get_job_queue,
     get_optional_api_key,
     get_owned_job,
     get_store,
 )
-from app.catalog.catalog import Catalog
 from app.db.session import get_db
 from app.models.api_key import ApiKey
 from app.models.job import Job
 from app.queue.job_queue import RedisJobQueue
+from app.releases.catalogs import CurrentCatalog
 from app.schemas.job import (
     JobListResponse,
     JobResponse,
@@ -46,7 +46,7 @@ async def submit_job(
     api_key: ApiKey = Depends(get_current_api_key),
     db: AsyncSession = Depends(get_db),
     queue: RedisJobQueue = Depends(get_job_queue),
-    catalog: Catalog = Depends(get_catalog),
+    current: CurrentCatalog = Depends(get_current_catalog),
 ):
     """
     Submit a standalone simulation job to the queue.
@@ -59,14 +59,19 @@ async def submit_job(
     :type db: AsyncSession
     :param queue: Job queue the job is sent to.
     :type queue: RedisJobQueue
-    :param catalog: Task catalog the request is checked against.
-    :type catalog: Catalog
+    :param current: The newest release, which the job is checked
+        against and pinned to.
+    :type current: CurrentCatalog
     :return: Created Job entity with Pending status.
     :rtype: Job
     """
-    job_req = validate_job_request(catalog, job_req)
+    job_req = validate_job_request(current.catalog, job_req)
     return await job_service.create_job(
-        db=db, request=job_req, queue=queue, api_key=api_key
+        db=db,
+        request=job_req,
+        queue=queue,
+        api_key=api_key,
+        release_id=current.release_id,
     )
 
 
@@ -81,7 +86,7 @@ async def submit_pipeline(
     db: AsyncSession = Depends(get_db),
     queue: RedisJobQueue = Depends(get_job_queue),
     store: ArtifactStore = Depends(get_store),
-    catalog: Catalog = Depends(get_catalog),
+    current: CurrentCatalog = Depends(get_current_catalog),
 ):
     """
     Submit a DAG pipeline of simulation jobs.
@@ -96,18 +101,20 @@ async def submit_pipeline(
     :type queue: RedisJobQueue
     :param store: Where attached files are kept for agents.
     :type store: ArtifactStore
-    :param catalog: Task catalog every node is checked against.
-    :type catalog: Catalog
+    :param current: The newest release, which every node is checked
+        against and the run is pinned to.
+    :type current: CurrentCatalog
     :return: Pipeline submission receipt and job ID mappings.
     :rtype: dict
     """
-    pipeline_req = validate_pipeline_request(catalog, pipeline_req)
+    pipeline_req = validate_pipeline_request(current.catalog, pipeline_req)
     return await job_service.submit_pipeline(
         db=db,
         request=pipeline_req,
         queue=queue,
         store=store,
         api_key=api_key,
+        release_id=current.release_id,
     )
 
 

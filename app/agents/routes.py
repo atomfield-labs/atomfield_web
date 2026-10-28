@@ -48,14 +48,14 @@ async def get_agent_services(request: Request) -> AgentServices:
 
     :param request: Active FastAPI HTTP request object.
     :type request: Request
-    :return: Queue, bus, catalog and store.
+    :return: Queue, bus, catalogs and store.
     :rtype: AgentServices
     """
     state = request.app.state
     return AgentServices(
         queue=state.job_queue,
         bus=state.event_bus,
-        catalog=state.catalog,
+        catalogs=state.catalogs,
         store=state.store,
     )
 
@@ -80,12 +80,14 @@ async def claim(
     :type target: ComputeTarget
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param services: Queue, bus, catalog and store.
+    :param services: Queue, bus, catalogs and store.
     :type services: AgentServices
     :return: The assignment, or an empty 204 response.
     :rtype: JobAssignment | Response
     """
-    assignment = await claim_next(db, services, target, request.wait_seconds)
+    assignment = await claim_next(
+        db, services, target, request.wait_seconds, request.scheduled
+    )
     if assignment is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     return assignment
@@ -107,12 +109,14 @@ async def heartbeat(
     :type target: ComputeTarget
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param services: Queue, bus, catalog and store.
+    :param services: Queue, bus, catalogs and store.
     :type services: AgentServices
     :return: Attempts to cancel or abandon, and runs to zip.
     :rtype: HeartbeatResponse
     """
-    return await record_heartbeat(db, services.store, target, request.jobs)
+    return await record_heartbeat(
+        db, services, target, request.jobs, request.started
+    )
 
 
 @router.post("/jobs/{job_id}/complete", response_model=CompletionResponse)
@@ -134,7 +138,7 @@ async def complete(
     :type target: ComputeTarget
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param services: Queue, bus, catalog and store.
+    :param services: Queue, bus, catalogs and store.
     :type services: AgentServices
     :return: The recorded outcome.
     :rtype: CompletionResponse
@@ -173,7 +177,7 @@ async def uploads(
     :type target: ComputeTarget
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param services: Queue, bus, catalog and store.
+    :param services: Queue, bus, catalogs and store.
     :type services: AgentServices
     :return: One link per name.
     :rtype: UploadLinksResponse

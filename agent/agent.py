@@ -13,20 +13,29 @@ from typing import Protocol
 
 import httpx
 
+from agent.archives import (
+    ArchiveCache,
+    ArchiveUnavailableError,
+)
 from agent.config import AgentConfig
+from agent.made_with import scripts_entry, write_made_with
 from agent.packer import BundleTooLargeError, write_bundle
 from agent.reports import StopReason, crash_report, exit_report, stopped_report
 from agent.results import file_cards, pick_ui_files, upload_body
-from agent.runner import Execution, Runner, stop_group
+from agent.runner import Command, Execution, Runner
 from agent.state import StateFile
 from agent.workspace import (
+    DATA_DIR,
     EXECUTION_LOG,
-    build_environment,
+    RELEASES_DIR,
+    job_environment,
+    job_folder,
     prepare_workspace,
     require_plain_name,
     run_folder,
 )
 from app.agents.schemas import (
+    ArchiveRef,
     BundleReport,
     CompletionRequest,
     CompletionResponse,
@@ -36,6 +45,7 @@ from app.agents.schemas import (
     JobAssignment,
     JobReference,
     PackRequest,
+    ReleaseRef,
     UploadLinksResponse,
 )
 from app.catalog.argv import Invocation, build_argv
@@ -51,22 +61,32 @@ class ApiClient(Protocol):
     The calls the agent makes; ``AgentClient`` or a test double.
     """
 
-    async def claim(self, wait_seconds: float) -> JobAssignment | None:
+    async def claim(
+        self, wait_seconds: float, scheduled: bool
+    ) -> JobAssignment | None:
         """
         Ask for one job.
 
         :param wait_seconds: Long-poll wait.
         :type wait_seconds: float
+        :param scheduled: Jobs go to a scheduler and may queue there.
+        :type scheduled: bool
         :return: An assignment, or None.
         :rtype: JobAssignment | None
         """
 
-    async def heartbeat(self, held: list[JobReference]) -> HeartbeatResponse:
+    async def heartbeat(
+        self,
+        held: list[JobReference],
+        started: list[JobReference],
+    ) -> HeartbeatResponse:
         """
-        Report the attempts in progress.
+        Report the attempts in progress, and which have begun running.
 
         :param held: Attempts in progress.
         :type held: list[JobReference]
+        :param started: Those that have begun running.
+        :type started: list[JobReference]
         :return: Attempts to cancel or abandon.
         :rtype: HeartbeatResponse
         """
@@ -147,6 +167,12 @@ class ApiClient(Protocol):
         """
 
 
+class NoScriptsError(RuntimeError):
+    """
+    A job without a release, on an agent without its own copy.
+    """
+
+
 class InputUnavailableError(RuntimeError):
     """
     An input file could not be downloaded.
@@ -171,12 +197,15 @@ class RunningJob:
     :type assignment: JobAssignment
     :param execution: Handle to the running command.
     :type execution: Execution
+    :param workspace: The job's folder.
+    :type workspace: Path
     :param stop_reason: Set when the agent stops the job itself.
     :type stop_reason: StopReason | None
     """
 
     assignment: JobAssignment
     execution: Execution
+    workspace: Path
     stop_reason: StopReason | None = None
 
     @property
@@ -202,6 +231,25 @@ def seconds_left(deadline: datetime) -> float:
     :rtype: float
     """
     return max(0.0, (deadline - datetime.now(UTC)).total_seconds())
+
+
+async def fetch_archive(cache: ArchiveCache, archive: ArchiveRef) -> Path:
+    """
+    An archive's folder, downloaded the first time it is needed.
+
+    :param cache: Where archives of this kind are kept.
+    :type cache: ArchiveCache
+    :param archive: The release or data pack.
+    :type archive: ArchiveRef
+    :return: Its folder.
+    :rtype: Path
+    :raises ArchiveUnavailableError: If the download fails.
+    :raises ArchiveMismatchError: If the download is not that archive.
+    """
+    try:
+        return await cache.ensure(archive)
+    except httpx.HTTPError as error:
+        raise ArchiveUnavailableError(archive, error) from error
 
 
 def invocation_for(assignment: JobAssignment) -> Invocation:
@@ -249,6 +297,9 @@ class Agent:
         self.client = client
         self.runner = runner
         self.state = state
+        work = config.artifacts_dir
+        self.releases = ArchiveCache(work / RELEASES_DIR, client.download)
+        self.data = ArchiveCache(work / DATA_DIR, client.download)
         self.slots = asyncio.Semaphore(config.max_jobs)
         self.running: dict[str, RunningJob] = {}
         self.tasks: set[asyncio.Task] = set()
@@ -267,25 +318,41 @@ class Agent:
         """
         Recover from a previous crash, then work until asked to stop.
         """
-        await self.recover_orphans()
+        await self.recover_jobs()
         heartbeats = asyncio.create_task(self.heartbeat_loop())
         try:
             await self.claim_loop()
         finally:
             await self.stop_all()
             heartbeats.cancel()
+            await self.runner.close()
 
-    async def recover_orphans(self) -> None:
+    async def recover_jobs(self) -> None:
         """
-        Stop processes a crashed predecessor left running.
-
-        Their results cannot be trusted or collected; the server sees no
-        heartbeat for them and retries each job on a new attempt.
+        Deal with the jobs a previous agent left: the runner stops a
+        local orphan (its results cannot be trusted; the server retries
+        it) or takes over a Slurm job, which is then watched and
+        reported like any other.
         """
-        for job_id, info in self.state.load().items():
-            logger.warning("Stopping orphaned job %s from a crash", job_id)
-            await stop_group(info["process_group"])
-        self.state.save({})
+        for job_id, entry in self.state.load().items():
+            handle = str(entry.get("handle", entry.get("process_group")))
+            saved = entry.get("assignment")
+            assignment = JobAssignment.model_validate(saved) if saved else None
+            workspace = (
+                job_folder(self.config.artifacts_dir, assignment)
+                if assignment
+                else self.config.artifacts_dir
+            )
+            execution = await self.runner.adopt(handle, workspace)
+            if execution is None or assignment is None:
+                logger.warning("Stopped job %s left by a crash", job_id)
+                self.state.forget(job_id)
+                continue
+            logger.info("Took over job %s (%s)", job_id, handle)
+            await self.slots.acquire()
+            running = RunningJob(assignment, execution, workspace)
+            self.running[job_id] = running
+            self.spawn(self.see_through(assignment, self.conclude(running)))
 
     async def claim_loop(self) -> None:
         """
@@ -297,9 +364,18 @@ class Agent:
             if assignment is None:
                 self.slots.release()
                 continue
-            task = asyncio.create_task(self.run_job(assignment))
-            self.tasks.add(task)
-            task.add_done_callback(self.tasks.discard)
+            self.spawn(self.run_job(assignment))
+
+    def spawn(self, job_work) -> None:
+        """
+        Run one job's work in the background, kept until it is done.
+
+        :param job_work: Coroutine that runs and reports one job.
+        :type job_work: Coroutine
+        """
+        task = asyncio.create_task(job_work)
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
 
     async def claim_once(self) -> JobAssignment | None:
         """
@@ -309,7 +385,9 @@ class Agent:
         :rtype: JobAssignment | None
         """
         try:
-            return await self.client.claim(self.config.claim_wait_seconds)
+            return await self.client.claim(
+                self.config.claim_wait_seconds, self.runner.scheduled
+            )
         except httpx.HTTPError as error:
             logger.warning("Claim failed (%s); retrying shortly", error)
             await self.pause(ERROR_BACKOFF_SECONDS)
@@ -329,19 +407,31 @@ class Agent:
 
     async def run_job(self, assignment: JobAssignment) -> None:
         """
-        Run one attempt and report it; never let one job kill the agent.
+        Run one attempt and report it.
 
         :param assignment: What the server handed out.
         :type assignment: JobAssignment
         """
+        await self.see_through(assignment, self.execute(assignment))
+
+    async def see_through(self, assignment: JobAssignment, job_work) -> None:
+        """
+        Await one job's work and report it; never let one job kill the
+        agent. If the agent is stopping (the work is cancelled), the
+        job stays in the state file for the next agent.
+
+        :param assignment: The attempt.
+        :type assignment: JobAssignment
+        :param job_work: Coroutine returning the report (or None).
+        :type job_work: Coroutine
+        """
         job_id = str(assignment.job_id)
         try:
-            report = await self.execute(assignment)
+            report = await job_work
         except Exception as error:  # outermost boundary for one job
             logger.exception("Job %s crashed in the agent", job_id)
             report = crash_report(assignment, error)
-        finally:
-            self.release(job_id)
+        self.release(job_id)
         if report is not None:
             await self.report(assignment, report)
 
@@ -368,24 +458,138 @@ class Agent:
         :rtype: CompletionRequest | None
         """
         job_id = str(assignment.job_id)
+        workspace, command = await self.prepare(assignment)
+        execution = await self.runner.start(command)
+        running = RunningJob(assignment, execution, workspace)
+        self.running[job_id] = running
+        self.state.record(
+            job_id,
+            assignment.attempt,
+            execution.handle,
+            assignment.model_dump(mode="json"),
+        )
+        return await self.conclude(running)
+
+    async def prepare(self, assignment: JobAssignment) -> tuple[Path, Command]:
+        """
+        Put everything in place (scripts, data packs, the job's folder
+        and its inputs), then describe the command.
+
+        :param assignment: The attempt.
+        :type assignment: JobAssignment
+        :return: The job's folder, and its command.
+        :rtype: tuple[Path, Command]
+        """
+        scripts = await self.scripts_folder(assignment)
+        data = await self.data_folders(assignment)
         workspace = prepare_workspace(self.config.artifacts_dir, assignment)
+        used = scripts_entry(scripts, self.release_used(assignment))
+        write_made_with(workspace, used, assignment.data, data)
         await self.fetch_inputs(assignment, workspace)
-        pipeline_id = assignment.parameters.get("pipeline_id", job_id)
+        return workspace, self.command_for(assignment, workspace, scripts, data)
+
+    def release_used(self, assignment: JobAssignment) -> ReleaseRef | None:
+        """
+        The release a job runs: its run's, unless the owner chose to
+        run their own copy (``pack_dir``).
+
+        :param assignment: The attempt.
+        :type assignment: JobAssignment
+        :return: The release, or None for the owner's own copy.
+        :rtype: ReleaseRef | None
+        """
+        if self.config.pack_source_dir is not None:
+            return None
+        return assignment.release
+
+    async def scripts_folder(self, assignment: JobAssignment) -> Path:
+        """
+        Where the job's scripts are: the owner's own copy if they chose
+        one, else the job's release, downloaded the first time.
+
+        :param assignment: The attempt.
+        :type assignment: JobAssignment
+        :return: Folder to put on ``PYTHONPATH``.
+        :rtype: Path
+        :raises NoScriptsError: Without a release or an own copy.
+        :raises ArchiveUnavailableError: If the download fails.
+        """
+        if self.config.pack_source_dir is not None:
+            return self.config.pack_source_dir
+        if assignment.release is None:
+            raise NoScriptsError(
+                "This run has no scripts release and this agent has no "
+                "copy of its own (pack_dir): publish a release"
+            )
+        return await fetch_archive(self.releases, assignment.release)
+
+    async def data_folders(self, assignment: JobAssignment) -> dict[str, Path]:
+        """
+        Have each data pack the job reads in place.
+
+        :param assignment: The attempt.
+        :type assignment: JobAssignment
+        :return: Environment variable -> the pack's folder.
+        :rtype: dict[str, Path]
+        :raises ArchiveUnavailableError: If a download fails.
+        """
+        folders = {}
+        for pack in assignment.data:
+            folders[pack.env] = await fetch_archive(self.data, pack)
+        return folders
+
+    def command_for(
+        self,
+        assignment: JobAssignment,
+        workspace: Path,
+        scripts: Path,
+        data: dict[str, Path],
+    ) -> Command:
+        """
+        The command that runs one attempt.
+
+        :param assignment: The attempt.
+        :type assignment: JobAssignment
+        :param workspace: The job's folder.
+        :type workspace: Path
+        :param scripts: Folder holding the scripts.
+        :type scripts: Path
+        :param data: Environment variable -> data pack folder.
+        :type data: dict[str, Path]
+        :return: Command for the runner.
+        :rtype: Command
+        """
         argv = build_argv(
             assignment.task, invocation_for(assignment), self.config.python_bin
         )
-        environment = build_environment(self.config.pack_source_dir)
-        log_path = workspace / EXECUTION_LOG
-        execution = await self.runner.start(
-            argv, workspace, log_path, environment
+        packs = {variable: str(folder) for variable, folder in data.items()}
+        return Command(
+            argv=argv,
+            workspace=workspace,
+            log_path=workspace / EXECUTION_LOG,
+            environment={**job_environment(scripts), **packs},
+            name=f"af-{assignment.node_key}",
+            resources=assignment.task.resources,
         )
-        running = RunningJob(assignment, execution)
-        self.running[job_id] = running
-        self.state.record(job_id, assignment.attempt, execution.process_group)
-        report = await self.finish(running, workspace, pipeline_id)
+
+    async def conclude(self, running: RunningJob) -> CompletionRequest | None:
+        """
+        Wait for a started (or taken over) job, then build its report
+        with its files.
+
+        :param running: The job.
+        :type running: RunningJob
+        :return: The report, or None if the job was abandoned.
+        :rtype: CompletionRequest | None
+        """
+        assignment = running.assignment
+        pipeline_id = assignment.parameters.get(
+            "pipeline_id", str(assignment.job_id)
+        )
+        report = await self.finish(running, running.workspace, pipeline_id)
         if report is None:
             return None
-        return await self.attach_results(assignment, workspace, report)
+        return await self.attach_results(assignment, running.workspace, report)
 
     async def attach_results(
         self,
@@ -496,7 +700,13 @@ class Agent:
         assignment = running.assignment
         loop = asyncio.get_running_loop()
         started_at = loop.time()
-        timeout = seconds_left(assignment.deadline_at)
+        # A scheduler (Slurm) times its jobs from when they really start;
+        # the agent times only its own children.
+        timeout = (
+            None
+            if self.runner.scheduled
+            else seconds_left(assignment.deadline_at)
+        )
         try:
             return_code = await asyncio.wait_for(
                 running.execution.wait(), timeout
@@ -504,6 +714,8 @@ class Agent:
         except TimeoutError:
             running.stop_reason = running.stop_reason or StopReason.TIMEOUT
             await running.execution.terminate()
+        if running.execution.timed_out:
+            running.stop_reason = running.stop_reason or StopReason.TIMEOUT
         duration = round(loop.time() - started_at, 2)
         if running.stop_reason is not None:
             return stopped_report(assignment, running.stop_reason, duration)
@@ -548,8 +760,13 @@ class Agent:
         while not self.stopping.is_set():
             await self.pause(self.config.heartbeat_seconds)
             held = [running.reference for running in self.running.values()]
+            started = [
+                running.reference
+                for running in self.running.values()
+                if running.execution.started
+            ]
             try:
-                reply = await self.client.heartbeat(held)
+                reply = await self.client.heartbeat(held, started)
             except httpx.HTTPError as error:
                 logger.warning("Heartbeat failed (%s)", error)
                 continue
@@ -580,8 +797,14 @@ class Agent:
         On shutdown, stop every job without reporting; the server will
         retry them when their leases expire.
         """
-        for running in list(self.running.values()):
-            await self.stop(running.reference, StopReason.ABANDONED)
+        if self.runner.scheduled:
+            # Slurm keeps the jobs running; they stay in the state file
+            # and the next agent takes them over.
+            for task in self.tasks:
+                task.cancel()
+        else:
+            for running in list(self.running.values()):
+                await self.stop(running.reference, StopReason.ABANDONED)
         if self.tasks:
             await asyncio.gather(*self.tasks, return_exceptions=True)
         # Unfinished zips are requested again by the server's sweeper.

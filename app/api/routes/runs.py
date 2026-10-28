@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
+    get_catalogs,
     get_current_api_key,
     get_event_bus,
     get_owned_job,
@@ -24,6 +25,8 @@ from app.models.api_key import ApiKey
 from app.models.compute_target import ComputeTarget
 from app.models.job import Job
 from app.models.run import Run
+from app.releases.catalogs import ReleaseCatalogs, run_data_packs
+from app.releases.service import release_label
 from app.runs.bundles import BundleStatus, bundle_name, request_bundle
 from app.runs.lifecycle import request_cancel
 from app.runs.states import FINAL_STATUSES, JobStatus
@@ -187,9 +190,11 @@ async def describe_bundle(
     db: AsyncSession,
     store: ArtifactStore,
     run: Run,
+    catalogs: ReleaseCatalogs,
 ) -> BundleInfo:
     """
-    Everything the UI needs to offer a run's files.
+    Everything the UI needs to offer a run's files, and which scripts
+    release made them.
 
     The folder is shown only for runs whose files stayed on a machine
     the user can reach; the house agent's folder is ours, not theirs.
@@ -200,6 +205,8 @@ async def describe_bundle(
     :type store: ArtifactStore
     :param run: The run (freshly loaded).
     :type run: Run
+    :param catalogs: Tell which data packs the run's tasks read.
+    :type catalogs: ReleaseCatalogs
     :return: Status, link and location.
     :rtype: BundleInfo
     """
@@ -222,6 +229,8 @@ async def describe_bundle(
         download_url=link,
         error=run.bundle_error,
         folder=folder_info(run) if keeps_files else None,
+        made_with=await release_label(db, run.release_id),
+        data_packs=await run_data_packs(db, catalogs, run),
     )
 
 
@@ -230,6 +239,7 @@ async def get_bundle(
     run: Run = Depends(get_owned_run),
     db: AsyncSession = Depends(get_db),
     store: ArtifactStore = Depends(get_store),
+    catalogs: ReleaseCatalogs = Depends(get_catalogs),
 ) -> BundleInfo:
     """
     How to get a run's files: a download link, or where they are.
@@ -240,11 +250,13 @@ async def get_bundle(
     :type db: AsyncSession
     :param store: Signs the download link.
     :type store: ArtifactStore
+    :param catalogs: Tell which data packs the run's tasks read.
+    :type catalogs: ReleaseCatalogs
     :return: Zip status and link, or the folder and copy command.
     :rtype: BundleInfo
     """
     await db.refresh(run)
-    return await describe_bundle(db, store, run)
+    return await describe_bundle(db, store, run, catalogs)
 
 
 @router.post("/runs/{run_id}/bundle", response_model=BundleInfo)
@@ -252,6 +264,7 @@ async def make_bundle(
     run: Run = Depends(get_owned_run),
     db: AsyncSession = Depends(get_db),
     store: ArtifactStore = Depends(get_store),
+    catalogs: ReleaseCatalogs = Depends(get_catalogs),
 ) -> BundleInfo:
     """
     Ask for a run's zip ("Make a download link"); the agent holding
@@ -264,6 +277,8 @@ async def make_bundle(
     :type db: AsyncSession
     :param store: Signs the download link.
     :type store: ArtifactStore
+    :param catalogs: Tell which data packs the run's tasks read.
+    :type catalogs: ReleaseCatalogs
     :return: The zip's state after the request.
     :rtype: BundleInfo
     :raises HTTPException: 409 while the run is still running.
@@ -275,4 +290,4 @@ async def make_bundle(
     await request_bundle(db, run.id)
     await db.commit()
     await db.refresh(run)
-    return await describe_bundle(db, store, run)
+    return await describe_bundle(db, store, run, catalogs)

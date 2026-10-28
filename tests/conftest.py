@@ -11,13 +11,17 @@ from collections.abc import Callable, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import pool
+from sqlalchemy import delete, pool, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import settings
 from app.db.migrate import migrate
 from app.main import app
-from tests.stores import reset_test_stores
+from app.models.compute_target import HOUSE_TARGET_ID
+from app.models.data_pack import DataPack
+from app.models.run import Run
+from app.models.script_release import ScriptRelease
+from tests.stores import make_redis, reset_test_stores
 
 UserHeadersFactory = Callable[..., dict[str, str]]
 
@@ -93,3 +97,37 @@ def make_session(client: TestClient) -> Iterator[async_sessionmaker]:
     """
     engine = create_async_engine(settings.database_url, poolclass=pool.NullPool)
     yield async_sessionmaker(engine, expire_on_commit=False)
+
+
+@pytest.fixture
+def releases(client: TestClient, make_session: async_sessionmaker) -> Iterator:
+    """
+    Start with an empty house queue; afterwards remove every release
+    and data pack, so the tests after this one submit runs without a
+    release, as before.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param make_session: Session factory on the test database.
+    :type make_session: async_sessionmaker
+    :return: Nothing; cleans up afterwards.
+    :rtype: Iterator
+    """
+
+    async def empty_house_queue():
+        redis = make_redis()
+        try:
+            await redis.delete(f"queue:{HOUSE_TARGET_ID}")
+        finally:
+            await redis.aclose()
+
+    async def forget_publications():
+        async with make_session() as session:
+            await session.execute(update(Run).values(release_id=None))
+            await session.execute(delete(ScriptRelease))
+            await session.execute(delete(DataPack))
+            await session.commit()
+
+    asyncio.run(empty_house_queue())
+    yield
+    asyncio.run(forget_publications())

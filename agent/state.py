@@ -1,9 +1,11 @@
 """
-The agent's memory across restarts: which process groups it started.
+The agent's memory across restarts: which jobs it started, how to find
+each again (its handle: a process group, a Slurm job id), and the
+whole assignment.
 
-If the agent dies, its jobs' processes keep running (they are in their
-own process groups). On the next start the agent stops those orphans;
-the server, seeing no heartbeat, retries the jobs on a new attempt.
+On the next start the runner decides: a local orphan is stopped (its
+parent is gone; the server retries the job), a Slurm job is taken
+over (Slurm kept it running; the new agent watches and reports it).
 """
 
 import json
@@ -27,7 +29,7 @@ class StateFile:
         """
         self.path = path
 
-    def load(self) -> dict[str, dict[str, int]]:
+    def load(self) -> dict[str, dict]:
         """
         Read the recorded jobs; a missing or broken file means none.
 
@@ -39,7 +41,7 @@ class StateFile:
         except (OSError, ValueError, KeyError):
             return {}
 
-    def save(self, jobs: dict[str, dict[str, int]]) -> None:
+    def save(self, jobs: dict[str, dict]) -> None:
         """
         Write the recorded jobs atomically.
 
@@ -55,7 +57,13 @@ class StateFile:
         temporary.write_text(json.dumps({JOBS_KEY: jobs}), encoding="utf-8")
         os.replace(temporary, self.path)
 
-    def record(self, job_id: str, attempt: int, process_group: int) -> None:
+    def record(
+        self,
+        job_id: str,
+        attempt: int,
+        handle: str,
+        assignment: dict | None = None,
+    ) -> None:
         """
         Remember a started job.
 
@@ -63,11 +71,18 @@ class StateFile:
         :type job_id: str
         :param attempt: Attempt number.
         :type attempt: int
-        :param process_group: Its process group.
-        :type process_group: int
+        :param handle: How the runner finds the job again.
+        :type handle: str
+        :param assignment: The assignment as JSON, so a new agent can
+            take the job over.
+        :type assignment: dict | None
         """
         jobs = self.load()
-        jobs[job_id] = {"attempt": attempt, "process_group": process_group}
+        jobs[job_id] = {
+            "attempt": attempt,
+            "handle": handle,
+            "assignment": assignment,
+        }
         self.save(jobs)
 
     def forget(self, job_id: str) -> None:

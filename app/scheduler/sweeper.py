@@ -32,7 +32,12 @@ from app.models.job import Job
 from app.models.run import Run
 from app.queue.job_queue import RedisJobQueue
 from app.runs.bundles import expire_bundles, requeue_stuck_packs
-from app.runs.lifecycle import complete_attempt, lease_expired, requeue_lost
+from app.runs.lifecycle import (
+    SilenceLimits,
+    complete_attempt,
+    lease_expired,
+    requeue_lost,
+)
 from app.runs.states import JobStatus
 from app.storage.keys import bundle_key
 from app.storage.store import ArtifactStore
@@ -87,7 +92,7 @@ class Sweeper:
         redis: Redis,
         store: ArtifactStore,
         interval_seconds: float,
-        lease_timeout: timedelta,
+        limits: SilenceLimits,
         deadline_grace: timedelta,
     ) -> None:
         """
@@ -105,8 +110,9 @@ class Sweeper:
         :type store: ArtifactStore
         :param interval_seconds: Time between passes.
         :type interval_seconds: float
-        :param lease_timeout: Silence after which a job counts as lost.
-        :type lease_timeout: timedelta
+        :param limits: Silence after which a job counts as lost, by
+            kind of job (local, scheduled).
+        :type limits: SilenceLimits
         :param deadline_grace: Extra time past a deadline before failing.
         :type deadline_grace: timedelta
         """
@@ -116,7 +122,7 @@ class Sweeper:
         self.redis = redis
         self.store = store
         self.interval_seconds = interval_seconds
-        self.lease_timeout = lease_timeout
+        self.limits = limits
         self.deadline_grace = deadline_grace
 
     async def run_forever(self) -> None:
@@ -221,7 +227,7 @@ class Sweeper:
         :param report: Pass report to update.
         :type report: SweepReport
         """
-        expired = lease_expired(self.lease_timeout)
+        expired = lease_expired(self.limits)
         query = (
             select(
                 Job.id,
@@ -264,9 +270,7 @@ class Sweeper:
         :rtype: int
         """
         async with self.session_factory() as session:
-            job = await requeue_lost(
-                session, job_id, attempt, self.lease_timeout
-            )
+            job = await requeue_lost(session, job_id, attempt, self.limits)
             await commit_and_publish(session, self.bus)
         if job is None:
             return 0
@@ -299,7 +303,7 @@ class Sweeper:
                 job_id,
                 outcome,
                 expected_attempt=attempt,
-                extra_conditions=[lease_expired(self.lease_timeout)],
+                extra_conditions=[lease_expired(self.limits)],
                 error_message=reason,
             )
             await commit_and_publish(session, self.bus)

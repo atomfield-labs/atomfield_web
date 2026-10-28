@@ -64,7 +64,12 @@ async def read_snapshot(
     """
     query = (
         select(
-            Run.event_seq, Job.id, Job.status, Job.attempt, Job.error_message
+            Run.event_seq,
+            Job.id,
+            Job.status,
+            Job.attempt,
+            Job.error_message,
+            Job.started_at,
         )
         .select_from(Run)
         .outerjoin(Job, Job.run_id == Run.id)
@@ -77,9 +82,13 @@ async def read_snapshot(
         return None
     jobs = [
         JobState(
-            job_id=job_id, status=status, attempt=attempt, error_message=error
+            job_id=job_id,
+            status=status,
+            attempt=attempt,
+            error_message=error,
+            started=started_at is not None,
         )
-        for _, job_id, status, attempt, error in rows
+        for _, job_id, status, attempt, error, started_at in rows
         if job_id is not None
     ]
     return RunSnapshot(run_id=run_id, seq=rows[0].event_seq, jobs=jobs)

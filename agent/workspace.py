@@ -23,6 +23,9 @@ from app.agents.schemas import EXECUTION_LOG, JobAssignment
 
 RUNS_DIR = "runs"
 UPSTREAM_DIR = "upstream"
+# Downloaded once and kept: scripts releases and data packs.
+RELEASES_DIR = "releases"
+DATA_DIR = "data"
 LOG_TAIL_CHARACTERS = 1000
 
 
@@ -120,6 +123,22 @@ def retire_previous_attempt(workspace: Path, attempt: int) -> None:
         )
 
 
+def job_folder(artifacts_dir: Path, assignment: JobAssignment) -> Path:
+    """
+    Where a job's folder is, without touching it (for a job a previous
+    agent started).
+
+    :param artifacts_dir: Root of all runs on this machine.
+    :type artifacts_dir: Path
+    :param assignment: The job's attempt.
+    :type assignment: JobAssignment
+    :return: ``<artifacts>/runs/<run>/<node>``.
+    :rtype: Path
+    """
+    run_dir = run_folder(artifacts_dir, assignment.run_id)
+    return run_dir / require_plain_name(assignment.node_key)
+
+
 def prepare_workspace(artifacts_dir: Path, assignment: JobAssignment) -> Path:
     """
     Create a job's folder for one attempt, with its parents linked.
@@ -133,27 +152,28 @@ def prepare_workspace(artifacts_dir: Path, assignment: JobAssignment) -> Path:
     :rtype: Path
     """
     run_dir = run_folder(artifacts_dir, assignment.run_id)
-    workspace = run_dir / require_plain_name(assignment.node_key)
+    workspace = job_folder(artifacts_dir, assignment)
     retire_previous_attempt(workspace, assignment.attempt)
     workspace.mkdir(parents=True, exist_ok=True)
     link_parents(run_dir, workspace, assignment.parents)
     return workspace
 
 
-def build_environment(pack_source_dir: Path) -> dict[str, str]:
+def job_environment(pack_source_dir: Path) -> dict[str, str]:
     """
-    Environment for a task: unbuffered output, pack importable.
+    Variables a job needs on top of its usual environment: unbuffered
+    output, and the domain pack importable.
 
     :param pack_source_dir: Directory containing the pack's packages.
     :type pack_source_dir: Path
-    :return: Environment variables for the subprocess.
+    :return: The additions only.
     :rtype: dict[str, str]
     """
-    environment = os.environ.copy()
-    environment["PYTHONUNBUFFERED"] = "1"
-    paths = [str(pack_source_dir), environment.get("PYTHONPATH", "")]
-    environment["PYTHONPATH"] = os.pathsep.join(path for path in paths if path)
-    return environment
+    paths = [str(pack_source_dir), os.environ.get("PYTHONPATH", "")]
+    return {
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONPATH": os.pathsep.join(path for path in paths if path),
+    }
 
 
 def read_tail(path: Path, max_characters: int = LOG_TAIL_CHARACTERS) -> str:

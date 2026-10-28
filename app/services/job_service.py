@@ -13,6 +13,7 @@ from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.schemas import EXECUTION_LOG
+from app.agents.targets import usable_target
 from app.core.config import settings
 from app.core.identifiers import (
     assign_node_keys,
@@ -53,6 +54,7 @@ async def create_job(
     request: JobSubmitRequest,
     queue: RedisJobQueue,
     api_key: ApiKey | None = None,
+    release_id: _uuid.UUID | None = None,
 ) -> Job:
     """
     Create a new Job entity, check quota, and persist it to the database.
@@ -65,6 +67,9 @@ async def create_job(
     :type queue: RedisJobQueue
     :param api_key: Optional authenticated user API key.
     :type api_key: Optional[ApiKey]
+    :param release_id: Scripts release the job runs (None: no release
+        published yet).
+    :type release_id: uuid.UUID | None
     :return: Created and refreshed Job record.
     :rtype: Job
     """
@@ -80,7 +85,8 @@ async def create_job(
 
     owner_id = api_key.id if api_key else None
     job_id = _uuid.uuid4()
-    run = await create_run(db, owner_id, f"job_{job_id}")
+    target_id = await usable_target(db, owner_id, request.target_id)
+    run = await create_run(db, owner_id, f"job_{job_id}", target_id, release_id)
     new_job = Job(
         id=job_id,
         run_id=run.id,
@@ -319,6 +325,8 @@ async def create_blocked_pipeline_jobs(
     nodes,
     pipeline_id: str,
     api_key: ApiKey | None = None,
+    target_id: _uuid.UUID | None = None,
+    release_id: _uuid.UUID | None = None,
 ) -> list[tuple[str, Job]]:
     """
     Create Job rows in Blocked status with attached pipeline_id and user_id.
@@ -331,6 +339,10 @@ async def create_blocked_pipeline_jobs(
     :type pipeline_id: str
     :param api_key: Optional authenticated user API key.
     :type api_key: Optional[ApiKey]
+    :param target_id: Where the run executes; the shared server if None.
+    :type target_id: uuid.UUID | None
+    :param release_id: Scripts release every job of the run uses.
+    :type release_id: uuid.UUID | None
     :return: List of (ui_id, Job) pairs.
     :rtype: list[tuple[str, Job]]
     """
@@ -338,7 +350,9 @@ async def create_blocked_pipeline_jobs(
     user_str = (
         sanitize_identifier(user_folder_name(api_key.id)) if api_key else None
     )
-    run = await create_run(db, api_key.id if api_key else None, pipeline_id)
+    owner_id = api_key.id if api_key else None
+    target_id = await usable_target(db, owner_id, target_id)
+    run = await create_run(db, owner_id, pipeline_id, target_id, release_id)
     node_keys = assign_node_keys([node.ui_id for node in nodes])
     for node in nodes:
         params = dict(node.parameters or {})
@@ -380,11 +394,12 @@ def _persist_job_dependencies(db: AsyncSession, edges, ui_to_db_map) -> None:
         )
 
 
-async def _persist_pipeline_jobs(
+async def persist_pipeline_jobs(
     db: AsyncSession,
     request: PipelineSubmitRequest,
     pipeline_id: str,
     api_key: ApiKey | None = None,
+    release_id: _uuid.UUID | None = None,
 ) -> tuple[list[tuple[str, Job]], dict[str, _uuid.UUID]]:
     """
     Persist pipeline nodes and dependency edges to the database.
@@ -397,11 +412,18 @@ async def _persist_pipeline_jobs(
     :type pipeline_id: str
     :param api_key: Optional authenticated user API key.
     :type api_key: Optional[ApiKey]
+    :param release_id: Scripts release the run is pinned to.
+    :type release_id: uuid.UUID | None
     :return: Tuple of (ui_jobs, ui_to_db_map).
     :rtype: tuple
     """
     db_jobs = await create_blocked_pipeline_jobs(
-        db, request.nodes, pipeline_id, api_key
+        db,
+        request.nodes,
+        pipeline_id,
+        api_key,
+        request.target_id,
+        release_id,
     )
     ui_to_db_map = {ui_id: job.id for ui_id, job in db_jobs}
     _persist_job_dependencies(db, request.edges, ui_to_db_map)
@@ -494,6 +516,7 @@ async def submit_pipeline(
     queue: RedisJobQueue,
     store: ArtifactStore,
     api_key: ApiKey | None = None,
+    release_id: _uuid.UUID | None = None,
 ) -> dict:
     """
     Validate, construct, and submit a DAG pipeline of simulation jobs.
@@ -506,6 +529,8 @@ async def submit_pipeline(
     :type queue: RedisJobQueue
     :param api_key: Optional authenticated user API key.
     :type api_key: Optional[ApiKey]
+    :param release_id: Scripts release the run is pinned to.
+    :type release_id: uuid.UUID | None
     :return: Submission summary with job mapping.
     :rtype: dict
     """
@@ -525,8 +550,8 @@ async def submit_pipeline(
         request.session_id or f"pipeline_{_uuid.uuid4().hex[:8]}"
     )
     await store_attachments(store, request.files, api_key, pipeline_id)
-    db_jobs, ui_to_db_map = await _persist_pipeline_jobs(
-        db, request, pipeline_id, api_key
+    db_jobs, ui_to_db_map = await persist_pipeline_jobs(
+        db, request, pipeline_id, api_key, release_id
     )
     root_jobs = set_initial_states(db_jobs, in_degrees)
     record_parents(db_jobs, request.edges, ui_to_db_map)

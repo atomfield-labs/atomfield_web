@@ -54,3 +54,7 @@ class BundleInfo(BaseModel):
     download_url: str | None = None
     error: str | None = None
     folder: FolderInfo | None = None
+    # The scripts release the run was pinned to, e.g. "afscripts 0.2.0",
+    # and the data packs its tasks read, e.g. "pslibrary-rel-pbe 1.0.0".
+    made_with: str | None = None
+    data_packs: list[str] = []

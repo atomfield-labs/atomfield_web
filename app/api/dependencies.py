@@ -9,7 +9,6 @@ from redis.asyncio import Redis
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.catalog.catalog import Catalog
 from app.core.config import settings
 from app.core.rate_limit import FixedWindowRateLimiter, RateLimit
 from app.core.security import hash_api_key
@@ -18,6 +17,7 @@ from app.events.bus import EventBus
 from app.models.api_key import ApiKey
 from app.models.job import Job
 from app.queue.job_queue import RedisJobQueue
+from app.releases.catalogs import CurrentCatalog, ReleaseCatalogs
 from app.storage.store import LocalDiskStore
 
 CLOUDFLARE_CLIENT_HEADER = "CF-Connecting-IP"
@@ -73,16 +73,34 @@ async def get_store(request: Request) -> LocalDiskStore:
     return request.app.state.store
 
 
-async def get_catalog(request: Request) -> Catalog:
+async def get_catalogs(request: Request) -> ReleaseCatalogs:
     """
-    Provide the task catalog loaded at startup.
+    Provide the catalog of every release, built on first use.
 
     :param request: Active FastAPI HTTP request object.
     :type request: Request
-    :return: Loaded task catalog.
-    :rtype: Catalog
+    :return: Catalogs by release.
+    :rtype: ReleaseCatalogs
     """
-    return request.app.state.catalog
+    return request.app.state.catalogs
+
+
+async def get_current_catalog(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> CurrentCatalog:
+    """
+    Provide the catalog new runs are checked against: the newest
+    release's, with that release (new runs are pinned to it).
+
+    :param request: Active FastAPI HTTP request object.
+    :type request: Request
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :return: The current release and its catalog.
+    :rtype: CurrentCatalog
+    """
+    return await request.app.state.catalogs.current(db)
 
 
 async def get_current_api_key(

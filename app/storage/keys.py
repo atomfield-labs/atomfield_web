@@ -5,6 +5,8 @@ and writer agrees on the layout.
     uploads/<user>/<session>/<file>    what a user uploaded
     runs/<run>/jobs/<job>/<file>       files the UI shows for one job
     runs/<run>/bundle.zip              everything of a run, zipped
+    releases/<sha256>.whl              a scripts release, by fingerprint
+    data/<name>/<version>.zip          a data pack
 """
 
 import uuid
@@ -16,6 +18,8 @@ UPLOADS = "uploads"
 RUNS = "runs"
 ANONYMOUS = "anonymous"
 BUNDLE_NAME = "bundle.zip"
+RELEASES = "releases"
+DATA = "data"
 
 
 def owner_folder(owner_id: uuid.UUID | None) -> str:
@@ -113,3 +117,34 @@ def bundle_key(run_id: uuid.UUID) -> str:
     :rtype: str
     """
     return f"{RUNS}/{run_id}/{BUNDLE_NAME}"
+
+
+def release_key(sha256: str) -> str:
+    """
+    Key of a release's wheel. Named by its fingerprint, so the same
+    file is always stored at the same place and never overwritten by
+    different content.
+
+    :param sha256: The wheel's fingerprint (hex).
+    :type sha256: str
+    :return: ``releases/<sha256>.whl``.
+    :rtype: str
+    """
+    return f"{RELEASES}/{sha256}.whl"
+
+
+def data_pack_key(name: str, version: str) -> str:
+    """
+    Key of a data pack's zip. A name and version are published once,
+    so the key never holds two different files.
+
+    :param name: The pack's name.
+    :type name: str
+    :param version: Its version.
+    :type version: str
+    :return: ``data/<name>/<version>.zip``.
+    :rtype: str
+    :raises InvalidKeyError: If the name or version is a path.
+    """
+    folder = validate_filename(name)
+    return f"{DATA}/{folder}/{validate_filename(f'{version}.zip')}"
