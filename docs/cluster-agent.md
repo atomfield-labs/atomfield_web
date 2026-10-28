@@ -24,13 +24,17 @@ your cluster, and AtomField never sees your cluster password.
 From your own computer (replace the address with yours):
 
 ```bash
-rsync -avz --exclude .venv --exclude node_modules --exclude storage \
+rsync -avz --exclude .env --exclude backups --exclude .git \
+  --exclude .venv --exclude frontend --exclude storage \
   --exclude artifacts --exclude scripts_repo \
   ~/atomfield/ you@login.cluster.edu:~/atomfield/code/
 ```
 
-The scripts themselves (afscripts) are not copied: each job brings
-the release it needs (see "Where the scripts come from").
+The agent needs only the code. The excludes keep your secrets
+(`.env` holds the server's keys) and database backups off the
+cluster, and skip what the agent never uses. The scripts themselves
+(afscripts) are not copied either: each job brings the release it
+needs (see "Where the scripts come from").
 
 ## 2. Make a Python environment
 
