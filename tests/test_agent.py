@@ -284,6 +284,7 @@ def make_agent(
     client: FakeClient,
     runner: Runner | None = None,
     own_copy: bool = True,
+    **changes,
 ) -> Agent:
     """
     An agent with fast timers, running the fake pack in tmp_path.
@@ -297,6 +298,8 @@ def make_agent(
     :param own_copy: Run the fake pack as the owner's own copy; else
         jobs run the release they name.
     :type own_copy: bool
+    :param changes: Other settings, e.g. ``delete_after_upload=True``.
+    :type changes: Any
     :return: Ready agent.
     :rtype: Agent
     """
@@ -310,6 +313,7 @@ def make_agent(
         heartbeat_seconds=0.05,
         claim_wait_seconds=0.05,
     )
+    config = dataclasses.replace(config, **changes)
     state = RecordingState(config.state_file)
     return Agent(config, client, runner or ProcessRunner(), state)
 
@@ -603,8 +607,7 @@ def test_the_house_agent_removes_a_run_folder_once_uploaded(tmp_path: Path):
     job = assign(charge=1)
     client = FakeClient(job)
     client.packs = [pack_request(job)]
-    agent = make_agent(tmp_path, client)
-    agent.config = dataclasses.replace(agent.config, delete_after_upload=True)
+    agent = make_agent(tmp_path, client, delete_after_upload=True)
     run_until(agent, lambda: client.bundles)
 
     assert client.bundles[job.run_id].status == "ready"

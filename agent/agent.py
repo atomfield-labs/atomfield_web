@@ -1,11 +1,19 @@
 """
-The agent loop: claim when a slot is free, run, heartbeat, report.
+The agent loop: claim a job whenever a slot is free, run it, keep its
+lease alive with heartbeats, report it. This class only coordinates;
+the work is done by its parts:
+
+- ``Preparer``: scripts, data packs, the job's folder, its inputs and
+  command (``agent.preparer``);
+- ``Runner``: starts, watches and stops commands (``agent.runner``,
+  ``agent.slurm``);
+- ``Reporter``: the job's files and the delivery of its report
+  (``agent.reporter``);
+- ``Bundler``: zips runs when the server asks (``agent.bundler``).
 """
 
 import asyncio
 import logging
-import shutil
-import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,52 +21,29 @@ from typing import Protocol
 
 import httpx
 
-from agent.archives import (
-    ArchiveCache,
-    ArchiveUnavailableError,
-)
+from agent.bundler import BundleApi, Bundler
 from agent.config import AgentConfig
-from agent.made_with import scripts_entry, write_made_with
-from agent.packer import BundleTooLargeError, write_bundle
+from agent.preparer import Preparer
+from agent.reporter import Reporter, ResultsApi
 from agent.reports import StopReason, crash_report, exit_report, stopped_report
-from agent.results import file_cards, pick_ui_files, upload_body
-from agent.runner import Command, Execution, Runner
+from agent.runner import Execution, Runner
 from agent.state import StateFile
-from agent.workspace import (
-    DATA_DIR,
-    EXECUTION_LOG,
-    RELEASES_DIR,
-    job_environment,
-    job_folder,
-    prepare_workspace,
-    require_plain_name,
-    run_folder,
-)
+from agent.workspace import job_folder
 from app.agents.schemas import (
-    ArchiveRef,
-    BundleReport,
     CompletionRequest,
-    CompletionResponse,
-    FileCard,
-    FolderLocation,
     HeartbeatResponse,
     JobAssignment,
     JobReference,
-    PackRequest,
-    ReleaseRef,
-    UploadLinksResponse,
 )
-from app.catalog.argv import Invocation, build_argv
 
 logger = logging.getLogger("agent")
-# Waits between attempts to deliver a result through network trouble.
-REPORT_RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0)
 ERROR_BACKOFF_SECONDS = 5.0
 
 
-class ApiClient(Protocol):
+class ApiClient(ResultsApi, BundleApi, Protocol):
     """
-    The calls the agent makes; ``AgentClient`` or a test double.
+    Every call the agent and its parts make; ``AgentClient`` or a test
+    double. Each part depends only on the calls it uses.
     """
 
     async def claim(
@@ -100,92 +85,6 @@ class ApiClient(Protocol):
         :param destination: File to create.
         :type destination: Path
         """
-
-    async def upload_links(
-        self,
-        job_id,
-        attempt: int,
-        names: list[str],
-    ) -> UploadLinksResponse | None:
-        """
-        Ask where to upload a finishing attempt's small files.
-
-        :param job_id: The job.
-        :type job_id: uuid.UUID
-        :param attempt: Its attempt.
-        :type attempt: int
-        :param names: File names.
-        :type names: list[str]
-        :return: The links, or None if the attempt is stale.
-        :rtype: UploadLinksResponse | None
-        """
-
-    async def upload(self, url: str, content: bytes) -> None:
-        """
-        Send bytes to a signed upload link.
-
-        :param url: Signed upload link.
-        :type url: str
-        :param content: What to store.
-        :type content: bytes
-        """
-
-    async def upload_file(self, url: str, source: Path) -> None:
-        """
-        Stream a file to a signed upload link.
-
-        :param url: Signed upload link.
-        :type url: str
-        :param source: File to send.
-        :type source: Path
-        """
-
-    async def report_bundle(self, run_id, report: BundleReport) -> bool:
-        """
-        Report how zipping a run ended.
-
-        :param run_id: The run.
-        :type run_id: uuid.UUID
-        :param report: Outcome.
-        :type report: BundleReport
-        :return: False if the server was not expecting it.
-        :rtype: bool
-        """
-
-    async def complete(
-        self, job_id, report: CompletionRequest
-    ) -> CompletionResponse | None:
-        """
-        Report how an attempt ended.
-
-        :param job_id: Finished job.
-        :type job_id: uuid.UUID
-        :param report: Outcome.
-        :type report: CompletionRequest
-        :return: False if refused as stale.
-        :rtype: bool
-        """
-
-
-class NoScriptsError(RuntimeError):
-    """
-    A job without a release, on an agent without its own copy.
-    """
-
-
-class InputUnavailableError(RuntimeError):
-    """
-    An input file could not be downloaded.
-    """
-
-    def __init__(self, name: str, error: httpx.HTTPError) -> None:
-        """
-        :param name: The file.
-        :type name: str
-        :param error: Why the download failed.
-        :type error: httpx.HTTPError
-        """
-        super().__init__(f"Could not download input {name!r}: {error}")
 
 
 @dataclass(slots=True)
@@ -233,42 +132,6 @@ def seconds_left(deadline: datetime) -> float:
     return max(0.0, (deadline - datetime.now(UTC)).total_seconds())
 
 
-async def fetch_archive(cache: ArchiveCache, archive: ArchiveRef) -> Path:
-    """
-    An archive's folder, downloaded the first time it is needed.
-
-    :param cache: Where archives of this kind are kept.
-    :type cache: ArchiveCache
-    :param archive: The release or data pack.
-    :type archive: ArchiveRef
-    :return: Its folder.
-    :rtype: Path
-    :raises ArchiveUnavailableError: If the download fails.
-    :raises ArchiveMismatchError: If the download is not that archive.
-    """
-    try:
-        return await cache.ensure(archive)
-    except httpx.HTTPError as error:
-        raise ArchiveUnavailableError(archive, error) from error
-
-
-def invocation_for(assignment: JobAssignment) -> Invocation:
-    """
-    Describe one run of an assigned job for ``build_argv``.
-
-    :param assignment: What the server handed out.
-    :type assignment: JobAssignment
-    :return: Values, inputs and platform-filled values.
-    :rtype: Invocation
-    """
-    return Invocation(
-        values=assignment.parameters,
-        inputs=assignment.input_files,
-        job_name=assignment.task.id,
-        cpus=assignment.task.resources.cpus,
-    )
-
-
 class Agent:
     """
     Runs jobs for one compute target until asked to stop.
@@ -290,23 +153,20 @@ class Agent:
         :type client: ApiClient
         :param runner: Starts commands.
         :type runner: Runner
-        :param state: Remembers process groups across restarts.
+        :param state: Remembers jobs across restarts.
         :type state: StateFile
         """
         self.config = config
         self.client = client
         self.runner = runner
         self.state = state
-        work = config.artifacts_dir
-        self.releases = ArchiveCache(work / RELEASES_DIR, client.download)
-        self.data = ArchiveCache(work / DATA_DIR, client.download)
+        self.preparer = Preparer(config, client.download)
+        self.reporter = Reporter(config, client)
+        self.bundler = Bundler(config, client)
         self.slots = asyncio.Semaphore(config.max_jobs)
         self.running: dict[str, RunningJob] = {}
         self.tasks: set[asyncio.Task] = set()
         self.stopping = asyncio.Event()
-        # Runs being zipped, so a repeated request is not zipped twice.
-        self.packing: set[uuid.UUID] = set()
-        self.pack_tasks: set[asyncio.Task] = set()
 
     def request_stop(self) -> None:
         """
@@ -433,7 +293,9 @@ class Agent:
             report = crash_report(assignment, error)
         self.release(job_id)
         if report is not None:
-            await self.report(assignment, report)
+            recorded = await self.reporter.deliver(assignment, report)
+            if recorded is not None:
+                self.bundler.start(recorded.pack)
 
     def release(self, job_id: str) -> None:
         """
@@ -450,7 +312,7 @@ class Agent:
         self, assignment: JobAssignment
     ) -> CompletionRequest | None:
         """
-        Prepare the workspace, start the command, then finish it.
+        Prepare the job, start its command, then finish it.
 
         :param assignment: What the server handed out.
         :type assignment: JobAssignment
@@ -458,9 +320,9 @@ class Agent:
         :rtype: CompletionRequest | None
         """
         job_id = str(assignment.job_id)
-        workspace, command = await self.prepare(assignment)
-        execution = await self.runner.start(command)
-        running = RunningJob(assignment, execution, workspace)
+        prepared = await self.preparer.prepare(assignment)
+        execution = await self.runner.start(prepared.command)
+        running = RunningJob(assignment, execution, prepared.workspace)
         self.running[job_id] = running
         self.state.record(
             job_id,
@@ -469,108 +331,6 @@ class Agent:
             assignment.model_dump(mode="json"),
         )
         return await self.conclude(running)
-
-    async def prepare(self, assignment: JobAssignment) -> tuple[Path, Command]:
-        """
-        Put everything in place (scripts, data packs, the job's folder
-        and its inputs), then describe the command.
-
-        :param assignment: The attempt.
-        :type assignment: JobAssignment
-        :return: The job's folder, and its command.
-        :rtype: tuple[Path, Command]
-        """
-        scripts = await self.scripts_folder(assignment)
-        data = await self.data_folders(assignment)
-        workspace = prepare_workspace(self.config.artifacts_dir, assignment)
-        used = scripts_entry(scripts, self.release_used(assignment))
-        write_made_with(workspace, used, assignment.data, data)
-        await self.fetch_inputs(assignment, workspace)
-        return workspace, self.command_for(assignment, workspace, scripts, data)
-
-    def release_used(self, assignment: JobAssignment) -> ReleaseRef | None:
-        """
-        The release a job runs: its run's, unless the owner chose to
-        run their own copy (``pack_dir``).
-
-        :param assignment: The attempt.
-        :type assignment: JobAssignment
-        :return: The release, or None for the owner's own copy.
-        :rtype: ReleaseRef | None
-        """
-        if self.config.pack_source_dir is not None:
-            return None
-        return assignment.release
-
-    async def scripts_folder(self, assignment: JobAssignment) -> Path:
-        """
-        Where the job's scripts are: the owner's own copy if they chose
-        one, else the job's release, downloaded the first time.
-
-        :param assignment: The attempt.
-        :type assignment: JobAssignment
-        :return: Folder to put on ``PYTHONPATH``.
-        :rtype: Path
-        :raises NoScriptsError: Without a release or an own copy.
-        :raises ArchiveUnavailableError: If the download fails.
-        """
-        if self.config.pack_source_dir is not None:
-            return self.config.pack_source_dir
-        if assignment.release is None:
-            raise NoScriptsError(
-                "This run has no scripts release and this agent has no "
-                "copy of its own (pack_dir): publish a release"
-            )
-        return await fetch_archive(self.releases, assignment.release)
-
-    async def data_folders(self, assignment: JobAssignment) -> dict[str, Path]:
-        """
-        Have each data pack the job reads in place.
-
-        :param assignment: The attempt.
-        :type assignment: JobAssignment
-        :return: Environment variable -> the pack's folder.
-        :rtype: dict[str, Path]
-        :raises ArchiveUnavailableError: If a download fails.
-        """
-        folders = {}
-        for pack in assignment.data:
-            folders[pack.env] = await fetch_archive(self.data, pack)
-        return folders
-
-    def command_for(
-        self,
-        assignment: JobAssignment,
-        workspace: Path,
-        scripts: Path,
-        data: dict[str, Path],
-    ) -> Command:
-        """
-        The command that runs one attempt.
-
-        :param assignment: The attempt.
-        :type assignment: JobAssignment
-        :param workspace: The job's folder.
-        :type workspace: Path
-        :param scripts: Folder holding the scripts.
-        :type scripts: Path
-        :param data: Environment variable -> data pack folder.
-        :type data: dict[str, Path]
-        :return: Command for the runner.
-        :rtype: Command
-        """
-        argv = build_argv(
-            assignment.task, invocation_for(assignment), self.config.python_bin
-        )
-        packs = {variable: str(folder) for variable, folder in data.items()}
-        return Command(
-            argv=argv,
-            workspace=workspace,
-            log_path=workspace / EXECUTION_LOG,
-            environment={**job_environment(scripts), **packs},
-            name=f"af-{assignment.node_key}",
-            resources=assignment.task.resources,
-        )
 
     async def conclude(self, running: RunningJob) -> CompletionRequest | None:
         """
@@ -589,95 +349,9 @@ class Agent:
         report = await self.finish(running, running.workspace, pipeline_id)
         if report is None:
             return None
-        return await self.attach_results(assignment, running.workspace, report)
-
-    async def attach_results(
-        self,
-        assignment: JobAssignment,
-        workspace: Path,
-        report: CompletionRequest,
-    ) -> CompletionRequest:
-        """
-        Add the job's file cards and folder location to its report,
-        uploading the small files the UI shows. Trouble here is logged,
-        never fatal: the job's outcome stands, and the files are still
-        on this machine.
-
-        :param assignment: The attempt.
-        :type assignment: JobAssignment
-        :param workspace: The job's folder.
-        :type workspace: Path
-        :param report: The outcome so far.
-        :type report: CompletionRequest
-        :return: The report with ``files`` and ``folder`` set.
-        :rtype: CompletionRequest
-        """
-        folder = FolderLocation(
-            path=str(workspace.parent), address=self.config.ssh_address
+        return await self.reporter.attach_results(
+            assignment, running.workspace, report
         )
-        try:
-            cards = await asyncio.to_thread(file_cards, workspace)
-            uploaded = await self.upload_ui_files(assignment, workspace, cards)
-        except (OSError, httpx.HTTPError) as error:
-            logger.warning("Could not collect results (%s)", error)
-            return report.model_copy(update={"folder": folder})
-        cards = [
-            card.model_copy(update={"uploaded": card.path in uploaded})
-            for card in cards
-        ]
-        return report.model_copy(update={"files": cards, "folder": folder})
-
-    async def upload_ui_files(
-        self,
-        assignment: JobAssignment,
-        workspace: Path,
-        cards: list[FileCard],
-    ) -> set[str]:
-        """
-        Upload the small files the web UI shows.
-
-        :param assignment: The attempt.
-        :type assignment: JobAssignment
-        :param workspace: The job's folder.
-        :type workspace: Path
-        :param cards: Every file of the job.
-        :type cards: list[FileCard]
-        :return: Names uploaded (none if the attempt went stale).
-        :rtype: set[str]
-        :raises httpx.HTTPError: On network trouble.
-        """
-        names = pick_ui_files(cards, assignment.task.id)
-        grant = await self.client.upload_links(
-            assignment.job_id, assignment.attempt, names
-        )
-        if not names or grant is None:
-            return set()
-        for name, url in grant.links.items():
-            body = upload_body(workspace / name, grant.max_bytes)
-            await self.client.upload(url, body)
-        return set(grant.links)
-
-    async def fetch_inputs(
-        self,
-        assignment: JobAssignment,
-        workspace: Path,
-    ) -> None:
-        """
-        Download each input file into the job's folder.
-
-        :param assignment: The attempt and its input links.
-        :type assignment: JobAssignment
-        :param workspace: The job's folder.
-        :type workspace: Path
-        :raises InputUnavailableError: If a file cannot be downloaded;
-            the job then fails with that message.
-        """
-        for item in assignment.inputs:
-            destination = workspace / require_plain_name(item.name)
-            try:
-                await self.client.download(item.url, destination)
-            except httpx.HTTPError as error:
-                raise InputUnavailableError(item.name, error) from error
 
     async def finish(
         self,
@@ -723,36 +397,6 @@ class Agent:
             assignment, return_code, workspace, pipeline_id, duration
         )
 
-    async def report(
-        self,
-        assignment: JobAssignment,
-        report: CompletionRequest,
-    ) -> None:
-        """
-        Deliver a result, retrying through network trouble. A 409 means
-        the server already moved on (e.g. retried the job); that is
-        final, not an error.
-
-        :param assignment: The attempt being reported.
-        :type assignment: JobAssignment
-        :param report: The result.
-        :type report: CompletionRequest
-        """
-        job_id = assignment.job_id
-        for delay in REPORT_RETRY_DELAYS:
-            try:
-                recorded = await self.client.complete(job_id, report)
-            except httpx.HTTPError as error:
-                logger.warning("Report failed (%s); retrying", error)
-                await asyncio.sleep(delay)
-                continue
-            if recorded is None:
-                logger.info("Server refused stale report for %s", job_id)
-            else:
-                self.start_packing(recorded.pack)
-            return
-        logger.error("Gave up reporting %s; its lease will expire", job_id)
-
     async def heartbeat_loop(self) -> None:
         """
         Every ``heartbeat_seconds``, renew leases and obey the reply.
@@ -774,7 +418,7 @@ class Agent:
                 await self.stop(reference, StopReason.CANCELLED)
             for reference in reply.abandon:
                 await self.stop(reference, StopReason.ABANDONED)
-            self.start_packing(reply.pack)
+            self.bundler.start(reply.pack)
 
     async def stop(self, reference: JobReference, reason: StopReason) -> None:
         """
@@ -807,98 +451,4 @@ class Agent:
                 await self.stop(running.reference, StopReason.ABANDONED)
         if self.tasks:
             await asyncio.gather(*self.tasks, return_exceptions=True)
-        # Unfinished zips are requested again by the server's sweeper.
-        for task in self.pack_tasks:
-            task.cancel()
-        if self.pack_tasks:
-            await asyncio.gather(*self.pack_tasks, return_exceptions=True)
-
-    def start_packing(self, requests: list[PackRequest]) -> None:
-        """
-        Zip and upload each requested run in the background, skipping
-        runs already being zipped.
-
-        :param requests: Runs to zip.
-        :type requests: list[PackRequest]
-        """
-        for request in requests:
-            if request.run_id in self.packing:
-                continue
-            self.packing.add(request.run_id)
-            task = asyncio.create_task(self.pack(request))
-            self.pack_tasks.add(task)
-            task.add_done_callback(self.pack_tasks.discard)
-
-    async def pack(self, request: PackRequest) -> None:
-        """
-        Zip, upload and report one run.
-
-        :param request: The run and where to upload it.
-        :type request: PackRequest
-        """
-        try:
-            outcome = await self.build_and_upload(request)
-        except Exception as error:  # outermost boundary of a background task
-            logger.exception("Packing run %s failed", request.run_id)
-            message = f"{type(error).__name__}: {error}"
-            outcome = BundleReport(status="failed", error=message)
-        finally:
-            self.packing.discard(request.run_id)
-        await self.deliver_bundle_report(request.run_id, outcome)
-
-    async def build_and_upload(self, request: PackRequest) -> BundleReport:
-        """
-        Zip the run's folder beside it, upload the zip, and remove the
-        zip (and, on the house agent, the folder) afterwards.
-
-        :param request: The run and where to upload it.
-        :type request: PackRequest
-        :return: Ready with its size, or too big.
-        :rtype: BundleReport
-        :raises httpx.HTTPError: If the upload fails.
-        """
-        run_dir = run_folder(self.config.artifacts_dir, request.run_id)
-        if not run_dir.is_dir():
-            message = "The run's folder is not on this machine any more"
-            return BundleReport(status="failed", error=message)
-        partial = run_dir.with_name(f".{run_dir.name}.zip.part")
-        try:
-            size = await asyncio.to_thread(
-                write_bundle,
-                run_dir,
-                request.bundle_name,
-                request.manifest,
-                partial,
-                request.max_bytes,
-            )
-            await self.client.upload_file(request.upload_url, partial)
-        except BundleTooLargeError as error:
-            return BundleReport(status="too_big", size_bytes=error.size_bytes)
-        finally:
-            partial.unlink(missing_ok=True)
-        if self.config.delete_after_upload:
-            await asyncio.to_thread(shutil.rmtree, run_dir, True)
-        return BundleReport(status="ready", size_bytes=size)
-
-    async def deliver_bundle_report(
-        self,
-        run_id: uuid.UUID,
-        outcome: BundleReport,
-    ) -> None:
-        """
-        Report how packing ended, retrying through network trouble.
-
-        :param run_id: The run.
-        :type run_id: uuid.UUID
-        :param outcome: How packing ended.
-        :type outcome: BundleReport
-        """
-        for delay in REPORT_RETRY_DELAYS:
-            try:
-                if not await self.client.report_bundle(run_id, outcome):
-                    logger.info("Server was not expecting run %s", run_id)
-                return
-            except httpx.HTTPError as error:
-                logger.warning("Bundle report failed (%s); retrying", error)
-                await asyncio.sleep(delay)
-        logger.error("Gave up reporting the zip of run %s", run_id)
+        await self.bundler.close()
