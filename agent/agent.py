@@ -38,6 +38,9 @@ from app.agents.schemas import (
 
 logger = logging.getLogger("agent")
 ERROR_BACKOFF_SECONDS = 5.0
+# How often, between heartbeats, the agent looks for a job that has
+# just started: the server hears of it at once, not at the next beat.
+START_CHECK_SECONDS = 1.0
 
 
 class ApiClient(ResultsApi, BundleApi, Protocol):
@@ -165,6 +168,8 @@ class Agent:
         self.bundler = Bundler(config, client)
         self.slots = asyncio.Semaphore(config.max_jobs)
         self.running: dict[str, RunningJob] = {}
+        # Jobs whose start the server has been told about.
+        self.reported_starts: set[str] = set()
         self.tasks: set[asyncio.Task] = set()
         self.stopping = asyncio.Event()
 
@@ -305,6 +310,7 @@ class Agent:
         :type job_id: str
         """
         self.running.pop(job_id, None)
+        self.reported_starts.discard(job_id)
         self.state.forget(job_id)
         self.slots.release()
 
@@ -399,26 +405,63 @@ class Agent:
 
     async def heartbeat_loop(self) -> None:
         """
-        Every ``heartbeat_seconds``, renew leases and obey the reply.
+        Renew leases and obey the reply: every ``heartbeat_seconds``,
+        and as soon as a job starts, so the web app shows it running
+        without waiting for the next beat.
         """
         while not self.stopping.is_set():
-            await self.pause(self.config.heartbeat_seconds)
-            held = [running.reference for running in self.running.values()]
-            started = [
-                running.reference
-                for running in self.running.values()
-                if running.execution.started
-            ]
-            try:
-                reply = await self.client.heartbeat(held, started)
-            except httpx.HTTPError as error:
-                logger.warning("Heartbeat failed (%s)", error)
-                continue
-            for reference in reply.cancel:
-                await self.stop(reference, StopReason.CANCELLED)
-            for reference in reply.abandon:
-                await self.stop(reference, StopReason.ABANDONED)
-            self.bundler.start(reply.pack)
+            await self.wait_for_beat()
+            await self.beat()
+
+    async def wait_for_beat(self) -> None:
+        """
+        Sleep until the next heartbeat is due, or until a job has
+        started that the server has not heard about yet.
+        """
+        loop = asyncio.get_running_loop()
+        due = loop.time() + self.config.heartbeat_seconds
+        while not self.stopping.is_set() and loop.time() < due:
+            if self.unreported_starts():
+                return
+            await self.pause(min(START_CHECK_SECONDS, due - loop.time()))
+
+    def unreported_starts(self) -> list[str]:
+        """
+        Jobs that have started but whose start was not reported yet.
+
+        :return: Their job ids.
+        :rtype: list[str]
+        """
+        return [
+            job_id
+            for job_id, running in self.running.items()
+            if running.execution.started and job_id not in self.reported_starts
+        ]
+
+    async def beat(self) -> None:
+        """
+        One heartbeat: renew leases, report started jobs, obey the
+        reply (cancel, abandon, zip). After a failure, wait a little,
+        so a server outage is not hammered.
+        """
+        held = [running.reference for running in self.running.values()]
+        started = [
+            running.reference
+            for running in self.running.values()
+            if running.execution.started
+        ]
+        try:
+            reply = await self.client.heartbeat(held, started)
+        except httpx.HTTPError as error:
+            logger.warning("Heartbeat failed (%s)", error)
+            await self.pause(ERROR_BACKOFF_SECONDS)
+            return
+        self.reported_starts.update(str(ref.job_id) for ref in started)
+        for reference in reply.cancel:
+            await self.stop(reference, StopReason.CANCELLED)
+        for reference in reply.abandon:
+            await self.stop(reference, StopReason.ABANDONED)
+        self.bundler.start(reply.pack)
 
     async def stop(self, reference: JobReference, reason: StopReason) -> None:
         """

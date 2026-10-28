@@ -698,6 +698,37 @@ def test_a_running_slurm_job_is_reported_started_and_can_be_cancelled(
     assert client.reports[job.job_id].outcome == "cancelled"
 
 
+def test_a_slurm_job_start_is_reported_without_waiting_for_a_beat(
+    tmp_path: Path,
+):
+    """
+    Heartbeats are 30 s apart, yet the server hears that Slurm started
+    the job within seconds: the web app shows it running at once.
+
+    :param tmp_path: Empty directory for this test.
+    :type tmp_path: Path
+    """
+    job = assign(charge=SLOW_CHARGE)
+    client = FakeClient(job)
+    runner = slurm(tmp_path, FAKE_SLURM_PENDING_SECONDS="0.3")
+    agent = make_agent(tmp_path, client, runner, heartbeat_seconds=30.0)
+
+    def started_then_cancelled() -> bool:
+        if job.job_id in client.started:
+            client.cancel.add(job.job_id)
+        return job.job_id in client.started
+
+    run_until(agent, started_then_cancelled, timeout=10.0)
+    assert job.job_id in client.started
+    # The stopped agent leaves Slurm jobs running; end this one here.
+    for entry in agent.state.load().values():
+        subprocess.run(
+            ["scancel", entry["handle"]],
+            env=runner.settings.environment,
+            check=False,
+        )
+
+
 def test_a_slurm_job_outlives_its_agent_and_is_adopted(tmp_path: Path):
     """
     The agent stops while its job waits in Slurm's queue: the job is

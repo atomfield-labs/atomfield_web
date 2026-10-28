@@ -248,7 +248,7 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
         }
         Object.entries(response.job_ids).forEach(([uiId, jobId]) => {
           if (updateNodeExecutionRef.current) {
-            updateNodeExecutionRef.current(uiId, 'Running', 'Job queued in cluster...', [], jobId);
+            updateNodeExecutionRef.current(uiId, 'Pending', 'Waiting to start...', [], jobId);
           }
         });
       }

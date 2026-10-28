@@ -122,6 +122,10 @@ export interface BlueprintEdge {
   id?: string;
   upstream_ui_id: string;
   downstream_ui_id: string;
+  // The handles the edge is attached to; drafts saved before these
+  // existed get the usual ones on load.
+  source_handle?: string | null;
+  target_handle?: string | null;
 }
 
 export interface PipelineBlueprint {

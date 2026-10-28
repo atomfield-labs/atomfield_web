@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Node, Edge } from '@xyflow/react';
 import type { SaveStatus, SessionMetadata, BlueprintNode, BlueprintEdge } from '../types/api';
+import { saveEdge } from '../utils/graphEdges';
 
 export function serializeGraphToBlueprint(nodes: Node[], edges: Edge[]): { nodes: BlueprintNode[]; edges: BlueprintEdge[] } {
   return {
@@ -44,11 +45,7 @@ export function serializeGraphToBlueprint(nodes: Node[], edges: Edge[]): { nodes
         branchCount: data.branchCount,
       };
     }),
-    edges: edges.map((edge) => ({
-      id: edge.id,
-      upstream_ui_id: edge.source,
-      downstream_ui_id: edge.target,
-    })),
+    edges: edges.map(saveEdge),
   };
 }
 

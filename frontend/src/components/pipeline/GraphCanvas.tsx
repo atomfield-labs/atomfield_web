@@ -28,6 +28,7 @@ import BranchExpanderNode from './BranchExpanderNode';
 import BranchCircleNode from './BranchCircleNode';
 import BranchDotsNode from './BranchDotsNode';
 import { parseStructureFile } from '../../utils/structureParser';
+import { orientConnection, restoreEdge } from '../../utils/graphEdges';
 
 const edgeTypes = {
   removable: RemovableEdge,
@@ -1050,19 +1051,15 @@ export default function GraphCanvas({
     }
     
     if (blueprint && blueprint.edges) {
-      const initialEdges: Edge[] = blueprint.edges.map((e) => ({
-        id: `e-${e.upstream_ui_id}-${e.downstream_ui_id}`,
-        source: e.upstream_ui_id,
-        target: e.downstream_ui_id,
-        sourceHandle:
-          (e as any).sourceHandle ||
-          (e as any).source_handle ||
-          (e.upstream_ui_id.includes('structure') ? 'structure-out' : 'source-right'),
-        targetHandle: (e as any).targetHandle || (e as any).target_handle || 'target-left',
-        type: 'removable',
-        animated: true,
-        style: { stroke: '#94a3b8', strokeWidth: 2 }
-      }));
+      const structureIds = new Set(
+        (blueprint.nodes || [])
+          .filter((n) => n.type === 'structure' || n.node_type === 'structure')
+          .map((n) => n.ui_id || n.id)
+      );
+      const isStructure = (nodeId: string) => structureIds.has(nodeId);
+      const initialEdges = blueprint.edges
+        .map((saved) => restoreEdge(saved, isStructure))
+        .filter((edge): edge is Edge => edge !== null);
       setEdges(initialEdges);
     }
   }, [blueprint, rfFitView]);
@@ -1140,9 +1137,14 @@ export default function GraphCanvas({
   );
 
   const onConnect = useCallback(
-    (params: any) => {
+    (raw: any) => {
       const currentNodes = nodesRef.current;
       const currentEdges = edgesRef.current;
+      const isStructure = (nodeId: string) =>
+        currentNodes.find((n) => n.id === nodeId)?.type === 'structure';
+      // Dragged either way, a structure file flows into the task.
+      const params = orientConnection(raw, isStructure);
+      if (!params) return;
 
       const sourceNode = currentNodes.find((n) => n.id === params.source);
       const targetNode = currentNodes.find((n) => n.id === params.target);

@@ -78,7 +78,7 @@ class SlurmSettings:
 
     options: list[str] = field(default_factory=list)
     setup_lines: list[str] = field(default_factory=list)
-    poll_seconds: float = 30.0
+    poll_seconds: float = 15.0
     command_timeout: float = 60.0
     environment: dict[str, str] | None = None
 

@@ -17,7 +17,7 @@ The file looks like::
     [slurm]
     options = ["--account=my_project"]
     setup = ["module load quantum-espresso/7.2"]
-    poll_seconds = 30.0
+    poll_seconds = 15.0
 
 Jobs run the scripts release the server names, downloaded into the
 work folder. ``pack_dir = "/path/to/afscripts/src"`` makes this agent
@@ -199,7 +199,7 @@ class AgentConfig:
             slurm=SlurmSettings(
                 options=list(settings.get("slurm_options", [])),
                 setup_lines=list(settings.get("slurm_setup", [])),
-                poll_seconds=float(settings.get("slurm_poll_seconds", 30.0)),
+                poll_seconds=float(settings.get("slurm_poll_seconds", 15.0)),
             ),
         )
 
