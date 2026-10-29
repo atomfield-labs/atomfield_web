@@ -119,8 +119,11 @@ line: `export AFSCRIPTS_MPI_LAUNCHER="srun"`.
 
 The agent keeps running after you log out, and restarts itself if it
 crashes. In the web app, your cluster now shows **●** (online) under
-**Run on**. Note which login node you are on (`hostname`): to check
-on the agent later, log in to that one (`ssh login1`).
+**Run on**. The agent runs on the login node you started it on; if
+you later land on another one, `status` tells you where it runs (log
+in there, e.g. `ssh login1`, to stop it), and `start` refuses to begin
+a second agent. Its log, `agent.log` in the work folder, is trimmed
+past 10 MB (the older part is kept in `agent.log.1`).
 
 To stop it: `~/atomfield/agent stop`. Your Slurm jobs keep running.
 
@@ -200,6 +203,13 @@ Delete old runs you no longer need.
 - **A job fails with "no scripts release"**: nothing was published
   when the run started; publish a release (see `docs/releases.md`) and
   run the pipeline again.
+- **The agent stopped and its log says the API refused its token**:
+  the cluster was removed in the web app, or its token replaced. Make
+  a new token there, then `~/atomfield/agent login` and
+  `~/atomfield/agent start`. Slurm jobs keep running meanwhile.
+- **`start` says the agent runs on another login node**: log in to
+  that node to stop or restart it. If that node went down, its lock
+  frees itself after 3 minutes.
 - **The cluster shows offline**: `~/atomfield/agent status`, then look
   at the log it names (`~/atomfield/agent.log`).
 - **`pw.x` stops with "OMPI was not built with SLURM's PMI support"**:
