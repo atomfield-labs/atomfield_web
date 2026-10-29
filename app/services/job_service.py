@@ -37,7 +37,7 @@ from app.storage.keys import (
     upload_folder,
     upload_key,
 )
-from app.storage.store import ArtifactStore, InvalidKeyError
+from app.storage.store import ArtifactStore
 
 ARTIFACTS_DIR = Path(settings.ARTIFACTS_DIR)
 DEFAULT_MAX_LOG_BYTES = 131072
@@ -298,25 +298,21 @@ async def store_attachments(
 ) -> None:
     """
     Keep the files attached to a submission in the store, where agents
-    fetch them through signed links.
+    fetch them through signed links. Their names were checked with the
+    rest of the request, before anything was stored.
 
     :param store: The server's file store.
     :type store: ArtifactStore
     :param files: Attachments (name and text content).
-    :type files: list[PipelineSubmitFile] | None
+    :type files: list[PipelineFile] | None
     :param api_key: Submitting user.
     :type api_key: ApiKey | None
     :param session_id: Session the files belong to.
     :type session_id: str
-    :raises HTTPException: 400 for a file name that is not plain.
     """
     owner_id = api_key.id if api_key else None
     for attachment in files or []:
-        try:
-            key = upload_key(owner_id, session_id, attachment.filename)
-        except InvalidKeyError:
-            detail = f"Invalid file name {attachment.filename!r}"
-            raise HTTPException(status_code=400, detail=detail) from None
+        key = upload_key(owner_id, session_id, attachment.filename)
         await store.write(key, attachment.content.encode("utf-8"))
 
 

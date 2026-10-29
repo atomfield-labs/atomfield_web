@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.workspace import link_parents, success_output
+from agent.workspace import link_parents
 
 
 def test_a_parent_folder_is_linked_under_upstream(tmp_path: Path):
@@ -115,25 +115,3 @@ def test_find_upstream_files_follows_symlinks():
         finally:
             os.chdir(original_cwd)
         assert [path.name for path in found] == ["mol1_optimized.xyz"]
-
-
-def test_a_link_to_a_parent_file_is_not_listed_as_an_output(
-    tmp_path: Path,
-):
-    """
-    A later step that links an earlier step's file (postw90 reading
-    Wannier90's checkpoint) lists only what it wrote itself.
-
-    :param tmp_path: Empty run folder.
-    :type tmp_path: Path
-    """
-    (tmp_path / "wannier").mkdir()
-    (tmp_path / "wannier" / "fe.chk").write_text("checkpoint")
-    berry = tmp_path / "berry"
-    berry.mkdir()
-    (berry / "fe.chk").symlink_to(Path("..") / "wannier" / "fe.chk")
-    (berry / "results.csv").write_text("sigma_xy,750")
-
-    output = success_output("ahc_berry", berry, "pipeline", "job")
-
-    assert output["artifacts"] == ["results.csv"]

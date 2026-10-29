@@ -3,6 +3,7 @@ Submissions are checked against the task catalog before anything is
 stored, and the catalog itself is served to the UI.
 """
 
+import uuid
 from collections.abc import Callable
 
 from fastapi.testclient import TestClient
@@ -139,3 +140,56 @@ def test_stored_jobs_record_every_value(
     assert parameters["charge"] == -1
     assert parameters["temp"] == 300.0
     assert parameters["optlevel"] == "normal"
+
+
+def test_a_file_name_the_store_refuses_is_refused_at_submission(
+    client: TestClient,
+    make_user_headers: UserHeadersFactory,
+):
+    """
+    A name with a control character is refused when submitted, at its
+    field. Accepted, it would only fail later, when the store refuses
+    to link it for the agent that already took the job.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param make_user_headers: Factory registering a user key.
+    :type make_user_headers: UserHeadersFactory
+    """
+    response = client.post(
+        "/api/jobs/submit",
+        json={"script_name": "toy_opt", "inputs": {"structure": ["a\n.xyz"]}},
+        headers=make_user_headers(),
+    )
+    assert response.status_code == 422
+    assert error_locations(response) == [["body", "inputs", "structure", 0]]
+
+
+def test_attached_file_names_are_checked_before_anything_is_stored(
+    client: TestClient,
+    make_user_headers: UserHeadersFactory,
+):
+    """
+    A pipeline attaching a file under a path is refused at that file's
+    name, and the good attachment before it is not stored either.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param make_user_headers: Factory registering a user key.
+    :type make_user_headers: UserHeadersFactory
+    """
+    good = f"good_{uuid.uuid4().hex[:6]}.xyz"
+    payload = {
+        "nodes": [{"ui_id": "a", "script_name": "toy_opt"}],
+        "edges": [],
+        "files": [
+            {"filename": good, "content": "1\n\nO 0 0 0\n"},
+            {"filename": "../escape.xyz", "content": "1\n\nO 0 0 0\n"},
+        ],
+    }
+    response = client.post(
+        "/api/jobs/pipeline/submit", json=payload, headers=make_user_headers()
+    )
+    assert response.status_code == 422
+    assert error_locations(response) == [["body", "files", 1, "filename"]]
+    assert not list(client.app.state.store.root.rglob(good))

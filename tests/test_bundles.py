@@ -18,7 +18,7 @@ from app.main import create_store
 from app.models.compute_target import HOUSE_TARGET_ID, ComputeTarget
 from app.models.job import Job
 from app.models.run import Run
-from app.runs.bundles import PACK_TIMEOUT
+from app.runs.bundles import PACK_TIMEOUT, requeue_stuck_packs
 from app.runs.lifecycle import complete_attempt
 from app.runs.states import JobStatus
 from app.storage.keys import bundle_key
@@ -108,6 +108,31 @@ def bundle_report(client: TestClient, run_id: str, **body):
     return client.post(url, json=body, headers=HOUSE)
 
 
+async def ask_again_for(
+    make_session: async_sessionmaker, run_id: uuid.UUID
+) -> str:
+    """
+    Age a zip's packing past the timeout, then run the sweeper's
+    repair, which asks for the zip again.
+
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
+    :param run_id: A run whose zip is being packed.
+    :type run_id: uuid.UUID
+    :return: The zip's status afterwards.
+    :rtype: str
+    """
+    async with make_session() as session:
+        await session.execute(
+            update(Run)
+            .where(Run.id == run_id)
+            .values(bundle_requested_at=func.now() - 2 * PACK_TIMEOUT)
+        )
+        await requeue_stuck_packs(session)
+        await session.commit()
+        return (await session.get(Run, run_id)).bundle_status
+
+
 @pytest.fixture
 def results_stay(make_session: async_sessionmaker) -> Iterator[None]:
     """
@@ -166,6 +191,36 @@ def test_a_finished_house_run_is_zipped_and_downloadable(
     assert download.content == b"PK zip"
     assert pack["bundle_name"] in download.headers["content-disposition"]
     assert bundle_report(client, pack["run_id"], **ready).status_code == 409
+
+
+def test_a_slow_zip_still_counts_once_asked_for_again(
+    client: TestClient,
+    chain,
+    make_session: async_sessionmaker,
+):
+    """
+    Packing that outlasts the pack timeout is asked for again by the
+    sweeper. The agent's report on its upload still counts before the
+    next heartbeat hands the zip out again: the zip is in the store,
+    and the house agent has deleted the run's folder, so packing it a
+    second time could only fail.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param chain: Owner headers and job ids.
+    :type chain: tuple
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
+    """
+    headers, _ = chain
+    (pack,) = finish_chain(client, chain)["pack"]
+    run_id = uuid.UUID(pack["run_id"])
+    assert asyncio.run(ask_again_for(make_session, run_id)) == "requested"
+    assert client.put(pack["upload_url"], content=b"PK zip").status_code == 201
+    ready = {"status": "ready", "size_bytes": 6}
+    assert bundle_report(client, pack["run_id"], **ready).status_code == 204
+    url = f"/api/runs/{pack['run_id']}/bundle"
+    assert client.get(url, headers=headers).json()["status"] == "ready"
 
 
 def test_results_that_stay_show_where_they_are(

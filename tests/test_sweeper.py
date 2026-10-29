@@ -518,9 +518,6 @@ def test_cancelling_a_run_counts_every_job_it_cancelled(
         "/api/jobs/pipeline/submit", json=payload, headers=headers
     ).json()
 
-    response = client.post(
-        f"/api/runs/{body['run_id']}/cancel", headers=headers
-    )
-
-    assert response.json()["cancelled"] == 3
-    assert response.json()["cancelling"] == 0
+    cancel = f"/api/runs/{body['run_id']}/cancel"
+    counts = client.post(cancel, headers=headers).json()
+    assert (counts["cancelled"], counts["cancelling"]) == (3, 0)

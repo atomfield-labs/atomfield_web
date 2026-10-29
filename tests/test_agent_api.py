@@ -422,12 +422,50 @@ def test_heartbeats_carry_cancel_and_abandon(
     assert beat(7)["abandon"] == [{"job_id": first, "attempt": 7}]
 
 
+def fetch_input(
+    client: TestClient,
+    headers: dict[str, str],
+    name: str,
+    files: list[dict[str, str]],
+):
+    """
+    Submit a one-node pipeline in the session ``shared_name`` reading
+    the file ``name``, attaching ``files``; then fetch that input
+    through the link its claim carries.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param headers: The submitting user's headers.
+    :type headers: dict[str, str]
+    :param name: The file the node reads.
+    :type name: str
+    :param files: Files attached to the submission.
+    :type files: list[dict[str, str]]
+    :return: The download's response.
+    :rtype: httpx.Response
+    """
+    drain_queue()
+    node = {
+        "ui_id": "opt",
+        "script_name": "toy_opt",
+        "inputs": {"structure": [name]},
+    }
+    payload = {"session_id": "shared_name", "nodes": [node], "edges": []}
+    submitted = client.post(
+        "/api/jobs/pipeline/submit",
+        json={**payload, "files": files},
+        headers=headers,
+    )
+    assert submitted.status_code == 202
+    return client.get(claim(client).json()["inputs"][0]["url"])
+
+
 def test_a_run_cannot_take_another_users_upload(
     client: TestClient,
     make_user_headers: UserHeadersFactory,
 ):
     """
-    Uploads are kept under their owner's folder, chosen from the
+    Attached files are kept under their owner's folder, chosen from the
     caller's key, never from the request. A stranger submitting under
     the same session name and asking for the owner's file gets a link
     into their own (empty) folder; the owner's run gets the file.
@@ -439,33 +477,10 @@ def test_a_run_cannot_take_another_users_upload(
     """
     owner, stranger = make_user_headers(), make_user_headers()
     name = f"owned_{uuid.uuid4().hex[:6]}.xyz"
-    uploaded = client.post(
-        "/api/files/upload",
-        files={"file": (name, WATER_XYZ, "text/plain")},
-        data={"session_id": "shared_name"},
-        headers=owner,
-    )
-    assert uploaded.status_code == 201
-
-    def fetch_input(headers: dict[str, str]):
-        drain_queue()
-        node = {
-            "ui_id": "opt",
-            "script_name": "toy_opt",
-            "inputs": {"structure": [name]},
-        }
-        payload = {"session_id": "shared_name", "nodes": [node], "edges": []}
-        submitted = client.post(
-            "/api/jobs/pipeline/submit", json=payload, headers=headers
-        )
-        assert submitted.status_code == 202
-        link = claim(client).json()["inputs"][0]["url"]
-        return client.get(link)
-
-    assert fetch_input(stranger).status_code == 404
-    mine = fetch_input(owner)
-    assert mine.status_code == 200
-    assert mine.text == WATER_XYZ
+    attached = [{"filename": name, "content": WATER_XYZ}]
+    mine = fetch_input(client, owner, name, attached)
+    assert (mine.status_code, mine.text) == (200, WATER_XYZ)
+    assert fetch_input(client, stranger, name, []).status_code == 404
 
 
 def test_a_claim_names_the_folder_and_the_parents(

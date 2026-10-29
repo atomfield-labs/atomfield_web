@@ -8,7 +8,7 @@ import traceback
 from enum import StrEnum
 from pathlib import Path
 
-from agent.workspace import failure_message, success_output
+from agent.workspace import failure_message
 from app.agents.schemas import CompletionRequest, JobAssignment
 
 
@@ -59,11 +59,11 @@ def exit_report(
     assignment: JobAssignment,
     return_code: int,
     workspace: Path,
-    pipeline_id: str,
     duration: float,
 ) -> CompletionRequest:
     """
-    Report for a job that ended by itself.
+    Report for a job that ended by itself. Its files are added to the
+    report afterwards, as cards (``Reporter.attach_results``).
 
     :param assignment: The attempt that ran.
     :type assignment: JobAssignment
@@ -71,21 +71,15 @@ def exit_report(
     :type return_code: int
     :param workspace: Its workspace.
     :type workspace: Path
-    :param pipeline_id: Its pipeline.
-    :type pipeline_id: str
     :param duration: Seconds it ran.
     :type duration: float
-    :return: Success with the file list, or failure with the log tail.
+    :return: Success, or failure with the log tail.
     :rtype: CompletionRequest
     """
-    task_id, job_id = assignment.task.id, str(assignment.job_id)
     common = {"attempt": assignment.attempt, "execution_time_seconds": duration}
     if return_code == 0:
-        output = success_output(task_id, workspace, pipeline_id, job_id)
-        return CompletionRequest(
-            outcome="succeeded", output_data=output, **common
-        )
-    message = failure_message(task_id, workspace, return_code)
+        return CompletionRequest(outcome="succeeded", **common)
+    message = failure_message(assignment.task.id, workspace, return_code)
     return CompletionRequest(outcome="failed", error_message=message, **common)
 
 

@@ -22,6 +22,7 @@ APP_FILES = {
     "app/catalog/models.py",
     "app/core/__init__.py",
     "app/core/cli.py",
+    "app/core/names.py",
 }
 SERVER_PACKAGES = {"alembic", "asyncpg", "fastapi", "redis", "sqlalchemy"}
 PROBE = """

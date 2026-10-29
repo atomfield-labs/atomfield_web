@@ -4,7 +4,8 @@ Request and response bodies of the agent API.
 
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from enum import StrEnum
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, Field
 
@@ -156,14 +157,61 @@ class PackRequest(BaseModel):
     )
 
 
+class PackOutcome(StrEnum):
+    """
+    How packing a run's zip ended, as its agent reports it.
+    """
+
+    READY = "ready"
+    TOO_BIG = "too_big"
+    FAILED = "failed"
+
+
 class BundleReport(BaseModel):
     """
     How packing a run ended.
     """
 
-    status: Literal["ready", "too_big", "failed"]
+    status: PackOutcome
     size_bytes: int | None = None
     error: str | None = None
+
+    @classmethod
+    def ready(cls, size_bytes: int) -> Self:
+        """
+        The zip was uploaded.
+
+        :param size_bytes: Its size.
+        :type size_bytes: int
+        :return: The report.
+        :rtype: BundleReport
+        """
+        return cls(status=PackOutcome.READY, size_bytes=size_bytes)
+
+    @classmethod
+    def too_big(cls, size_bytes: int) -> Self:
+        """
+        The zip passed the size the server, or a proxy before it,
+        accepts; the run's folder stays where it is.
+
+        :param size_bytes: Size reached.
+        :type size_bytes: int
+        :return: The report.
+        :rtype: BundleReport
+        """
+        return cls(status=PackOutcome.TOO_BIG, size_bytes=size_bytes)
+
+    @classmethod
+    def failed(cls, error: str) -> Self:
+        """
+        Packing failed.
+
+        :param error: Why, for the user.
+        :type error: str
+        :return: The report.
+        :rtype: BundleReport
+        """
+        return cls(status=PackOutcome.FAILED, error=error)
 
 
 class HeartbeatResponse(BaseModel):

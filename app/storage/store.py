@@ -19,10 +19,9 @@ from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote, urlencode
 
+from app.core.names import is_plain_name
 from app.storage.links import DOWNLOAD, UPLOAD, LinkGrant, LinkSigner
 
-# Path parts a key may never contain: empty ("a//b", "/abs"), "." and "..".
-FORBIDDEN_SEGMENTS = {"", ".", ".."}
 LINK_PREFIX = "/api/storage"
 
 
@@ -38,6 +37,21 @@ class TooLargeError(ValueError):
     """
 
 
+def is_safe_key(key: str) -> bool:
+    """
+    Whether a key is plain names joined by ``/``: so no ``..``, no
+    absolute path ("/abs" starts with an empty name), no backslashes
+    or control characters.
+
+    :param key: Proposed key, e.g. ``runs/<run>/bundle.zip``.
+    :type key: str
+    :return: True if it can neither escape the store nor break a
+        signature.
+    :rtype: bool
+    """
+    return all(is_plain_name(part) for part in key.split("/"))
+
+
 def validate_key(key: str) -> str:
     """
     Accept only relative, plain keys: no ``..``, no absolute paths, no
@@ -49,9 +63,7 @@ def validate_key(key: str) -> str:
     :rtype: str
     :raises InvalidKeyError: If the key is unsafe.
     """
-    unsafe_characters = "\\" in key or any(ord(char) < 32 for char in key)
-    segments = key.split("/")
-    if unsafe_characters or FORBIDDEN_SEGMENTS.intersection(segments):
+    if not is_safe_key(key):
         raise InvalidKeyError(key)
     return key
 
@@ -66,9 +78,9 @@ def validate_filename(filename: str) -> str:
     :rtype: str
     :raises InvalidKeyError: If it is empty, a path, or unsafe.
     """
-    if "/" in filename:
+    if not is_plain_name(filename):
         raise InvalidKeyError(filename)
-    return validate_key(filename)
+    return filename
 
 
 class ArtifactStore(Protocol):
@@ -78,7 +90,8 @@ class ArtifactStore(Protocol):
 
     def upload_link(self, key: str, max_bytes: int, valid_seconds: int) -> str:
         """
-        A link that accepts one upload of at most ``max_bytes`` to key.
+        A link that accepts uploads of at most ``max_bytes`` to key
+        until it expires.
 
         :param key: Where the file will be stored.
         :type key: str
@@ -226,7 +239,8 @@ class LocalDiskStore:
 
     def upload_link(self, key: str, max_bytes: int, valid_seconds: int) -> str:
         """
-        A link that accepts one upload of at most ``max_bytes`` to key.
+        A link that accepts uploads of at most ``max_bytes`` to key
+        until it expires.
 
         :param key: Where the file will be stored.
         :type key: str

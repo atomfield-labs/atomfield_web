@@ -8,9 +8,9 @@ which is what the UI shows anyway.
 """
 
 import hashlib
-import os
 from pathlib import Path
 
+from agent.workspace import own_files
 from app.agents.schemas import (
     EXECUTION_LOG,
     MAX_UI_FILES,
@@ -18,7 +18,6 @@ from app.agents.schemas import (
     FileCard,
 )
 
-UPSTREAM_DIR = "upstream"
 LOG_SUFFIX = ".log"
 # Text a person can read in the browser.
 TEXT_SUFFIXES = {
@@ -52,11 +51,28 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
+def card_for(path: Path, workspace: Path) -> FileCard:
+    """
+    One file's card.
+
+    :param path: A file in the job's folder.
+    :type path: Path
+    :param workspace: The job's folder.
+    :type workspace: Path
+    :return: Its path in the folder, size and fingerprint.
+    :rtype: FileCard
+    """
+    return FileCard(
+        path=path.relative_to(workspace).as_posix(),
+        size_bytes=path.stat().st_size,
+        sha256=sha256_of(path),
+    )
+
+
 def file_cards(workspace: Path) -> list[FileCard]:
     """
-    Card every file in a job's folder, walking subfolders but not
-    links (``upstream/`` and any other link point at earlier jobs'
-    files, carded there) or hidden files.
+    Card every file the job made (``own_files``): links point at
+    earlier jobs' files, carded there.
 
     Slow for large outputs (hashing reads every byte): run it in a
     thread so heartbeats continue meanwhile.
@@ -66,21 +82,7 @@ def file_cards(workspace: Path) -> list[FileCard]:
     :return: Cards sorted by path.
     :rtype: list[FileCard]
     """
-    cards = []
-    for folder, subfolders, names in os.walk(workspace):
-        if Path(folder) == workspace and UPSTREAM_DIR in subfolders:
-            subfolders.remove(UPSTREAM_DIR)
-        for name in names:
-            path = Path(folder) / name
-            if name.startswith(".") or path.is_symlink() or not path.is_file():
-                continue
-            cards.append(
-                FileCard(
-                    path=path.relative_to(workspace).as_posix(),
-                    size_bytes=path.stat().st_size,
-                    sha256=sha256_of(path),
-                )
-            )
+    cards = [card_for(path, workspace) for path in own_files(workspace)]
     return sorted(cards, key=lambda card: card.path)
 
 

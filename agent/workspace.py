@@ -16,13 +16,17 @@ can never mix its files with the new attempt's.
 """
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
 
 from app.agents.schemas import EXECUTION_LOG, JobAssignment
+from app.core.names import is_plain_name
 
 RUNS_DIR = "runs"
 UPSTREAM_DIR = "upstream"
+# Hidden entries are the agent's own work in progress (downloads,
+# zips), never a job's results.
+HIDDEN_PREFIX = "."
 # Downloaded once and kept: scripts releases and data packs.
 RELEASES_DIR = "releases"
 DATA_DIR = "data"
@@ -32,7 +36,7 @@ LOG_TAIL_CHARACTERS = 1000
 def require_plain_name(name: str) -> str:
     """
     Accept a folder or file name from the server only if it cannot
-    point anywhere else (no separators, not ``.`` or ``..``).
+    point anywhere else (``is_plain_name``).
 
     :param name: Node key or file name.
     :type name: str
@@ -40,9 +44,45 @@ def require_plain_name(name: str) -> str:
     :rtype: str
     :raises ValueError: If the name is a path.
     """
-    if name in {"", ".", ".."} or Path(name).name != name or "\\" in name:
+    if not is_plain_name(name):
         raise ValueError(f"Not a plain name: {name!r}")
     return name
+
+
+def is_own_file(path: Path) -> bool:
+    """
+    Whether an entry of a job's folder is a file the job made: not
+    hidden, and not a link (an earlier job's file, which belongs to
+    that job).
+
+    :param path: The entry.
+    :type path: Path
+    :return: True for a regular file of the folder's own.
+    :rtype: bool
+    """
+    hidden = path.name.startswith(HIDDEN_PREFIX)
+    return not hidden and not path.is_symlink() and path.is_file()
+
+
+def own_files(folder: Path) -> Iterator[Path]:
+    """
+    Every file the jobs in a folder (a run's, or one job's) made: what
+    their cards list and their zip holds. ``upstream/`` folders (links
+    to earlier jobs) and hidden folders are not entered.
+
+    :param folder: A run's or a job's folder.
+    :type folder: Path
+    :return: The files, in walking order.
+    :rtype: Iterator[Path]
+    """
+    for parent, subfolders, names in os.walk(folder):
+        subfolders[:] = [
+            name
+            for name in subfolders
+            if name != UPSTREAM_DIR and not name.startswith(HIDDEN_PREFIX)
+        ]
+        paths = (Path(parent) / name for name in names)
+        yield from (path for path in paths if is_own_file(path))
 
 
 def run_folder(artifacts_dir: Path, run_id: object) -> Path:
@@ -211,44 +251,3 @@ def failure_message(task_id: str, workspace: Path, return_code: int) -> str:
         or f"Process exited with code {return_code}"
     )
     return f"{task_id} failed (code {return_code}):\n{detail}"
-
-
-def success_output(
-    task_id: str,
-    workspace: Path,
-    pipeline_id: str,
-    job_id: str,
-) -> dict[str, Any]:
-    """
-    Describe a successful run and list the files it left behind.
-
-    :param task_id: Task that ran.
-    :type task_id: str
-    :param workspace: The job's workspace.
-    :type workspace: Path
-    :param pipeline_id: Pipeline the job belongs to.
-    :type pipeline_id: str
-    :param job_id: Job id.
-    :type job_id: str
-    :return: Output payload for the job record.
-    :rtype: dict[str, Any]
-    """
-    # A link is an earlier job's file (a later step reading it), not
-    # an output of this one.
-    artifacts = sorted(
-        item.name
-        for item in workspace.iterdir()
-        if item.is_file()
-        and not item.is_symlink()
-        and not item.name.startswith(".")
-    )
-    script_log = f"{task_id}.log"
-    has_script_log = (workspace / script_log).exists()
-    return {
-        "status": "simulation_complete",
-        "script": task_id,
-        "logfile": script_log if has_script_log else EXECUTION_LOG,
-        "pipeline_id": pipeline_id,
-        "job_id": job_id,
-        "artifacts": artifacts,
-    }

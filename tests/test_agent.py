@@ -362,7 +362,8 @@ def test_a_finished_job_is_reported_with_its_files(tmp_path: Path):
 
     succeeded, failed = client.reports[good.job_id], client.reports[bad.job_id]
     assert succeeded.outcome == "succeeded"
-    assert "toy_opt_optimized.xyz" in succeeded.output_data["artifacts"]
+    outputs = [card.path for card in succeeded.files]
+    assert "toy_opt_optimized.xyz" in outputs
     assert failed.outcome == "failed"
     assert "toy_opt failed (code 3)" in failed.error_message
     assert "negative charge refused" in failed.error_message

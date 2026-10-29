@@ -17,12 +17,13 @@ from agent.config import AgentConfig
 from agent.packer import BundleTooLargeError, write_bundle
 from agent.reporter import REPORT_RETRY_DELAYS
 from agent.workspace import run_folder
-from app.agents.schemas import BundleReport, PackRequest
+from app.agents.schemas import BundleReport, PackOutcome, PackRequest
 
 logger = logging.getLogger("agent")
 # A server, or a proxy in front of it (a Cloudflare tunnel takes at
 # most 100 MB per request), refusing a body this big.
 PAYLOAD_TOO_LARGE = 413
+FOLDER_GONE_MESSAGE = "The run's folder is not on this machine any more"
 
 
 class BundleApi(Protocol):
@@ -100,36 +101,71 @@ class Bundler:
 
     async def pack(self, request: PackRequest) -> None:
         """
-        Zip, upload and report one run.
+        Zip, upload and report one run. The run counts as being packed
+        until its report is delivered: the server may ask for a slow
+        zip again meanwhile, and on the house agent the folder is gone
+        once uploaded, so packing it again could only fail.
 
         :param request: The run and where to upload it.
         :type request: PackRequest
         """
         try:
-            outcome = await self.build_and_upload(request)
-        except Exception as error:  # outermost boundary of a background task
-            logger.exception("Packing run %s failed", request.run_id)
-            message = f"{type(error).__name__}: {error}"
-            outcome = BundleReport(status="failed", error=message)
+            outcome = await self.attempt(request)
+            await self.deliver(request.run_id, outcome)
         finally:
             self.packing.discard(request.run_id)
-        await self.deliver(request.run_id, outcome)
 
-    async def build_and_upload(self, request: PackRequest) -> BundleReport:
+    async def attempt(self, request: PackRequest) -> BundleReport:
         """
-        Zip the run's folder beside it, upload the zip, and remove the
-        zip (and, on the house agent, the folder) afterwards.
+        Zip and upload one run; any failure becomes a "failed" report.
 
         :param request: The run and where to upload it.
         :type request: PackRequest
-        :return: Ready with its size, or too big.
+        :return: How packing ended.
+        :rtype: BundleReport
+        """
+        try:
+            return await self.build_and_upload(request)
+        except Exception as error:  # outermost boundary of a background task
+            logger.exception("Packing run %s failed", request.run_id)
+            return BundleReport.failed(f"{type(error).__name__}: {error}")
+
+    async def build_and_upload(self, request: PackRequest) -> BundleReport:
+        """
+        Zip the run's folder, upload the zip, and on the house agent
+        remove the folder once uploaded.
+
+        :param request: The run and where to upload it.
+        :type request: PackRequest
+        :return: Ready with its size, too big, or failed for a folder
+            that is gone.
         :rtype: BundleReport
         :raises httpx.HTTPError: If the upload fails.
         """
         run_dir = run_folder(self.config.artifacts_dir, request.run_id)
         if not run_dir.is_dir():
-            message = "The run's folder is not on this machine any more"
-            return BundleReport(status="failed", error=message)
+            return BundleReport.failed(FOLDER_GONE_MESSAGE)
+        report = await self.zip_and_upload(request, run_dir)
+        ready = report.status == PackOutcome.READY
+        if ready and self.config.delete_after_upload:
+            await asyncio.to_thread(shutil.rmtree, run_dir, True)
+        return report
+
+    async def zip_and_upload(
+        self, request: PackRequest, run_dir: Path
+    ) -> BundleReport:
+        """
+        Zip a run's folder into a hidden file beside it and upload it;
+        the zip is removed afterwards either way.
+
+        :param request: The run and where to upload it.
+        :type request: PackRequest
+        :param run_dir: The run's folder.
+        :type run_dir: Path
+        :return: Ready with its size, or too big.
+        :rtype: BundleReport
+        :raises httpx.HTTPError: If the upload fails.
+        """
         partial = run_dir.with_name(f".{run_dir.name}.zip.part")
         try:
             size = await asyncio.to_thread(
@@ -140,14 +176,11 @@ class Bundler:
                 partial,
                 request.max_bytes,
             )
-            report = await self.upload(request, partial, size)
+            return await self.upload(request, partial, size)
         except BundleTooLargeError as error:
-            return BundleReport(status="too_big", size_bytes=error.size_bytes)
+            return BundleReport.too_big(error.size_bytes)
         finally:
             partial.unlink(missing_ok=True)
-        if report.status == "ready" and self.config.delete_after_upload:
-            await asyncio.to_thread(shutil.rmtree, run_dir, True)
-        return report
 
     async def upload(
         self, request: PackRequest, partial: Path, size: int
@@ -171,8 +204,8 @@ class Bundler:
         except httpx.HTTPStatusError as error:
             if error.response.status_code != PAYLOAD_TOO_LARGE:
                 raise
-            return BundleReport(status="too_big", size_bytes=size)
-        return BundleReport(status="ready", size_bytes=size)
+            return BundleReport.too_big(size)
+        return BundleReport.ready(size)
 
     async def deliver(self, run_id: uuid.UUID, outcome: BundleReport) -> None:
         """

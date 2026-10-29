@@ -8,6 +8,8 @@ from collections.abc import Callable
 
 from fastapi.testclient import TestClient
 
+from app.storage.keys import UPLOADS
+
 UserHeadersFactory = Callable[..., dict[str, str]]
 
 
@@ -129,30 +131,34 @@ def test_auth_key_lifecycle_and_user_stats(
     assert stats_after["quota_used"] == 1
 
 
-def test_path_traversal_prevention_file_upload(
+def test_a_session_id_cannot_lead_files_out_of_the_uploads(
     client: TestClient,
     make_user_headers: UserHeadersFactory,
 ):
     """
-    A session id containing ``..`` cannot escape the workspace.
+    A session id containing ``..`` is cleaned to a plain name, so the
+    files attached under it stay inside the uploads folder.
 
     :param client: In-process API client.
     :type client: TestClient
     :param make_user_headers: Factory registering a user key.
     :type make_user_headers: UserHeadersFactory
     """
-    files = {"file": ("test.xyz", "1\nwater\nO 0.0 0.0 0.0\n", "text/plain")}
-    data = {"session_id": "../../etc/evil"}
+    name = f"evil_{uuid.uuid4().hex[:6]}.xyz"
+    payload = {
+        "session_id": "../../etc/evil",
+        "nodes": [{"ui_id": "a", "script_name": "toy_opt"}],
+        "edges": [],
+        "files": [{"filename": name, "content": "1\nwater\nO 0 0 0\n"}],
+    }
     response = client.post(
-        "/api/files/upload",
-        files=files,
-        data=data,
-        headers=make_user_headers(),
+        "/api/jobs/pipeline/submit", json=payload, headers=make_user_headers()
     )
-    assert response.status_code in (200, 201)
-    meta = response.json()
-    assert ".." not in meta["workspace_path"]
-    assert meta["formula"] == "O"
+    assert response.status_code == 202
+    assert response.json()["pipeline_id"] == "etcevil"
+    root = client.app.state.store.root
+    (stored,) = root.rglob(name)
+    assert stored.is_relative_to(root / UPLOADS)
 
 
 def test_dag_cycle_detection(

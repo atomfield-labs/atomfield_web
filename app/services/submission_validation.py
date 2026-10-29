@@ -7,17 +7,28 @@ user got wrong. Every problem in a request is reported at once.
 """
 
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, TypeVar
 
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 
 from app.catalog.catalog import Catalog, UnknownTaskError
 from app.catalog.models import InputPort, TaskDefinition
-from app.schemas.job import InputFiles, JobSubmitRequest, PipelineSubmitRequest
+from app.core.names import is_plain_name
+from app.schemas.job import (
+    InputFiles,
+    JobNode,
+    JobSubmitRequest,
+    PipelineFile,
+    PipelineSubmitRequest,
+)
 
 Location = tuple[str | int, ...]
-UNSAFE_NAMES = frozenset({"", ".", ".."})
+# A single job and a pipeline node are checked the same way.
+TaskRequest = TypeVar("TaskRequest", JobSubmitRequest, JobNode)
+PLAIN_NAME_MESSAGE = (
+    "Use a plain file name, without folders or control characters"
+)
 
 
 def make_error(
@@ -63,17 +74,22 @@ def relocate_errors(
     ]
 
 
-def is_plain_filename(name: str) -> bool:
+def path_error(name: str, location: Location) -> dict[str, Any] | None:
     """
-    Accept only a bare file name: no directories, no ``..``.
+    An error for a file name the store would refuse (``..``, a folder,
+    a control character), so it is refused now rather than when an
+    agent asks for the file.
 
     :param name: Submitted file name.
     :type name: str
-    :return: True if the name cannot point outside the workspace.
-    :rtype: bool
+    :param location: Location of this name in the request body.
+    :type location: Location
+    :return: The error, or None if the name is plain.
+    :rtype: dict[str, Any] | None
     """
-    plain = PurePosixPath(name).name == name and "\\" not in name
-    return plain and name not in UNSAFE_NAMES
+    if is_plain_name(name):
+        return None
+    return make_error(location, "path", PLAIN_NAME_MESSAGE, name)
 
 
 def filename_error(
@@ -93,9 +109,8 @@ def filename_error(
     :return: An error, or None if the name is acceptable.
     :rtype: dict[str, Any] | None
     """
-    if not is_plain_filename(name):
-        message = "Use a plain file name, without folders"
-        return make_error(location, "path", message, name)
+    if error := path_error(name, location):
+        return error
     suffix = PurePosixPath(name).suffix.lstrip(".").lower()
     if suffix not in port.formats:
         message = f"Expected one of {port.formats}"
@@ -206,6 +221,35 @@ def check_task_request(
     return values
 
 
+def with_valid_parameters(
+    catalog: Catalog,
+    request: TaskRequest,
+    location: Location,
+) -> TaskRequest:
+    """
+    Return a copy of a task request (a job, or a pipeline node) with
+    validated parameters.
+
+    :param catalog: Loaded task catalog.
+    :type catalog: Catalog
+    :param request: Request as submitted.
+    :type request: TaskRequest
+    :param location: Where the request object sits in the body.
+    :type location: Location
+    :return: Request whose parameters are complete and valid.
+    :rtype: TaskRequest
+    :raises RequestValidationError: Listing every problem found.
+    """
+    values = check_task_request(
+        catalog,
+        request.script_name,
+        request.parameters,
+        request.inputs,
+        location,
+    )
+    return request.model_copy(update={"parameters": values})
+
+
 def validate_job_request(
     catalog: Catalog,
     request: JobSubmitRequest,
@@ -221,14 +265,24 @@ def validate_job_request(
     :rtype: JobSubmitRequest
     :raises RequestValidationError: Listing every problem found.
     """
-    values = check_task_request(
-        catalog,
-        request.script_name,
-        request.parameters,
-        request.inputs,
-        ("body",),
+    return with_valid_parameters(catalog, request, ("body",))
+
+
+def attachment_errors(files: list[PipelineFile]) -> list[dict[str, Any]]:
+    """
+    Check the names of the files attached to a pipeline, before any of
+    them is stored.
+
+    :param files: The attachments.
+    :type files: list[PipelineFile]
+    :return: Errors found; empty if every name is plain.
+    :rtype: list[dict[str, Any]]
+    """
+    found = (
+        path_error(attachment.filename, ("body", "files", index, "filename"))
+        for index, attachment in enumerate(files)
     )
-    return request.model_copy(update={"parameters": values})
+    return [error for error in found if error]
 
 
 def validate_pipeline_request(
@@ -244,23 +298,18 @@ def validate_pipeline_request(
     :type request: PipelineSubmitRequest
     :return: Request whose nodes have complete, valid parameters.
     :rtype: PipelineSubmitRequest
-    :raises RequestValidationError: Listing every bad node at once.
+    :raises RequestValidationError: Listing every bad node and file
+        name at once.
     """
     errors: list[dict[str, Any]] = []
     nodes = []
     for index, node in enumerate(request.nodes):
+        location = ("body", "nodes", index)
         try:
-            values = check_task_request(
-                catalog,
-                node.script_name,
-                node.parameters,
-                node.inputs,
-                ("body", "nodes", index),
-            )
+            nodes.append(with_valid_parameters(catalog, node, location))
         except RequestValidationError as error:
             errors.extend(error.errors())
-            continue
-        nodes.append(node.model_copy(update={"parameters": values}))
+    errors += attachment_errors(request.files or [])
     if errors:
         raise RequestValidationError(errors)
     return request.model_copy(update={"nodes": nodes})

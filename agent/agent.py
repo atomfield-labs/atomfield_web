@@ -408,45 +408,57 @@ class Agent:
         :return: The report, or None if the job was abandoned.
         :rtype: CompletionRequest | None
         """
-        assignment = running.assignment
-        pipeline_id = assignment.parameters.get(
-            "pipeline_id", str(assignment.job_id)
-        )
-        report = await self.finish(running, running.workspace, pipeline_id)
+        report = await self.finish(running)
         if report is None:
             return None
         return await self.reporter.attach_results(
-            assignment, running.workspace, report
+            running.assignment, running.workspace, report
         )
 
-    async def finish(
-        self,
-        running: RunningJob,
-        workspace: Path,
-        pipeline_id: str,
-    ) -> CompletionRequest | None:
+    async def finish(self, running: RunningJob) -> CompletionRequest | None:
         """
         Wait for the command within its deadline, then build the report.
 
         :param running: The attempt being run.
         :type running: RunningJob
-        :param workspace: Its workspace.
-        :type workspace: Path
-        :param pipeline_id: Its pipeline.
-        :type pipeline_id: str
         :return: The report, or None if the job was abandoned.
         :rtype: CompletionRequest | None
         """
-        assignment = running.assignment
         loop = asyncio.get_running_loop()
         started_at = loop.time()
-        # A scheduler (Slurm) times its jobs from when they really start;
-        # the agent times only its own children.
-        timeout = (
-            None
-            if self.runner.scheduled
-            else seconds_left(assignment.deadline_at)
-        )
+        return_code = await self.wait_for_exit(running)
+        duration = round(loop.time() - started_at, 2)
+        assignment = running.assignment
+        if running.stop_reason is not None:
+            return stopped_report(assignment, running.stop_reason, duration)
+        return exit_report(assignment, return_code, running.workspace, duration)
+
+    def time_limit(self, assignment: JobAssignment) -> float | None:
+        """
+        Seconds a job may still run here. None under a scheduler
+        (Slurm): it times its jobs from when they really start; the
+        agent times only its own children.
+
+        :param assignment: The attempt.
+        :type assignment: JobAssignment
+        :return: Seconds left, or None for no limit here.
+        :rtype: float | None
+        """
+        if self.runner.scheduled:
+            return None
+        return seconds_left(assignment.deadline_at)
+
+    async def wait_for_exit(self, running: RunningJob) -> int | None:
+        """
+        Wait for the command, stopping it at its time limit; a stop
+        for time is noted on the job.
+
+        :param running: The attempt being run.
+        :type running: RunningJob
+        :return: Its exit code, or None if it was stopped for time.
+        :rtype: int | None
+        """
+        timeout = self.time_limit(running.assignment)
         try:
             return_code = await asyncio.wait_for(
                 running.execution.wait(), timeout
@@ -454,14 +466,10 @@ class Agent:
         except TimeoutError:
             running.stop_reason = running.stop_reason or StopReason.TIMEOUT
             await running.execution.terminate()
+            return None
         if running.execution.timed_out:
             running.stop_reason = running.stop_reason or StopReason.TIMEOUT
-        duration = round(loop.time() - started_at, 2)
-        if running.stop_reason is not None:
-            return stopped_report(assignment, running.stop_reason, duration)
-        return exit_report(
-            assignment, return_code, workspace, pipeline_id, duration
-        )
+        return return_code
 
     async def heartbeat_loop(self) -> None:
         """

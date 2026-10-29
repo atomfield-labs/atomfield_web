@@ -9,12 +9,12 @@ a run far too big to upload is not zipped in full just to find out.
 """
 
 import json
-import os
 import zipfile
 from pathlib import Path
 from typing import Any
 
-UPSTREAM_DIR = "upstream"
+from agent.workspace import own_files
+
 MANIFEST_NAME = "run.json"
 
 
@@ -34,25 +34,14 @@ class BundleTooLargeError(Exception):
 
 def bundle_files(run_dir: Path) -> list[Path]:
     """
-    Every file to zip, skipping ``upstream/`` links and hidden files.
+    Every file to zip: the run's own files (``own_files``), sorted.
 
     :param run_dir: The run's folder.
     :type run_dir: Path
     :return: Files, sorted.
     :rtype: list[Path]
     """
-    found = []
-    for folder, subfolders, names in os.walk(run_dir):
-        subfolders[:] = [
-            name
-            for name in subfolders
-            if name != UPSTREAM_DIR and not name.startswith(".")
-        ]
-        for name in names:
-            path = Path(folder) / name
-            if not name.startswith(".") and not path.is_symlink():
-                found.append(path)
-    return sorted(found)
+    return sorted(own_files(run_dir))
 
 
 def write_bundle(
