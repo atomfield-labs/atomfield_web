@@ -63,6 +63,36 @@ contents.
   starts with (`CATALOG_PATH`); their agents need their own copy of
   the scripts (`pack_dir`).
 
+## Ready-made pipelines
+
+The editor's **Prebuilt Pipelines** come from the release too, so a
+template always matches the tasks it calls. Each is a TOML file in
+afscripts' `catalog/pipelines/`: its example structures (files beside
+it), then its steps in the order they run, each naming a task, the
+nodes it reads from (`after`) and only the values that differ from
+the task's defaults:
+
+```toml
+[[structures]]
+key = "structure_fe"
+file = "structures/fe_bcc_primitive.in"
+
+[[steps]]
+key = "ahc_scf"
+task = "ahc_scf"
+label = "SCF with spin-orbit"
+after = ["structure_fe"]
+parameters = { magnetization = "Fe=0.5" }
+```
+
+A step may only follow what is listed before it, so a template cannot
+loop. The export copies the structures' text into `catalog.json`, and
+stops on a template naming an unknown task or parameter. The server
+checks the values themselves when the release is published: a broken
+template refuses the release. `GET /api/pipeline-templates` lists the
+templates of the newest release; the editor lays each one out left to
+right and fills in every other setting from the task's defaults.
+
 What a release does not carry: the Python packages the scripts import
 (ase, numpy...) and the engines (Quantum ESPRESSO, xTB). Each machine
 provides those once: a conda environment, and the cluster's modules

@@ -2,7 +2,6 @@ import apiClient from '../client';
 import type {
   ApiKeyCreateResponse,
   ApiKeyInfo,
-  QuotaResponse,
   UserStatsResponse,
 } from '../../types/api';
 
@@ -35,11 +34,6 @@ export const authService = {
 
   async getStats(): Promise<UserStatsResponse> {
     const response = await apiClient.get<UserStatsResponse>('/api/auth/stats');
-    return response.data;
-  },
-
-  async getQuota(): Promise<QuotaResponse> {
-    const response = await apiClient.get<QuotaResponse>('/api/auth/quota');
     return response.data;
   },
 };

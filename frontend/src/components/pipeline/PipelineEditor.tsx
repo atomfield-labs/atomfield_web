@@ -4,16 +4,14 @@ import LeftSidebar from './LeftSidebar';
 import GraphCanvas from './GraphCanvas';
 import InspectorDrawer from './InspectorDrawer';
 import EditorHeader from './EditorHeader';
-import { jobsService, pipelineService } from '../../api/services';
-import type { TemplateName } from '../../api/services';
-import { useQuota } from '../../hooks/useQuota';
+import { jobsService } from '../../api/services';
 import { useBlueprint } from '../../hooks/useBlueprint';
 import { useSessionDraft, serializeGraphToBlueprint } from '../../hooks/useSessionDraft';
 import { useRunEvents } from '../../hooks/useRunEvents';
 import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
 import { buildPipelineSubmitPayload } from '../../utils/pipelinePayload';
-import { withCatalogDefaults } from '../../utils/templates';
-import type { SessionMetadata } from '../../types/api';
+import { templateToBlueprint } from '../../utils/templates';
+import type { PipelineTemplate, SessionMetadata } from '../../types/api';
 
 export type { SessionMetadata };
 
@@ -45,7 +43,6 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
   const replicateNodeRef = useRef<((nodeId: string, count: number) => void) | null>(null);
 
   // Custom Hooks
-  const { quota, decrementQuota } = useQuota();
   const { blueprint, isLoading: isLoadingBlueprint, setBlueprint } = useBlueprint(activeSessionId);
   const { saveStatus, setSaveStatus, autosaveGraph, markSessionRunning } = useSessionDraft(activeSessionId);
 
@@ -263,7 +260,6 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
       }
 
       setSaveStatus('deployed');
-      decrementQuota();
 
       alert(
         `Pipeline launched successfully.\n\nSubmitted ${response.total_nodes} job(s) (${response.roots_started} root job(s) running in cluster).\nSession is now running with live tracking in Sessions.`
@@ -277,21 +273,15 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
     }
   };
 
-  // A ready-made pipeline replaces the canvas, its tasks' settings
-  // filled in from the catalog.
+  // A ready-made pipeline replaces the canvas, every setting shown.
   const handleLoadTemplate = useCallback(
-    async (template: TemplateName) => {
-      try {
-        const loaded = await pipelineService.getTemplateBlueprint(template);
-        const filled = withCatalogDefaults(loaded, taskById);
-        setBlueprint(filled);
-        localStorage.setItem(
-          `atomfield_blueprint_${activeSessionId}`,
-          JSON.stringify(filled)
-        );
-      } catch (e) {
-        console.error(`Failed to load the ${template} pipeline`, e);
-      }
+    (template: PipelineTemplate) => {
+      const loaded = templateToBlueprint(template, taskById);
+      setBlueprint(loaded);
+      localStorage.setItem(
+        `atomfield_blueprint_${activeSessionId}`,
+        JSON.stringify(loaded)
+      );
     },
     [activeSessionId, setBlueprint, taskById]
   );
@@ -301,7 +291,6 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
       <EditorHeader
         activeSessionId={activeSessionId}
         saveStatus={saveStatus}
-        quota={quota}
         isDeploying={isDeploying}
         onDeploy={handleDeploy}
         targetId={targetId}

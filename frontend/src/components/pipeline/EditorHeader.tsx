@@ -7,7 +7,6 @@ import type { SaveStatus } from '../../types/api';
 interface EditorHeaderProps {
   activeSessionId: string;
   saveStatus: SaveStatus;
-  quota?: number | null;
   isDeploying: boolean;
   onDeploy: () => void;
   // Where the pipeline runs; null means the shared AtomField server.
@@ -18,7 +17,6 @@ interface EditorHeaderProps {
 export default function EditorHeader({
   activeSessionId,
   saveStatus,
-  quota: _quota,
   isDeploying,
   onDeploy,
   targetId,

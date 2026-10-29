@@ -22,6 +22,11 @@ from pydantic import (
 # they become folder names on agents' machines.
 PACKAGE_NAME_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._+!-]{0,99}"
 ENVIRONMENT_NAME_PATTERN = r"[A-Z][A-Z0-9_]{0,63}"
+# A template's node keys become job folder names on agents' machines.
+NODE_KEY_PATTERN = r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}"
+FILE_NAME_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}"
+# A template's example structures travel inside the catalog.
+MAX_TEMPLATE_STRUCTURE_CHARS = 64 * 1024
 # Variables the agent sets for every job; a data pack may not take one.
 RESERVED_ENVIRONMENT = frozenset(
     {
@@ -216,14 +221,79 @@ class TaskDefinition(ContractModel):
         return self
 
 
+class TemplateStructure(ContractModel):
+    """
+    An example structure a pipeline template starts from, its text
+    included, so the template is complete inside the catalog.
+    """
+
+    key: str = Field(pattern=f"^{NODE_KEY_PATTERN}$")
+    filename: str = Field(pattern=f"^{FILE_NAME_PATTERN}$")
+    content: str = Field(max_length=MAX_TEMPLATE_STRUCTURE_CHARS)
+
+
+class TemplateStep(ContractModel):
+    """
+    One step of a pipeline template: a catalog task, the nodes whose
+    results it reads, and the parameter values that differ from the
+    task's defaults.
+    """
+
+    key: str = Field(pattern=f"^{NODE_KEY_PATTERN}$")
+    task: str
+    label: str
+    after: list[str] = []
+    parameters: dict[str, Any] = {}
+
+
+class PipelineTemplate(ContractModel):
+    """
+    A ready-made pipeline the editor offers. Its steps are listed in
+    the order they run, and a step may follow only structures and
+    steps listed before it, so a template cannot loop.
+    """
+
+    id: str
+    title: str
+    description: str
+    structures: list[TemplateStructure] = []
+    steps: list[TemplateStep] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def check_steps_follow_earlier_nodes(self) -> "PipelineTemplate":
+        """
+        Reject a step that follows a node not listed before it, and
+        two nodes sharing a key.
+
+        :return: The validated template.
+        :rtype: PipelineTemplate
+        :raises ValueError: On the first such step or key.
+        """
+        earlier = [structure.key for structure in self.structures]
+        for step in self.steps:
+            later = sorted(set(step.after) - set(earlier))
+            if later:
+                raise ValueError(
+                    f"Template {self.id}: {step.key} follows {later}, "
+                    "not listed before it"
+                )
+            earlier.append(step.key)
+        repeated = sorted(key for key, n in Counter(earlier).items() if n > 1)
+        if repeated:
+            raise ValueError(f"Template {self.id}: keys used twice: {repeated}")
+        return self
+
+
 class CatalogDocument(ContractModel):
     """
-    The whole ``catalog.json`` file.
+    The whole ``catalog.json`` file: the tasks, and the ready-made
+    pipelines built from them.
     """
 
     # Only format 1 exists; a newer file must fail loudly, not half-load.
     format_version: Literal[1]
     tasks: list[TaskDefinition]
+    pipelines: list[PipelineTemplate] = []
 
     @model_validator(mode="after")
     def check_ids_are_unique(self) -> "CatalogDocument":
@@ -238,4 +308,19 @@ class CatalogDocument(ContractModel):
         repeated = sorted(task_id for task_id, n in counts.items() if n > 1)
         if repeated:
             raise ValueError(f"Task ids used twice: {repeated}")
+        return self
+
+    @model_validator(mode="after")
+    def check_template_ids_are_unique(self) -> "CatalogDocument":
+        """
+        Reject a catalog in which two pipeline templates share an id.
+
+        :return: The validated document.
+        :rtype: CatalogDocument
+        :raises ValueError: If any template id appears more than once.
+        """
+        counts = Counter(template.id for template in self.pipelines)
+        repeated = sorted(name for name, n in counts.items() if n > 1)
+        if repeated:
+            raise ValueError(f"Template ids used twice: {repeated}")
         return self

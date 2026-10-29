@@ -7,9 +7,13 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-from app.catalog.models import CatalogDocument, TaskDefinition
+from app.catalog.models import (
+    CatalogDocument,
+    PipelineTemplate,
+    TaskDefinition,
+)
 from app.catalog.parameters import build_parameter_model, validate_values
 
 
@@ -17,6 +21,21 @@ class UnknownTaskError(LookupError):
     """
     Raised when a request names a task the catalog does not contain.
     """
+
+
+def accepts_file(task: TaskDefinition, filename: str) -> bool:
+    """
+    Whether one of a task's inputs takes a file of this type.
+
+    :param task: The task.
+    :type task: TaskDefinition
+    :param filename: The file's name; its extension is its type.
+    :type filename: str
+    :return: True if an input lists the extension.
+    :rtype: bool
+    """
+    extension = filename.rpartition(".")[2].lower()
+    return any(extension in port.formats for port in task.inputs)
 
 
 class Catalog:
@@ -41,6 +60,11 @@ class Catalog:
         self.parameter_models: Mapping[str, type[BaseModel]] = MappingProxyType(
             {task.id: build_parameter_model(task) for task in document.tasks}
         )
+        self.templates: Mapping[str, PipelineTemplate] = MappingProxyType(
+            {template.id: template for template in document.pipelines}
+        )
+        for template in document.pipelines:
+            self.check_template(template)
 
     @classmethod
     def from_path(cls, path: Path) -> "Catalog":
@@ -89,3 +113,28 @@ class Catalog:
         """
         self.get(task_id)
         return validate_values(self.parameter_models[task_id], raw_values)
+
+    def check_template(self, template: PipelineTemplate) -> None:
+        """
+        Check a pipeline template against the tasks: each step names a
+        task of this catalog with valid parameter values, and each
+        structure a step reads fits one of that task's inputs.
+
+        :param template: A template of this catalog.
+        :type template: PipelineTemplate
+        :raises ValueError: On the first problem, naming the step.
+        """
+        filenames = {item.key: item.filename for item in template.structures}
+        for step in template.steps:
+            where = f"Template {template.id}, step {step.key}"
+            if step.task not in self.tasks:
+                raise ValueError(f"{where}: unknown task {step.task}")
+            try:
+                self.validate_values(step.task, step.parameters)
+            except ValidationError as error:
+                raise ValueError(f"{where}: {error}") from error
+            for key in set(step.after) & set(filenames):
+                if not accepts_file(self.tasks[step.task], filenames[key]):
+                    raise ValueError(
+                        f"{where}: no input takes {filenames[key]}"
+                    )

@@ -87,5 +87,35 @@
         {"name": "copy", "flag": "-copy", "kind": "string", "default": "a"}
       ]
     }
+  ],
+  "pipelines": [
+    {
+      "id": "toy_demo",
+      "title": "Toy demo",
+      "description": "Optimize water, then map its reactions.",
+      "structures": [
+        {
+          "key": "structure_water",
+          "filename": "water.xyz",
+          "content": "3\nwater\nO 0 0 0\nH 0.96 0 0\nH -0.24 0.93 0\n"
+        }
+      ],
+      "steps": [
+        {
+          "key": "opt",
+          "task": "toy_opt",
+          "label": "Optimize",
+          "after": ["structure_water"],
+          "parameters": {"charge": 1}
+        },
+        {
+          "key": "network",
+          "task": "toy_network",
+          "label": "Reaction network",
+          "after": ["opt"],
+          "parameters": {"method": "smiles"}
+        }
+      ]
+    }
   ]
 }

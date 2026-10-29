@@ -1,19 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { catalogService } from '../api/services';
 import type { TaskDefinition } from '../types/api';
+import { sharedRequest } from '../utils/sharedRequest';
 
 // One request per page load, shared by every component that asks.
-let cachedRequest: Promise<TaskDefinition[]> | null = null;
-
-function loadTaskDefinitions(): Promise<TaskDefinition[]> {
-  if (!cachedRequest) {
-    cachedRequest = catalogService.listTaskDefinitions().catch((error) => {
-      cachedRequest = null; // let the next caller retry
-      throw error;
-    });
-  }
-  return cachedRequest;
-}
+export const loadTaskDefinitions = sharedRequest(() =>
+  catalogService.listTaskDefinitions()
+);
 
 export interface TaskCatalog {
   tasks: TaskDefinition[];

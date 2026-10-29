@@ -97,6 +97,76 @@ def test_broken_catalogs_are_rejected(break_it, message: str):
         CatalogDocument.model_validate(document)
 
 
+@pytest.mark.skipif(not REAL_CATALOG.exists(), reason="no scripts_repo")
+def test_the_real_templates_fit_the_real_tasks():
+    """
+    afscripts' ready-made pipelines pass the checks a release must
+    pass: real tasks, valid values, structures their steps can read.
+    """
+    templates = Catalog.from_path(REAL_CATALOG).templates
+    assert {"ahc", "nanoreactor", "nanoreactor_modular"} <= set(templates)
+    assert templates["ahc"].steps[0].parameters["magnetization"] == "Fe=0.5"
+
+
+def toy_template(document: dict[str, Any]) -> dict[str, Any]:
+    """
+    The fixture's one template, to break it on purpose.
+
+    :param document: The fixture as plain data.
+    :type document: dict[str, Any]
+    :return: The template inside it.
+    :rtype: dict[str, Any]
+    """
+    return document["pipelines"][0]
+
+
+@pytest.mark.parametrize(
+    ("break_it", "message"),
+    [
+        (
+            lambda doc: toy_template(doc)["steps"][0].update(task="toy_md"),
+            "unknown task toy_md",
+        ),
+        (
+            lambda doc: toy_template(doc)["steps"][0].update(
+                parameters={"charge": "one"}
+            ),
+            "step opt",
+        ),
+        (
+            lambda doc: toy_template(doc)["structures"][0].update(
+                filename="water.cif"
+            ),
+            "no input takes water.cif",
+        ),
+        (
+            lambda doc: toy_template(doc)["steps"][0].update(after=["network"]),
+            "not listed before it",
+        ),
+        (
+            lambda doc: toy_template(doc)["steps"][1].update(key="opt"),
+            "keys used twice",
+        ),
+    ],
+    ids=["task", "value", "file", "loop", "key"],
+)
+def test_broken_templates_are_rejected(break_it, message: str):
+    """
+    A template whose step names an unknown task or a bad value, reads
+    a structure no input takes, follows a later step or reuses a key
+    stops the catalog from loading, and so a release from publishing.
+
+    :param break_it: Mutates the fixture document.
+    :type break_it: Callable[[dict], None]
+    :param message: Text expected in the error.
+    :type message: str
+    """
+    document = fixture_document()
+    break_it(document)
+    with pytest.raises(ValueError, match=message):
+        Catalog(CatalogDocument.model_validate(document))
+
+
 def test_validation_fills_in_defaults(catalog: Catalog):
     """
     Omitted parameters get their defaults, so a job records every value.

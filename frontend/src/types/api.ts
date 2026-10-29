@@ -21,10 +21,6 @@ export type JobStatus =
 
 export type SaveStatus = 'saved' | 'saving' | 'deployed' | 'idle';
 
-export interface QuotaResponse {
-  runsRemaining: number;
-}
-
 // Task catalog (GET /api/task-definitions); mirrors app/catalog/models.py.
 export type ParameterKind = 'boolean' | 'integer' | 'number' | 'string';
 
@@ -82,6 +78,32 @@ export interface TaskDefinition {
   parameters: ParameterSpec[];
   // Data packs the agent puts in place first (pseudopotentials...).
   data?: DataNeed[];
+}
+
+// Ready-made pipelines (GET /api/pipeline-templates), shipped in the
+// scripts release beside the tasks they use.
+export interface TemplateStructure {
+  key: string;
+  filename: string;
+  content: string;
+}
+
+export interface TemplateStep {
+  key: string;
+  task: string;
+  label: string;
+  // Keys of the structures and earlier steps it reads from.
+  after: string[];
+  // Only the values that differ from the task's defaults.
+  parameters: Record<string, ParameterValue>;
+}
+
+export interface PipelineTemplate {
+  id: string;
+  title: string;
+  description: string;
+  structures: TemplateStructure[];
+  steps: TemplateStep[];
 }
 
 // A data pack a task reads, and the variable that names its folder.

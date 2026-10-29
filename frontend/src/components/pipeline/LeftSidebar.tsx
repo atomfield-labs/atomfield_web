@@ -6,13 +6,13 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
 } from 'lucide-react';
+import { usePipelineTemplates } from '../../hooks/usePipelineTemplates';
 import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
-import type { TemplateName } from '../../api/services';
-import type { TaskDefinition } from '../../types/api';
+import type { PipelineTemplate, TaskDefinition } from '../../types/api';
 import { groupByCategory } from '../../utils/taskCatalog';
 
 interface LeftSidebarProps {
-  onLoadTemplate?: (template: TemplateName) => void;
+  onLoadTemplate?: (template: PipelineTemplate) => void;
 }
 
 interface SidebarItem {
@@ -22,7 +22,7 @@ interface SidebarItem {
   description: string;
   isStructure?: boolean;
   // A ready-made pipeline: clicking it replaces the canvas.
-  template?: TemplateName;
+  template?: PipelineTemplate;
   task?: TaskDefinition;
 }
 
@@ -48,43 +48,6 @@ const BUILDERS: PaletteCategory = {
   ],
 };
 
-const PREBUILT_DRIVERS: PaletteCategory = {
-  id: 'prebuilt_drivers',
-  label: 'Prebuilt Drivers',
-  items: [
-    {
-      id: 'flash_nanoreactor',
-      title: 'Nanoreactor Flash',
-      filename: 'xtb_nanoreactor',
-      description:
-        'Fast monolithic prebuilt run: parallel MD replicates & reaction ' +
-        'network graph extraction. Click to switch pipeline.',
-      template: 'nanoreactor',
-    },
-    {
-      id: 'modular_nanoreactor',
-      title: 'Nanoreactor Pipe',
-      filename: 'modular_workflow',
-      description:
-        '2D decomposed 5-node reaction discovery pipeline: xTB Opt -> ' +
-        'xTB MD -> Reaction Network -> SevenNet Refine -> TS Search. ' +
-        'Click to switch pipeline.',
-      template: 'nanoreactor_modular',
-    },
-    {
-      id: 'ahc_pipeline',
-      title: 'Anomalous Hall (AHC)',
-      filename: 'ahc',
-      description:
-        'Four-step anomalous Hall conductivity pipeline: QE SCF with ' +
-        'spin-orbit -> NSCF on the full k-mesh -> Wannier90 -> postw90 ' +
-        'Berry curvature. Set up for bcc Fe; swap in your own ' +
-        'structure. Click to switch pipeline.',
-      template: 'ahc',
-    },
-  ],
-};
-
 /**
  * Palette entry for one catalog task; its id shows in the tooltip.
  */
@@ -99,16 +62,37 @@ function taskItem(task: TaskDefinition): SidebarItem {
 }
 
 /**
- * Fixed builders first, then one category per catalog category, then
- * the prebuilt pipeline templates.
+ * Palette entry for one ready-made pipeline of the catalog.
  */
-function buildCategories(tasks: TaskDefinition[]): PaletteCategory[] {
+function templateItem(template: PipelineTemplate): SidebarItem {
+  return {
+    id: `template:${template.id}`,
+    title: template.title,
+    filename: template.id,
+    description: `${template.description} Click to switch pipeline.`,
+    template,
+  };
+}
+
+/**
+ * Fixed builders first, then one category per catalog category, then
+ * the catalog's ready-made pipelines.
+ */
+function buildCategories(
+  tasks: TaskDefinition[],
+  templates: PipelineTemplate[]
+): PaletteCategory[] {
   const catalogCategories = groupByCategory(tasks).map(([label, group]) => ({
     id: `catalog:${label}`,
     label,
     items: group.map(taskItem),
   }));
-  return [BUILDERS, ...catalogCategories, PREBUILT_DRIVERS];
+  const prebuilt: PaletteCategory = {
+    id: 'prebuilt_pipelines',
+    label: 'Prebuilt Pipelines',
+    items: templates.map(templateItem),
+  };
+  return [BUILDERS, ...catalogCategories, prebuilt];
 }
 
 interface TooltipState {
@@ -121,6 +105,7 @@ export default function LeftSidebar({
   onLoadTemplate,
 }: LeftSidebarProps = {}) {
   const { tasks, isLoading } = useTaskDefinitions();
+  const templates = usePipelineTemplates();
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [isCollapsed, setIsCollapsed] = useState(
     () => typeof window !== 'undefined' && window.innerWidth < 768
@@ -129,7 +114,7 @@ export default function LeftSidebar({
   const [openCategories, setOpenCategories] = useState<
     Record<string, boolean>
   >({});
-  const categories = buildCategories(tasks);
+  const categories = buildCategories(tasks, templates);
 
   const toggleCategory = (catId: string) => {
     setOpenCategories((prev) => ({

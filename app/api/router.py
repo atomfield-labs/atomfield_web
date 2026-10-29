@@ -12,7 +12,6 @@ from app.api.routes.catalog import router as catalog_router
 from app.api.routes.data_packs import router as data_packs_router
 from app.api.routes.files import router as files_router
 from app.api.routes.jobs import router as jobs_router
-from app.api.routes.mock import router as mock_router
 from app.api.routes.releases import router as releases_router
 from app.api.routes.runs import router as runs_router
 from app.api.routes.storage import router as storage_router
@@ -31,6 +30,5 @@ api_router.include_router(runs_router)
 api_router.include_router(files_router)
 api_router.include_router(storage_router)
 api_router.include_router(targets_router)
-api_router.include_router(mock_router)
 
 __all__ = ["api_router"]

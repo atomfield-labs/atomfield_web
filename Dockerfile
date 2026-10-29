@@ -3,11 +3,11 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# Docker CLI for container management, curl for health checks,
-# PostgreSQL client for pg_dump backups before migrations
+# curl for health checks, PostgreSQL client for pg_dump backups before
+# migrations
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        docker.io curl postgresql-client && \
+        curl postgresql-client && \
     rm -rf /var/lib/apt/lists/*
 
 # Install uv binary

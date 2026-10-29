@@ -5,7 +5,9 @@ field: the anomalous Hall effect. Its size, the anomalous Hall
 conductivity (AHC, sigma_xy, in S/cm), comes from the Berry curvature
 of the bands near the Fermi level. Computing it takes four programs
 in a row, each building on the one before. The editor offers them as
-one ready-made pipeline: **Prebuilt Drivers → Anomalous Hall (AHC)**.
+one ready-made pipeline: **Prebuilt Pipelines → Anomalous Hall
+(AHC)**. Like every template, it ships in the scripts release, in
+afscripts' `catalog/pipelines/ahc.toml` (see `docs/releases.md`).
 
 ## The story of one run
 

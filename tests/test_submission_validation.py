@@ -37,6 +37,22 @@ def test_task_definitions_are_public(client: TestClient):
     ]
 
 
+def test_pipeline_templates_are_public(client: TestClient):
+    """
+    The ready-made pipelines load without a key, with their steps in
+    order and their structures' text.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    """
+    response = client.get("/api/pipeline-templates")
+    assert response.status_code == 200
+    (template,) = response.json()
+    assert template["id"] == "toy_demo"
+    assert [step["key"] for step in template["steps"]] == ["opt", "network"]
+    assert template["structures"][0]["content"].startswith("3\nwater")
+
+
 def test_unknown_task_is_rejected_at_its_field(
     client: TestClient,
     make_user_headers: UserHeadersFactory,

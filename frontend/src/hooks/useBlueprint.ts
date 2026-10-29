@@ -1,26 +1,68 @@
 import { useState, useEffect } from 'react';
-import { pipelineService } from '../api/services';
-import type { PipelineBlueprint } from '../types/api';
+import type {
+  PipelineBlueprint,
+  PipelineTemplate,
+  TaskDefinition,
+} from '../types/api';
+import { templateToBlueprint } from '../utils/templates';
+import { loadPipelineTemplates } from './usePipelineTemplates';
+import { loadTaskDefinitions } from './useTaskDefinitions';
 
+// The landing page's demo session shows this template of the catalog.
+const DEMO_SESSION_ID = 'nanoreactor';
+const DEMO_TEMPLATE_ID = 'nanoreactor';
+const EMPTY_BLUEPRINT: PipelineBlueprint = { nodes: [], edges: [] };
+
+/**
+ * The demo pipeline, built from the current release's template; an
+ * empty canvas if the release has none.
+ */
+function demoBlueprint(
+  templates: PipelineTemplate[],
+  tasks: TaskDefinition[]
+): PipelineBlueprint {
+  const demo = templates.find((item) => item.id === DEMO_TEMPLATE_ID);
+  if (!demo) return EMPTY_BLUEPRINT;
+  return templateToBlueprint(demo, new Map(tasks.map((t) => [t.id, t])));
+}
+
+/**
+ * The draft of a session saved in this browser, if any.
+ */
+function savedDraft(sessionId: string): PipelineBlueprint | null {
+  const saved = localStorage.getItem(`atomfield_blueprint_${sessionId}`);
+  if (!saved) return null;
+  try {
+    return JSON.parse(saved);
+  } catch (err) {
+    console.error('Failed to parse saved blueprint from localStorage', err);
+    return null;
+  }
+}
+
+/**
+ * What a session opens with: the demo template for the demo session,
+ * else the draft saved in this browser, else an empty canvas.
+ */
 export function useBlueprint(activeSessionId: string) {
-  const [blueprint, setBlueprint] = useState<PipelineBlueprint>({ nodes: [], edges: [] });
+  const [blueprint, setBlueprint] = useState<PipelineBlueprint>(
+    EMPTY_BLUEPRINT
+  );
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     let isMounted = true;
 
-    if (activeSessionId === 'nanoreactor') {
+    if (activeSessionId === DEMO_SESSION_ID) {
       setIsLoading(true);
-      pipelineService
-        .getNanoreactorBlueprint()
-        .then((data) => {
-          if (isMounted) {
-            setBlueprint(data);
-            setIsLoading(false);
-          }
+      Promise.all([loadPipelineTemplates(), loadTaskDefinitions()])
+        .then(([templates, tasks]) => {
+          if (!isMounted) return;
+          setBlueprint(demoBlueprint(templates, tasks));
+          setIsLoading(false);
         })
         .catch((err) => {
-          console.error('Failed to fetch nanoreactor blueprint', err);
+          console.error('Failed to load the demo pipeline', err);
           if (isMounted) setIsLoading(false);
         });
       return () => {
@@ -28,46 +70,8 @@ export function useBlueprint(activeSessionId: string) {
       };
     }
 
-    // Check localStorage for saved draft
-    const savedBp = localStorage.getItem(`atomfield_blueprint_${activeSessionId}`);
-    if (savedBp) {
-      try {
-        const parsed = JSON.parse(savedBp);
-        setBlueprint(parsed);
-        setIsLoading(false);
-        return () => {
-          isMounted = false;
-        };
-      } catch (err) {
-        console.error('Failed to parse saved blueprint from localStorage', err);
-      }
-    }
-
-    // Fetch from API if not a draft
-    const isClientDraft =
-      activeSessionId.startsWith('pipeline_') || activeSessionId.startsWith('draft_');
-
-    if (activeSessionId && !isClientDraft) {
-      setIsLoading(true);
-      pipelineService
-        .getSessionBlueprint(activeSessionId)
-        .then((data) => {
-          if (isMounted) {
-            setBlueprint(data);
-            setIsLoading(false);
-          }
-        })
-        .catch(() => {
-          if (isMounted) {
-            setBlueprint({ nodes: [], edges: [] });
-            setIsLoading(false);
-          }
-        });
-    } else {
-      setBlueprint({ nodes: [], edges: [] });
-      setIsLoading(false);
-    }
-
+    setBlueprint(savedDraft(activeSessionId) ?? EMPTY_BLUEPRINT);
+    setIsLoading(false);
     return () => {
       isMounted = false;
     };
