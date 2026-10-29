@@ -12,6 +12,7 @@ from app.db.base import Base
 
 # Jobs a new person may submit, until the administrator changes it.
 DEFAULT_QUOTA_LIMIT = 100
+NAME_LENGTH = 100
 
 
 class User(Base):
@@ -24,7 +25,7 @@ class User(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     # Set by signing in; empty for people from before sign-in existed.
     email = Column(String(320), nullable=True, unique=True)
-    name = Column(String(100), nullable=True)
+    name = Column(String(NAME_LENGTH), nullable=True)
     is_admin = Column(Boolean, nullable=False, default=False)
     quota_limit = Column(Integer, nullable=False, default=DEFAULT_QUOTA_LIMIT)
     quota_used = Column(Integer, nullable=False, default=0)

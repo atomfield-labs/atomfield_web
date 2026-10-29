@@ -3,11 +3,27 @@ Centralized application configuration using pydantic-settings.
 """
 
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
 _BASE_DIR = Path(__file__).resolve().parents[2]
+HTTPS = "https"
+LIST_SEPARATOR = ","
+
+
+def comma_list(text: str) -> frozenset[str]:
+    """
+    Read a comma-separated setting, ignoring case and spaces.
+
+    :param text: e.g. ``a@x.ac.in, B@x.ac.in``.
+    :type text: str
+    :return: The items, lower case, empty ones dropped.
+    :rtype: frozenset[str]
+    """
+    items = (item.strip().lower() for item in text.split(LIST_SEPARATOR))
+    return frozenset(item for item in items if item)
 
 
 class Settings(BaseSettings):
@@ -70,6 +86,20 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"  # development | staging | production
     ADMIN_API_KEY: str | None = None
 
+    # --- Signing in with an institute account (OpenID Connect) ---
+    # Unset OIDC_CLIENT_ID turns sign-in off; scripts still use keys.
+    OIDC_ISSUER: str = "https://accounts.google.com"
+    OIDC_CLIENT_ID: str | None = None
+    OIDC_CLIENT_SECRET: str | None = None
+    # Where Google sends people back, this server as browsers see it:
+    # https://atomfield.<dept>.<institute>.ac.in/api/auth/callback
+    OIDC_REDIRECT_URI: str | None = None
+    # Comma-separated: whose accounts may sign in, and who of them
+    # are administrators.
+    SIGN_IN_DOMAINS: str = ""
+    ADMIN_EMAILS: str = ""
+    SESSION_DAYS: int = 14
+
     # --- Agents ---
     # Token of the platform's own (house) agent; None disables it.
     HOUSE_AGENT_TOKEN: str | None = None
@@ -116,6 +146,52 @@ class Settings(BaseSettings):
             database=self.POSTGRES_DB,
         )
         return url.render_as_string(hide_password=False)
+
+    @property
+    def sign_in_domains(self) -> frozenset[str]:
+        """
+        The institute domains whose accounts may sign in.
+
+        :return: Domains, lower case.
+        :rtype: frozenset[str]
+        """
+        return comma_list(self.SIGN_IN_DOMAINS)
+
+    @property
+    def admin_emails(self) -> frozenset[str]:
+        """
+        The people who are administrators when they sign in.
+
+        :return: Emails, lower case.
+        :rtype: frozenset[str]
+        """
+        return comma_list(self.ADMIN_EMAILS)
+
+    @property
+    def public_origin(self) -> str | None:
+        """
+        This server's address as browsers see it, taken from where the
+        sign-in provider sends people back.
+
+        :return: Scheme, host and port, such as
+            ``https://atomfield.example.ac.in``; None without sign-in.
+        :rtype: str | None
+        """
+        if not self.OIDC_REDIRECT_URI:
+            return None
+        parts = urlsplit(self.OIDC_REDIRECT_URI)
+        return f"{parts.scheme}://{parts.netloc}"
+
+    @property
+    def secure_cookies(self) -> bool:
+        """
+        Whether cookies are marked Secure (sent over https only): yes
+        whenever browsers reach this server over https.
+
+        :return: True for an https address.
+        :rtype: bool
+        """
+        return urlsplit(self.OIDC_REDIRECT_URI or "").scheme == HTTPS
 
 
 # Instantiate once — module-level singleton

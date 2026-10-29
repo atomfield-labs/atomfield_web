@@ -40,6 +40,9 @@ class KeyQuota(BaseModel):
         validation_alias=AliasChoices("label", "name"),
         description="The person's name.",
     )
+    email: str | None = Field(
+        default=None, description="Their email, once they have signed in."
+    )
     quota_limit: int = Field(
         default=DEFAULT_QUOTA_LIMIT, description="Max calculation quota."
     )
@@ -104,7 +107,6 @@ class AdminUserSummary(KeyQuota, JobCounts):
     """
 
     id: UUID
-    email: str | None = None
     is_active: bool
     created_at: datetime | None = None
     last_used_at: datetime | None = Field(

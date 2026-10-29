@@ -10,8 +10,10 @@ from contextlib import asynccontextmanager, suppress
 from datetime import timedelta
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from redis.asyncio import Redis
 from sqlalchemy import exists, select, update
 from sqlalchemy.dialects.postgresql import Insert, insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +32,8 @@ from app.queue.job_queue import RedisJobQueue
 from app.releases.catalogs import ReleaseCatalogs
 from app.runs.lifecycle import SilenceLimits
 from app.scheduler.sweeper import Sweeper
+from app.sign_in.flow import PendingSignIns, SignInFlow, SignInRules
+from app.sign_in.provider import IdentityProvider, Registration
 from app.storage.links import LinkSigner
 from app.storage.store import LocalDiskStore
 
@@ -38,6 +42,14 @@ ADMIN_LABEL = "Cluster Administrator"
 # Every API process derives the same administrator id from the same key.
 ADMIN_ID_NAMESPACE = uuid.UUID("5b0f8e7e-6d2c-4f4b-9a39-6f2d7e1c3a10")
 HEALTHY = "AtomField Core Online"
+# Signing in needs all of these as soon as OIDC_CLIENT_ID is set.
+SIGN_IN_SETTINGS = (
+    "OIDC_CLIENT_SECRET",
+    "OIDC_REDIRECT_URI",
+    "SIGN_IN_DOMAINS",
+)
+# How long to wait for the sign-in provider to answer.
+PROVIDER_TIMEOUT_SECONDS = 10.0
 
 
 @asynccontextmanager
@@ -56,6 +68,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         yield
     finally:
         await stop_task(sweeper_task)
+        await app.state.http.aclose()
         await app.state.redis.aclose()
         await engine.dispose()
 
@@ -82,6 +95,8 @@ async def set_up(app: FastAPI) -> None:
     app.state.redis = create_redis()
     app.state.job_queue = RedisJobQueue(app.state.redis)
     app.state.event_bus = RedisEventBus(app.state.redis)
+    app.state.http = httpx.AsyncClient(timeout=PROVIDER_TIMEOUT_SECONDS)
+    app.state.sign_in = create_sign_in(app.state.http, app.state.redis)
 
 
 async def stop_task(task: asyncio.Task | None) -> None:
@@ -112,6 +127,47 @@ def create_store() -> LocalDiskStore:
         raise RuntimeError("Set STORAGE_SIGNING_KEY (openssl rand -hex 32)")
     signer = LinkSigner(settings.STORAGE_SIGNING_KEY)
     return LocalDiskStore(Path(settings.STORAGE_DIR), signer)
+
+
+def sign_in_registration() -> Registration:
+    """
+    AtomField's registration with the sign-in provider, from the
+    settings (``create_sign_in`` checks they are all there).
+
+    :return: The registration.
+    :rtype: Registration
+    """
+    return Registration(
+        issuer=settings.OIDC_ISSUER,
+        client_id=settings.OIDC_CLIENT_ID,
+        client_secret=settings.OIDC_CLIENT_SECRET,
+        redirect_uri=settings.OIDC_REDIRECT_URI,
+    )
+
+
+def create_sign_in(http: httpx.AsyncClient, redis: Redis) -> SignInFlow | None:
+    """
+    Set up signing in with an institute account, from the settings.
+
+    :param http: Client for calling the sign-in provider.
+    :type http: httpx.AsyncClient
+    :param redis: Where sign-ins in progress are kept.
+    :type redis: Redis
+    :return: The sign-in flow, or None if ``OIDC_CLIENT_ID`` is unset.
+    :rtype: SignInFlow | None
+    :raises RuntimeError: If sign-in is half set up: better to say so
+        now than at someone's first sign-in.
+    """
+    if not settings.OIDC_CLIENT_ID:
+        return None
+    missing = [name for name in SIGN_IN_SETTINGS if not getattr(settings, name)]
+    if missing:
+        raise RuntimeError(f"Sign-in also needs {', '.join(missing)}")
+    provider = IdentityProvider(http, sign_in_registration())
+    rules = SignInRules(
+        domains=settings.sign_in_domains, admins=settings.admin_emails
+    )
+    return SignInFlow(provider, PendingSignIns(redis), rules)
 
 
 def admin_person(admin_id: uuid.UUID) -> Insert:
@@ -233,8 +289,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Keys travel in a header, never in cookies, so no origin needs the
-# browser's credentials mode: with it, "*" would admit every site.
+# Scripts send keys in a header. Browsers send the session cookie only
+# to the origin serving the web app, which needs no CORS; so no other
+# origin needs the browser's credentials mode: with it, "*" would
+# admit every site.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
