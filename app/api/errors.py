@@ -4,6 +4,9 @@ The HTTP errors the API answers with, built one way each.
 
 from fastapi import HTTPException, status
 
+# Tells a client refused for going too fast when to try again.
+RETRY_AFTER = "Retry-After"
+
 
 def unauthorized(detail: str, scheme: str | None = None) -> HTTPException:
     """
@@ -82,4 +85,52 @@ def unprocessable(detail: str) -> HTTPException:
     """
     return HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=detail
+    )
+
+
+def bad_request(detail: str) -> HTTPException:
+    """
+    A 400: the request cannot be carried out as given (a pipeline whose
+    graph has a cycle).
+
+    :param detail: Explanation for the client.
+    :type detail: str
+    :return: Exception to raise.
+    :rtype: HTTPException
+    """
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+def forbidden(detail: str) -> HTTPException:
+    """
+    A 403: the caller is known but not allowed (not the administrator,
+    or a link not signed for this request).
+
+    :param detail: Explanation for the client.
+    :type detail: str
+    :return: Exception to raise.
+    :rtype: HTTPException
+    """
+    return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
+def too_many_requests(
+    detail: str, retry_after_seconds: int | None = None
+) -> HTTPException:
+    """
+    A 429: over a limit (a quota, or how often something may be done).
+
+    :param detail: Explanation for the client.
+    :type detail: str
+    :param retry_after_seconds: When to try again, if waiting helps.
+    :type retry_after_seconds: int | None
+    :return: Exception to raise.
+    :rtype: HTTPException
+    """
+    waiting_helps = retry_after_seconds is not None
+    headers = {RETRY_AFTER: str(retry_after_seconds)} if waiting_helps else None
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=detail,
+        headers=headers,
     )

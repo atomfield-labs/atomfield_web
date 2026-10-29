@@ -13,6 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.errors import not_found
 from app.core.security import generate_agent_token
 from app.models.compute_target import HOUSE_TARGET_ID, ComputeTarget
+from app.models.job import Job
+from app.models.run import Run
+from app.runs.lifecycle import cancel_jobs
 from app.schemas.targets import TargetCreate, TargetInfo, TargetToken
 
 # Agents call in at least every 30 s (claims and heartbeats).
@@ -20,6 +23,7 @@ ONLINE_WINDOW = timedelta(seconds=90)
 # Missing, retired or not yours: the same 404, so strangers learn
 # nothing.
 TARGET_KIND = "Compute target"
+TARGET_REMOVED_MESSAGE = "Cancelled: its compute target was removed"
 
 
 def visible_to(owner_id: uuid.UUID):
@@ -179,9 +183,11 @@ async def retire_target(
 ) -> None:
     """
     Retire a target: hidden from the list and its token stops working,
-    while its past runs keep pointing at it.
+    while its past runs keep pointing at it. Its unfinished jobs are
+    cancelled, since no agent can run them any more.
 
-    :param db: Asynchronous database session.
+    :param db: Asynchronous database session; the caller commits with
+        ``commit_and_publish``.
     :type db: AsyncSession
     :param owner_id: The user's API key id.
     :type owner_id: uuid.UUID
@@ -194,7 +200,8 @@ async def retire_target(
         .where(ComputeTarget.id == target.id)
         .values(retired_at=func.now(), token_hash=None)
     )
-    await db.commit()
+    runs_here = select(Run.id).where(Run.target_id == target.id)
+    await cancel_jobs(db, Job.run_id.in_(runs_here), TARGET_REMOVED_MESSAGE)
 
 
 async def usable_target(

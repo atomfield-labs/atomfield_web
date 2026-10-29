@@ -3,12 +3,10 @@ HTTP route handlers for API key issuance, identity, and usage analytics.
 """
 
 from fastapi import APIRouter, Depends, status
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
     get_current_api_key,
-    get_optional_api_key,
     is_admin_key,
     limit_key_creation,
 )
@@ -16,13 +14,14 @@ from app.core.security import generate_api_key
 from app.db.session import get_db
 from app.models.api_key import ApiKey
 from app.models.job import Job
-from app.runs.states import FAILURE_STATUSES, JobStatus
 from app.schemas.auth import (
     ApiKeyCreateRequest,
     ApiKeyCreateResponse,
     ApiKeyInfoResponse,
+    KeyQuota,
     UserStatsResponse,
 )
+from app.services.job_stats import job_counts
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -48,25 +47,14 @@ async def create_api_key(
     :rtype: ApiKeyCreateResponse
     """
     raw_key, display_prefix, key_hash = generate_api_key()
-    new_key_record = ApiKey(
-        key_hash=key_hash,
-        key_prefix=display_prefix,
-        label=request.label,
-        quota_limit=100,
-        quota_used=0,
-        is_active=True,
+    key = ApiKey(
+        key_hash=key_hash, key_prefix=display_prefix, label=request.label
     )
-    db.add(new_key_record)
+    db.add(key)
     await db.commit()
-    await db.refresh(new_key_record)
-
-    return ApiKeyCreateResponse(
-        api_key=raw_key,
-        key_prefix=new_key_record.key_prefix,
-        label=new_key_record.label,
-        quota_limit=new_key_record.quota_limit,
-        quota_used=new_key_record.quota_used,
-    )
+    await db.refresh(key)
+    quota = KeyQuota.model_validate(key).model_dump()
+    return ApiKeyCreateResponse(api_key=raw_key, **quota)
 
 
 @router.get("/me", response_model=ApiKeyInfoResponse)
@@ -81,17 +69,8 @@ async def get_current_user_info(
     :return: User account identity and remaining calculation balance.
     :rtype: ApiKeyInfoResponse
     """
-    is_admin = is_admin_key(api_key)
-    remaining = max(0, api_key.quota_limit - api_key.quota_used)
-    return ApiKeyInfoResponse(
-        key_prefix=api_key.key_prefix,
-        label=api_key.label,
-        quota_limit=api_key.quota_limit,
-        quota_used=api_key.quota_used,
-        quota_remaining=remaining,
-        is_active=api_key.is_active,
-        is_admin=is_admin,
-    )
+    info = ApiKeyInfoResponse.model_validate(api_key)
+    return info.model_copy(update={"is_admin": is_admin_key(api_key)})
 
 
 @router.get("/stats", response_model=UserStatsResponse)
@@ -109,50 +88,6 @@ async def get_user_statistics(
     :return: Comprehensive execution metrics dictionary.
     :rtype: UserStatsResponse
     """
-    status_query = (
-        select(Job.status, func.count(Job.id))
-        .where(Job.api_key_id == api_key.id)
-        .group_by(Job.status)
-    )
-    result = await db.execute(status_query)
-    status_counts = dict(result.all())
-
-    total = sum(status_counts.values())
-    success = status_counts.get(JobStatus.SUCCEEDED, 0)
-    failed = sum(status_counts.get(state, 0) for state in FAILURE_STATUSES)
-    running = status_counts.get(JobStatus.RUNNING, 0)
-    pending = status_counts.get(JobStatus.QUEUED, 0) + status_counts.get(
-        JobStatus.WAITING, 0
-    )
-    remaining = max(0, api_key.quota_limit - api_key.quota_used)
-
-    return UserStatsResponse(
-        key_prefix=api_key.key_prefix,
-        label=api_key.label,
-        quota_limit=api_key.quota_limit,
-        quota_used=api_key.quota_used,
-        quota_remaining=remaining,
-        total_jobs=total,
-        success_jobs=success,
-        failed_jobs=failed,
-        running_jobs=running,
-        pending_jobs=pending,
-    )
-
-
-@router.get("/quota")
-async def get_quota_balance(
-    api_key: ApiKey | None = Depends(get_optional_api_key),
-) -> dict[str, int]:
-    """
-    Retrieve real-time remaining quota for client header status pills.
-
-    :param api_key: Optional authenticated ApiKey entity.
-    :type api_key: Optional[ApiKey]
-    :return: Dictionary containing runsRemaining execution balance.
-    :rtype: dict[str, int]
-    """
-    if not api_key:
-        return {"runsRemaining": 100}
-    remaining = max(0, api_key.quota_limit - api_key.quota_used)
-    return {"runsRemaining": remaining}
+    counts = await job_counts(db, Job.api_key_id == api_key.id)
+    stats = UserStatsResponse.model_validate(api_key)
+    return stats.model_copy(update=counts.model_dump())

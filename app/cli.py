@@ -58,9 +58,7 @@ async def wipe_everything() -> dict:
     redis = create_redis()
     try:
         async with AsyncSessionLocal() as session:
-            return await clear_all_data(
-                db=session, store=create_store(), redis_queue=redis
-            )
+            return await clear_all_data(session, create_store(), redis)
     finally:
         await redis.aclose()
 

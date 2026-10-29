@@ -216,3 +216,28 @@ def test_a_retired_target_disappears_but_its_runs_remain(
     assert submit_to(client, owner, target_id).status_code == 404
     bundle = client.get(f"/api/runs/{run_id}/bundle", headers=owner)
     assert bundle.status_code == 200
+
+
+def test_retiring_a_target_cancels_the_jobs_it_can_no_longer_run(
+    client: TestClient,
+    make_user_headers: UserHeadersFactory,
+):
+    """
+    A job queued for a removed cluster could never start: no agent can
+    claim it any more. It is cancelled, saying why, and its run ends.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param make_user_headers: Factory registering a user key.
+    :type make_user_headers: UserHeadersFactory
+    """
+    owner = make_user_headers()
+    target_id = add_cluster(client, owner)["target"]["id"]
+    submitted = submit_to(client, owner, target_id).json()
+    removed = client.delete(f"/api/targets/{target_id}", headers=owner)
+    assert removed.status_code == 204
+    job = client.get(f"/api/jobs/{submitted['job_ids']['only']}", headers=owner)
+    assert job.json()["status"] == "cancelled"
+    assert "removed" in job.json()["error_message"]
+    run = client.get(f"/api/runs/{submitted['run_id']}/bundle", headers=owner)
+    assert run.json()["finished"] is True

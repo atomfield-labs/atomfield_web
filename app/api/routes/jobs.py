@@ -2,7 +2,7 @@
 HTTP route handlers for simulation jobs and DAG pipelines.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
@@ -18,6 +18,7 @@ from app.models.api_key import ApiKey
 from app.models.job import Job
 from app.queue.job_queue import RedisJobQueue
 from app.releases.catalogs import CurrentCatalog
+from app.runs.states import JobStatus
 from app.schemas.job import (
     JobListResponse,
     JobResponse,
@@ -33,6 +34,8 @@ from app.services.submission_validation import (
 from app.storage.store import ArtifactStore
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
+DEFAULT_PAGE_SIZE = 50
+MAX_PAGE_SIZE = 200
 
 
 # -----------------------------------------------------------------------
@@ -181,20 +184,20 @@ async def delete_session(
 
 @router.get("", response_model=JobListResponse)
 async def list_jobs(
-    status: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
+    status: JobStatus | None = None,
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    offset: int = Query(0, ge=0),
     api_key: ApiKey | None = Depends(get_optional_api_key),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    List jobs with optional status filter and pagination.
+    List the caller's jobs, newest first, a page at a time.
 
-    :param status: Optional execution status filter.
-    :type status: str | None
-    :param limit: Maximum records to return.
+    :param status: Only jobs in this state, if given.
+    :type status: JobStatus | None
+    :param limit: Most jobs to return (1 to ``MAX_PAGE_SIZE``).
     :type limit: int
-    :param offset: Number of records to skip.
+    :param offset: Jobs to skip.
     :type offset: int
     :param api_key: Optional authenticated user API key.
     :type api_key: ApiKey | None
@@ -206,11 +209,7 @@ async def list_jobs(
     if not api_key:
         return JobListResponse(jobs=[], total=0)
     jobs, total = await job_service.list_jobs(
-        db=db,
-        status=status,
-        limit=limit,
-        offset=offset,
-        api_key_id=api_key.id,
+        db, api_key.id, status=status, limit=limit, offset=offset
     )
     return JobListResponse(jobs=jobs, total=total)
 
@@ -231,21 +230,16 @@ async def get_job_status(job: Job = Depends(get_owned_job)):
 @router.get("/{job_id}/logs")
 async def get_job_logs(
     job: Job = Depends(get_owned_job),
-    db: AsyncSession = Depends(get_db),
     store: ArtifactStore = Depends(get_store),
 ):
     """
-    Fetch live logs and generated artifact file list for a job.
+    The end of a job's log and the list of its files.
 
     :param job: Job the caller owns (any job, for the admin).
     :type job: Job
-    :param db: Asynchronous database session.
-    :type db: AsyncSession
     :param store: Where the job's uploaded files are kept.
     :type store: ArtifactStore
-    :return: Dictionary containing logs, status, and artifact listing.
+    :return: Status, log tail, file names and outputs.
     :rtype: dict
     """
-    return await job_service.get_job_logs_and_artifacts(
-        db=db, store=store, job_id=job.id
-    )
+    return await job_service.job_logs_and_files(store, job)

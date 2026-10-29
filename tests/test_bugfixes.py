@@ -218,12 +218,76 @@ def test_dag_invalid_edge_endpoints(
     assert "references invalid node ID" in response.json()["detail"]
 
 
+def test_a_node_id_given_twice_is_refused(
+    client: TestClient,
+    make_user_headers: UserHeadersFactory,
+):
+    """
+    Edges name nodes by id, so two nodes under one id cannot be told
+    apart: the pipeline is refused with 400, naming the id.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param make_user_headers: Factory registering a user key.
+    :type make_user_headers: UserHeadersFactory
+    """
+    payload = build_two_node_pipeline("twin_nodes", "toy_opt")
+    payload["nodes"][1]["ui_id"] = "node_1"
+    payload["edges"] = []
+    response = client.post(
+        "/api/jobs/pipeline/submit", json=payload, headers=make_user_headers()
+    )
+    assert response.status_code == 400
+    assert "node_1" in response.json()["detail"]
+
+
+def test_an_edge_given_twice_is_refused(
+    client: TestClient,
+    make_user_headers: UserHeadersFactory,
+):
+    """
+    The same edge twice is refused with 400, naming it.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param make_user_headers: Factory registering a user key.
+    :type make_user_headers: UserHeadersFactory
+    """
+    payload = build_two_node_pipeline("twin_edges", "toy_opt")
+    payload["edges"] *= 2
+    response = client.post(
+        "/api/jobs/pipeline/submit", json=payload, headers=make_user_headers()
+    )
+    assert response.status_code == 400
+    assert "node_1 -> node_2" in response.json()["detail"]
+
+
+def test_a_job_list_page_outside_the_limits_is_refused(
+    client: TestClient,
+    make_user_headers: UserHeadersFactory,
+):
+    """
+    A negative offset, or a page of no jobs or too many, is a 422 at
+    that query parameter.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param make_user_headers: Factory registering a user key.
+    :type make_user_headers: UserHeadersFactory
+    """
+    headers = make_user_headers()
+    for query in ("offset=-1", "limit=0", "limit=100000"):
+        response = client.get(f"/api/jobs?{query}", headers=headers)
+        assert response.status_code == 422, query
+
+
 def test_standalone_job_submission_with_null_parameters(
     client: TestClient,
     make_user_headers: UserHeadersFactory,
 ):
     """
-    A job submitted with ``parameters: null`` is accepted as Pending.
+    A job submitted with ``parameters: null`` is queued with its task's
+    defaults.
 
     :param client: In-process API client.
     :type client: TestClient
@@ -238,7 +302,7 @@ def test_standalone_job_submission_with_null_parameters(
     assert response.status_code in (200, 201, 202)
     job_data = response.json()
     assert job_data["status"] == "queued"
-    assert "user_id" in job_data["parameters"]
+    assert job_data["parameters"]["temp"] == 300.0
 
 
 def test_valid_dag_submission_and_status(

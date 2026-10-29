@@ -8,17 +8,19 @@ checked against the signature before anything is read or written.
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.api.dependencies import get_store
-from app.api.errors import too_large
+from app.api.errors import bad_request, forbidden, not_found, too_large
 from app.storage.links import DOWNLOAD, UPLOAD, LinkGrant
 from app.storage.store import InvalidKeyError, LocalDiskStore, TooLargeError
 
 router = APIRouter(prefix="/storage", tags=["Storage"])
 CONTENT_LENGTH = "content-length"
+FILE_KIND = "File"
+BAD_LINK_MESSAGE = "Link is invalid or has expired"
 
 
 class UploadReceipt(BaseModel):
@@ -43,9 +45,7 @@ def check_link(store: LocalDiskStore, grant: LinkGrant, signature: str) -> None:
     :raises HTTPException: 403 if tampered with or expired.
     """
     if not store.signer.verify(grant, signature, time.time()):
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN, "Link is invalid or has expired"
-        )
+        raise forbidden(BAD_LINK_MESSAGE)
 
 
 @router.get("/{key:path}", response_class=FileResponse)
@@ -76,7 +76,7 @@ async def download(
     check_link(store, LinkGrant(DOWNLOAD, key, expires, 0, filename), signature)
     path = store.existing_path(key)
     if path is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")
+        raise not_found(FILE_KIND, key)
     return FileResponse(path, filename=filename or Path(key).name)
 
 
@@ -124,5 +124,5 @@ async def upload(
             f"Upload exceeds this link's limit of {max_bytes} bytes"
         ) from None
     except InvalidKeyError:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Bad key") from None
+        raise bad_request(f"Not a usable key: {key}") from None
     return UploadReceipt(key=key, size_bytes=size)

@@ -13,8 +13,10 @@ from app.agents.targets import (
     retire_target,
     rotate_token,
 )
-from app.api.dependencies import get_current_api_key
+from app.api.dependencies import get_current_api_key, get_event_bus
 from app.db.session import get_db
+from app.events.bus import EventBus
+from app.events.changes import commit_and_publish
 from app.models.api_key import ApiKey
 from app.schemas.targets import TargetCreate, TargetInfo, TargetToken
 
@@ -88,10 +90,12 @@ async def remove_target(
     target_id: uuid.UUID,
     api_key: ApiKey = Depends(get_current_api_key),
     db: AsyncSession = Depends(get_db),
+    bus: EventBus = Depends(get_event_bus),
 ) -> Response:
     """
-    Retire a target: its token stops working and it leaves the list;
-    its past runs keep their history.
+    Retire a target: its token stops working, it leaves the list, and
+    its unfinished jobs are cancelled; its past runs keep their
+    history.
 
     :param target_id: The target.
     :type target_id: uuid.UUID
@@ -99,8 +103,11 @@ async def remove_target(
     :type api_key: ApiKey
     :param db: Asynchronous database session.
     :type db: AsyncSession
+    :param bus: Where the cancelled jobs are announced.
+    :type bus: EventBus
     :return: Empty response.
     :rtype: Response
     """
     await retire_target(db, api_key.id, target_id)
+    await commit_and_publish(db, bus)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

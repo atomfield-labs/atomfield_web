@@ -512,13 +512,41 @@ async def request_cancel(
     return JobStatus.RUNNING if flagged else None
 
 
+async def cancel_jobs(
+    session: AsyncSession,
+    which: ColumnElement[bool],
+    reason: str = CANCELLED_MESSAGE,
+) -> RunCancel:
+    """
+    Cancel every unfinished job meeting ``which``: those not started
+    at once, in one statement (so no job's cascade can hide another
+    from the count), and running ones by asking their agents.
+
+    :param session: Open database session; the caller commits with
+        ``commit_and_publish``.
+    :type session: AsyncSession
+    :param which: Condition picking the jobs (a run's, a target's).
+    :type which: ColumnElement[bool]
+    :param reason: Message shown on the jobs cancelled at once.
+    :type reason: str
+    :return: How many were cancelled, and how many are stopping.
+    :rtype: RunCancel
+    """
+    statement = (
+        update(Job)
+        .where(which, Job.status.in_(NOT_STARTED_STATUSES))
+        .values(status=JobStatus.CANCELLED, error_message=reason)
+    )
+    cancelled = await update_jobs(session, statement)
+    flagged = await flag_cancel(session, which)
+    return RunCancel(cancelled=len(cancelled), cancelling=flagged)
+
+
 async def cancel_run_jobs(
     session: AsyncSession, run_id: uuid.UUID
 ) -> RunCancel:
     """
-    Cancel every unfinished job of a run: those not started at once,
-    in one statement (so no job's cascade can hide another from the
-    count), and running ones by asking their agents.
+    Cancel every unfinished job of a run (``cancel_jobs``).
 
     :param session: Open database session; the caller commits with
         ``commit_and_publish``.
@@ -528,14 +556,7 @@ async def cancel_run_jobs(
     :return: How many were cancelled, and how many are stopping.
     :rtype: RunCancel
     """
-    statement = (
-        update(Job)
-        .where(Job.run_id == run_id, Job.status.in_(NOT_STARTED_STATUSES))
-        .values(status=JobStatus.CANCELLED, error_message=CANCELLED_MESSAGE)
-    )
-    cancelled = await update_jobs(session, statement)
-    flagged = await flag_cancel(session, Job.run_id == run_id)
-    return RunCancel(cancelled=len(cancelled), cancelling=flagged)
+    return await cancel_jobs(session, Job.run_id == run_id)
 
 
 async def flag_cancel(session: AsyncSession, which: ColumnElement[bool]) -> int:
@@ -545,7 +566,7 @@ async def flag_cancel(session: AsyncSession, which: ColumnElement[bool]) -> int:
 
     :param session: Open database session; the caller commits.
     :type session: AsyncSession
-    :param which: Condition picking the jobs (one job, or a run's).
+    :param which: Condition picking the jobs (one job, a run's...).
     :type which: ColumnElement[bool]
     :return: How many running jobs were flagged.
     :rtype: int

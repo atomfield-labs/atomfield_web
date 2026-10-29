@@ -4,12 +4,17 @@ Shared FastAPI route dependencies for database, cache, and authentication.
 
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi import Depends, Header, HTTPException, Request
 from redis.asyncio import Redis
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.errors import not_found, unauthorized
+from app.api.errors import (
+    forbidden,
+    not_found,
+    too_many_requests,
+    unauthorized,
+)
 from app.core.config import settings
 from app.core.rate_limit import FixedWindowRateLimiter, RateLimit
 from app.core.security import API_KEY_HEADER, hash_api_key
@@ -31,6 +36,9 @@ MISSING_KEY_MESSAGE = (
     f"API key required. Please provide a valid '{API_KEY_HEADER}' header."
 )
 INVALID_KEY_MESSAGE = "Invalid or deactivated API key."
+NO_ADMIN_MESSAGE = "Admin API key is not configured on the server."
+NOT_ADMIN_MESSAGE = "Administrator privileges required."
+TOO_MANY_KEYS_MESSAGE = "Too many new API keys from this address. Try later."
 
 
 async def get_redis(request: Request) -> Redis:
@@ -205,17 +213,9 @@ async def require_admin_key(
     :raises HTTPException: 403 if admin key unconfigured or caller lacks rights.
     """
     if not settings.ADMIN_API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin API key is not configured on the server.",
-        )
-
+        raise forbidden(NO_ADMIN_MESSAGE)
     if not is_admin_key(api_key):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Administrator privileges required.",
-        )
-
+        raise forbidden(NOT_ADMIN_MESSAGE)
     return api_key
 
 
@@ -340,8 +340,6 @@ async def limit_key_creation(
     limiter = FixedWindowRateLimiter(redis, limit)
     decision = await limiter.check(client_address(request))
     if not decision.allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many new API keys from this address. Try later.",
-            headers={"Retry-After": str(decision.retry_after_seconds)},
+        raise too_many_requests(
+            TOO_MANY_KEYS_MESSAGE, decision.retry_after_seconds
         )

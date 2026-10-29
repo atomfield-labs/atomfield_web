@@ -1,7 +1,13 @@
+"""
+Request and response bodies for keys, quotas and job statistics.
+"""
+
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.models.api_key import DEFAULT_QUOTA_LIMIT
 
 
 class ApiKeyCreateRequest(BaseModel):
@@ -17,7 +23,38 @@ class ApiKeyCreateRequest(BaseModel):
     )
 
 
-class ApiKeyCreateResponse(BaseModel):
+class KeyQuota(BaseModel):
+    """
+    A key as its holder knows it, and its quota; read straight from the
+    stored key.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    key_prefix: str = Field(..., description="Truncated key identifier.")
+    label: str | None = Field(default=None, description="Assigned label.")
+    quota_limit: int = Field(
+        default=DEFAULT_QUOTA_LIMIT, description="Max calculation quota."
+    )
+    quota_used: int = Field(default=0, description="Allocated calculations.")
+    quota_remaining: int = Field(..., description="Calculations left.")
+
+
+class JobCounts(BaseModel):
+    """
+    How many jobs are in each kind of state, and the compute time they
+    used.
+    """
+
+    total_jobs: int = 0
+    success_jobs: int = 0
+    failed_jobs: int = 0
+    running_jobs: int = 0
+    pending_jobs: int = 0
+    total_compute_seconds: float = 0.0
+
+
+class ApiKeyCreateResponse(KeyQuota):
     """
     Response payload returned upon generating a new API key.
     """
@@ -29,72 +66,37 @@ class ApiKeyCreateResponse(BaseModel):
             "again."
         ),
     )
-    key_prefix: str = Field(..., description="Truncated key identifier.")
-    label: str | None = Field(default=None, description="Assigned label.")
-    quota_limit: int = Field(default=100, description="Max calculation quota.")
-    quota_used: int = Field(default=0, description="Allocated calculations.")
 
 
-class ApiKeyInfoResponse(BaseModel):
+class ApiKeyInfoResponse(KeyQuota):
     """
     Metadata representation of an authenticated user API key.
     """
 
-    key_prefix: str
-    label: str | None = None
-    quota_limit: int
-    quota_used: int
-    quota_remaining: int
     is_active: bool
     is_admin: bool = False
 
 
-class UserStatsResponse(BaseModel):
+class UserStatsResponse(KeyQuota, JobCounts):
     """
-    Detailed calculation execution metrics and quotas for an API key holder.
+    A key holder's quota and job counts.
     """
 
-    key_prefix: str
-    label: str | None = None
-    quota_limit: int
-    quota_used: int
-    quota_remaining: int
-    total_jobs: int
-    success_jobs: int
-    failed_jobs: int
-    running_jobs: int
-    pending_jobs: int
 
-
-class AdminStatsResponse(BaseModel):
+class AdminStatsResponse(JobCounts):
     """
-    Cluster-wide statistics aggregated across all registered users and jobs.
+    Job counts across every user, and how many users there are.
     """
 
     total_users: int
-    total_jobs: int
-    success_jobs: int
-    failed_jobs: int
-    running_jobs: int
-    total_compute_seconds: float
 
 
-class AdminUserSummary(BaseModel):
+class AdminUserSummary(KeyQuota, JobCounts):
     """
-    Per-user compute usage summary and quota details for administrators.
+    One user's key, quota and job counts, for the administrator.
     """
 
     id: UUID
-    key_prefix: str
-    label: str | None = None
-    quota_limit: int
-    quota_used: int
-    quota_remaining: int
-    total_jobs: int
-    success_jobs: int
-    failed_jobs: int
-    running_jobs: int
-    total_compute_seconds: float
     is_active: bool
     created_at: datetime | None = None
     last_used_at: datetime | None = None
