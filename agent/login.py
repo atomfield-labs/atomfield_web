@@ -8,6 +8,7 @@ Settings already in the file are offered as the defaults, so running
 """
 
 import getpass
+import os
 import shlex
 import shutil
 import sys
@@ -17,7 +18,7 @@ from typing import Any
 
 import httpx
 
-from agent.config import read_settings, write_settings
+from agent.config import agent_command, read_settings, write_settings
 
 CHECK_SECONDS = 10.0
 # Setting -> question, in the order they are asked.
@@ -208,5 +209,5 @@ def login(
     return [
         first,
         f"Saved {path}",
-        "Start the agent with: python -m agent start",
+        f"Start the agent with: {agent_command(os.environ)} start",
     ]

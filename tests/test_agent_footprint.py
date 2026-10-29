@@ -68,26 +68,66 @@ def test_the_agent_needs_only_its_package_and_a_few_app_files():
     assert not SERVER_PACKAGES & set(loaded["packages"])
 
 
-def test_ship_copies_the_agent_and_replaces_the_old_copy(tmp_path: Path):
+def cluster_environment(tmp_path: Path) -> dict:
     """
-    Through a fake ssh, ``~/atomfield/code`` ends up holding exactly
-    the agent's files; a file from an older copy is gone.
+    An environment whose ``ssh`` runs the remote command here, with a
+    home folder of its own (the "cluster").
 
-    :param tmp_path: Empty directory for this test.
+    :param tmp_path: Empty directory for the test.
     :type tmp_path: Path
+    :return: Environment variables.
+    :rtype: dict
     """
     fake = tmp_path / "bin" / "ssh"
     fake.parent.mkdir()
     fake.write_text(FAKE_SSH)
     fake.chmod(0o755)
-    code = tmp_path / "home" / "atomfield" / "code"
-    code.mkdir(parents=True)
-    (code / "stale.py").write_text("old copy")
-    env = {
+    environment = {
         **os.environ,
         "HOME": str(tmp_path / "home"),
         "PATH": f"{fake.parent}{os.pathsep}{os.environ['PATH']}",
     }
+    environment.pop("PYTHONPATH", None)
+    return environment
+
+
+def run_shortcut(tmp_path: Path, env: dict, *arguments: str):
+    """
+    Run ``~/atomfield/agent`` from a folder outside the repository.
+
+    :param tmp_path: The test's directory (the "cluster").
+    :type tmp_path: Path
+    :param env: The cluster's environment.
+    :type env: dict
+    :param arguments: What follows the shortcut.
+    :type arguments: str
+    :return: The finished process.
+    :rtype: subprocess.CompletedProcess
+    """
+    shortcut = tmp_path / "home" / "atomfield" / "agent"
+    return subprocess.run(
+        [str(shortcut), *arguments],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_ship_copies_the_agent_and_replaces_the_old_copy(tmp_path: Path):
+    """
+    Through a fake ssh, ``~/atomfield/code`` ends up holding exactly
+    the agent's files; a file from an older copy is gone; the shortcut
+    sits beside it, ready to run.
+
+    :param tmp_path: Empty directory for this test.
+    :type tmp_path: Path
+    """
+    env = cluster_environment(tmp_path)
+    code = tmp_path / "home" / "atomfield" / "code"
+    code.mkdir(parents=True)
+    (code / "stale.py").write_text("old copy")
 
     message = run_python(["-m", "agent.ship", "mycluster"], env).stdout
     expected = json.loads(run_python(["-c", PROBE]).stdout)["files"]
@@ -96,5 +136,46 @@ def test_ship_copies_the_agent_and_replaces_the_old_copy(tmp_path: Path):
         for path in code.rglob("*")
         if path.is_file()
     )
+    shortcut = tmp_path / "home" / "atomfield" / "agent"
     assert copied == expected
     assert f"Copied {len(expected)} files" in message
+    assert "~/atomfield/agent start" in message
+    assert os.access(shortcut, os.X_OK)
+
+
+def test_the_shortcut_runs_the_copied_agent_from_any_folder(tmp_path: Path):
+    """
+    ``~/atomfield/agent`` runs the agent from ``~/atomfield/code`` with
+    the Python it was given, from a folder that is not the agent's,
+    and the agent names the shortcut as its command.
+
+    :param tmp_path: Empty directory for this test.
+    :type tmp_path: Path
+    """
+    env = cluster_environment(tmp_path)
+    run_python(
+        ["-m", "agent.ship", "mycluster", "--python", sys.executable], env
+    )
+
+    done = run_shortcut(tmp_path, env, "--help")
+
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.startswith("usage: ~/atomfield/agent")
+
+
+def test_the_shortcut_names_a_missing_python(tmp_path: Path):
+    """
+    Before the agent's environment exists, the shortcut says so
+    instead of failing obscurely.
+
+    :param tmp_path: Empty directory for this test.
+    :type tmp_path: Path
+    """
+    env = cluster_environment(tmp_path)
+    run_python(["-m", "agent.ship", "mycluster"], env)
+
+    done = run_shortcut(tmp_path, env, "status")
+
+    assert done.returncode == 1
+    assert "No Python at" in done.stderr
+    assert "atomfield/env/bin/python" in done.stderr

@@ -21,7 +21,12 @@ from pathlib import Path
 from agent import daemon
 from agent.agent import Agent
 from agent.client import AgentClient
-from agent.config import AgentConfig, MissingSettingError, settings_path
+from agent.config import (
+    AgentConfig,
+    MissingSettingError,
+    agent_command,
+    settings_path,
+)
 from agent.login import TokenRefusedError, login
 from agent.runner import ProcessRunner, Runner
 from agent.slurm import SlurmRunner
@@ -202,7 +207,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Settings file (default: ~/.config/atomfield/agent.toml)",
     )
     parser = argparse.ArgumentParser(
-        prog="python -m agent",
+        prog=agent_command(os.environ),
         description="The AtomField agent: runs your jobs on this machine.",
     )
     parser.add_argument("--config", type=Path, default=None)

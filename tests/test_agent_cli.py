@@ -16,8 +16,10 @@ import pytest
 from agent import daemon
 from agent.__main__ import main
 from agent.config import (
+    AGENT_COMMAND_VARIABLE,
     AgentConfig,
     MissingSettingError,
+    agent_command,
     read_settings,
     write_settings,
 )
@@ -352,3 +354,16 @@ def test_settings_are_swapped_in_whole(
 
     assert path.read_text() == before
     assert oct(path.stat().st_mode & 0o777) == oct(0o600)
+
+
+def test_messages_name_the_command_the_person_types():
+    """
+    Run through the shortcut, the agent suggests the shortcut (with ~
+    for the home folder); run directly, ``python -m agent``.
+    """
+    shortcut = str(Path.home() / "atomfield" / "agent")
+
+    assert agent_command({}) == "python -m agent"
+    assert agent_command({AGENT_COMMAND_VARIABLE: shortcut}) == (
+        "~/atomfield/agent"
+    )

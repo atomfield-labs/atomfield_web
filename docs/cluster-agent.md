@@ -30,11 +30,15 @@ uv run --python 3.11 python -m agent.ship you@login.cluster.edu
 ```
 
 It copies exactly the files the agent loads into `~/atomfield/code`,
-replacing any older copy, and prints how many arrived.
+replacing any older copy, and prints how many arrived. It also
+installs a shortcut, `~/atomfield/agent`, which runs the agent with
+the Python of step 2 from any folder: every command below starts with
+it. If that Python lives elsewhere, add `--python /path/to/bin/python`
+to the command above.
 
 Run it again to update the agent later. A running agent keeps its
-old copy until you restart it on the cluster (`python -m agent stop`,
-then `start`; its Slurm jobs keep running meanwhile). Stopping the
+old copy until you restart it on the cluster (`~/atomfield/agent
+stop`, then `start`; its Slurm jobs keep running meanwhile). Stopping the
 copy with Ctrl+C is safe: run the command again to finish it.
 
 If your cluster's SSH listens on another port, add a shortcut to
@@ -77,8 +81,7 @@ if you lose it, make a new one (the old one stops working).
 ## 4. Log the agent in
 
 ```bash
-cd ~/atomfield/code
-~/atomfield/env/bin/python -m agent login
+~/atomfield/agent login
 ```
 
 It asks for each setting, offering a default in brackets (Enter keeps
@@ -107,8 +110,11 @@ line: `export AFSCRIPTS_MPI_LAUNCHER="srun"`.
 ## 5. Start the agent
 
 ```bash
-~/atomfield/env/bin/python -m agent start
-~/atomfield/env/bin/python -m agent status
+~/atomfield/agent start
+```
+
+```bash
+~/atomfield/agent status
 ```
 
 The agent keeps running after you log out, and restarts itself if it
@@ -116,7 +122,7 @@ crashes. In the web app, your cluster now shows **●** (online) under
 **Run on**. Note which login node you are on (`hostname`): to check
 on the agent later, log in to that one (`ssh login1`).
 
-To stop it: `python -m agent stop`. Your Slurm jobs keep running.
+To stop it: `~/atomfield/agent stop`. Your Slurm jobs keep running.
 
 ## Where the scripts come from
 
@@ -142,7 +148,7 @@ To run your own copy of the scripts instead (for example, while you
 edit them on the cluster), point the agent at it:
 
 ```bash
-python -m agent login --pack-dir ~/afscripts/src
+~/atomfield/agent login --pack-dir ~/afscripts/src
 ```
 
 Every job then runs that copy, and its `.af_made_with` says so. Remove
@@ -152,7 +158,7 @@ releases.
 ## If the login node reboots
 
 Nothing restarts the agent by itself after a reboot. When the web app
-shows the cluster offline, log in and run `python -m agent start`
+shows the cluster offline, log in and run `~/atomfield/agent start`
 again. Nothing is lost meanwhile:
 
 - Slurm keeps your jobs running without the agent.
@@ -186,7 +192,7 @@ Delete old runs you no longer need.
 
 - **A job fails at once with "sbatch refused the job"**: the message
   is Slurm's own. Usually a missing or wrong `--account` or
-  `--partition`; fix it with `python -m agent login`.
+  `--partition`; fix it with `~/atomfield/agent login`.
 - **A job stays "Pending"**: it is waiting in Slurm's queue. Check
   with `squeue --user=$USER`.
 - **A job fails with "does not match its fingerprint"**: the release
@@ -194,7 +200,7 @@ Delete old runs you no longer need.
 - **A job fails with "no scripts release"**: nothing was published
   when the run started; publish a release (see `docs/releases.md`) and
   run the pipeline again.
-- **The cluster shows offline**: `python -m agent status`, then look
+- **The cluster shows offline**: `~/atomfield/agent status`, then look
   at the log it names (`~/atomfield/agent.log`).
 - **`pw.x` stops with "OMPI was not built with SLURM's PMI support"**:
   the program's module did not put its own `mpirun` on the PATH, so

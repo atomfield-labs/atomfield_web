@@ -40,6 +40,10 @@ TRUE_WORDS = {"1", "true", "yes"}
 CONFIG_PATH_VARIABLE = "ATOMFIELD_AGENT_CONFIG"
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "atomfield" / "agent.toml"
 STATE_FILE_NAME = "agent-state.json"
+# Set by the ~/atomfield/agent shortcut, so that messages suggest the
+# command the person actually types.
+AGENT_COMMAND_VARIABLE = "ATOMFIELD_AGENT_COMMAND"
+DEFAULT_AGENT_COMMAND = "python -m agent"
 SLURM_TABLE = "slurm"
 # Environment variable -> setting; the environment wins over the file.
 ENVIRONMENT_SETTINGS = {
@@ -170,8 +174,9 @@ class AgentConfig:
         """
         for required in ("api_url", "token"):
             if not settings.get(required):
+                command = agent_command(os.environ)
                 raise MissingSettingError(
-                    f"No {required} set: run 'python -m agent login' first"
+                    f"No {required} set: run '{command} login' first"
                 )
         defaults = cls(api_url="", token="")
         work = settings.get("work_folder")
@@ -295,6 +300,23 @@ def settings_text(settings: Mapping[str, Any]) -> str:
             f"{key} = {toml_value(value)}" for key, value in slurm.items()
         ]
     return "\n".join(lines) + "\n"
+
+
+def agent_command(environ: Mapping[str, str]) -> str:
+    """
+    How the person runs the agent: the shortcut (``~`` for the home
+    folder) if that is what they typed, else ``python -m agent``.
+
+    :param environ: The environment.
+    :type environ: Mapping[str, str]
+    :return: The command, without its subcommand.
+    :rtype: str
+    """
+    command = environ.get(AGENT_COMMAND_VARIABLE) or DEFAULT_AGENT_COMMAND
+    home = f"{Path.home()}/"
+    if command.startswith(home):
+        return "~/" + command.removeprefix(home)
+    return command
 
 
 def write_settings(path: Path, settings: Mapping[str, Any]) -> None:
