@@ -14,10 +14,10 @@ from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_store, require_admin_key
+from app.api.dependencies import get_store, require_admin
 from app.api.errors import conflict, too_large, unprocessable
 from app.db.session import get_db
-from app.models.api_key import ApiKey
+from app.models.user import User
 from app.releases.published import PublishConflictError
 from app.releases.service import latest_release, publish_release
 from app.releases.wheel import (
@@ -65,7 +65,7 @@ async def publish(
     request: Request,
     response: Response,
     git_commit: str | None = Query(None, pattern=COMMIT_PATTERN),
-    _admin: ApiKey = Depends(require_admin_key),
+    _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
     store: ArtifactStore = Depends(get_store),
 ) -> ReleaseInfo:
@@ -78,8 +78,8 @@ async def publish(
     :type response: Response
     :param git_commit: The commit the wheel was built from.
     :type git_commit: str | None
-    :param _admin: The administrator's key.
-    :type _admin: ApiKey
+    :param _admin: The administrator.
+    :type _admin: User
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :param store: Where the wheel is kept.

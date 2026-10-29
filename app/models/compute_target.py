@@ -34,7 +34,7 @@ class ComputeTarget(Base):
     # None for shared targets such as the house agent.
     owner_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("api_keys.id", ondelete="SET NULL"),
+        ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )

@@ -23,7 +23,7 @@ from app.agents.targets import usable_target
 from app.api.errors import too_many_requests
 from app.core.config import settings
 from app.core.identifiers import assign_node_keys, sanitize_identifier
-from app.models import ApiKey, Job, JobDependency, Run
+from app.models import Job, JobDependency, Run, User
 from app.queue.job_queue import RedisJobQueue
 from app.runs.lifecycle import create_run, dispatch
 from app.runs.states import JobStatus
@@ -61,7 +61,7 @@ WIPED_MESSAGE = "All runs, jobs and stored files cleared."
 logger = logging.getLogger(__name__)
 
 
-async def charge_quota(db: AsyncSession, api_key: ApiKey, needed: int) -> None:
+async def charge_quota(db: AsyncSession, user: User, needed: int) -> None:
     """
     Count ``needed`` jobs against the user's quota, or refuse them all.
 
@@ -72,30 +72,30 @@ async def charge_quota(db: AsyncSession, api_key: ApiKey, needed: int) -> None:
 
     :param db: Asynchronous database session; the caller commits.
     :type db: AsyncSession
-    :param api_key: The submitting user.
-    :type api_key: ApiKey
+    :param user: The submitting person.
+    :type user: User
     :param needed: Jobs in the submission.
     :type needed: int
     :raises HTTPException: 429 if they do not fit.
     """
-    fits = ApiKey.quota_used + needed <= ApiKey.quota_limit
+    fits = User.quota_used + needed <= User.quota_limit
     statement = (
-        update(ApiKey)
-        .where(ApiKey.id == api_key.id, fits)
-        .values(quota_used=ApiKey.quota_used + needed)
-        .returning(ApiKey.id)
+        update(User)
+        .where(User.id == user.id, fits)
+        .values(quota_used=User.quota_used + needed)
+        .returning(User.id)
         .execution_options(synchronize_session=False)
     )
     if (await db.execute(statement)).first() is None:
-        await db.refresh(api_key)
-        remaining = api_key.quota_remaining
+        await db.refresh(user)
+        remaining = user.quota_remaining
         message = QUOTA_MESSAGE.format(needed=needed, remaining=remaining)
         raise too_many_requests(message)
 
 
 async def start_run(
     db: AsyncSession,
-    api_key: ApiKey,
+    user: User,
     session_id: str,
     target_id: uuid.UUID | None,
     release_id: uuid.UUID | None,
@@ -106,8 +106,8 @@ async def start_run(
 
     :param db: Asynchronous database session; the caller commits.
     :type db: AsyncSession
-    :param api_key: The submitting user.
-    :type api_key: ApiKey
+    :param user: The submitting person.
+    :type user: User
     :param session_id: The run's session.
     :type session_id: str
     :param target_id: The target asked for, if any.
@@ -118,8 +118,8 @@ async def start_run(
     :rtype: Run
     :raises HTTPException: 404 for a target the user may not use.
     """
-    target = await usable_target(db, api_key.id, target_id)
-    return await create_run(db, api_key.id, session_id, target, release_id)
+    target = await usable_target(db, user.id, target_id)
+    return await create_run(db, user.id, session_id, target, release_id)
 
 
 def new_job(
@@ -144,7 +144,7 @@ def new_job(
     """
     return Job(
         run_id=run.id,
-        api_key_id=run.owner_id,
+        owner_id=run.owner_id,
         script_name=request.script_name,
         node_key=node_key,
         input_files=request.inputs or None,
@@ -179,7 +179,7 @@ async def create_job(
     db: AsyncSession,
     request: JobSubmitRequest,
     queue: RedisJobQueue,
-    api_key: ApiKey,
+    user: User,
     release_id: uuid.UUID | None = None,
 ) -> Job:
     """
@@ -192,8 +192,8 @@ async def create_job(
     :type request: JobSubmitRequest
     :param queue: Job queue the job is sent to after commit.
     :type queue: RedisJobQueue
-    :param api_key: The submitting user.
-    :type api_key: ApiKey
+    :param user: The submitting person.
+    :type user: User
     :param release_id: Scripts release the job runs (None: no release
         published yet).
     :type release_id: uuid.UUID | None
@@ -202,10 +202,10 @@ async def create_job(
     :raises HTTPException: 429 over the quota; 404 for a target the
         user may not use.
     """
-    await charge_quota(db, api_key, 1)
+    await charge_quota(db, user, 1)
     job_id = uuid.uuid4()
     run = await start_run(
-        db, api_key, f"job_{job_id}", request.target_id, release_id
+        db, user, f"job_{job_id}", request.target_id, release_id
     )
     job = single_job(run, request, job_id)
     db.add(job)
@@ -217,7 +217,7 @@ async def create_job(
 
 async def list_jobs(
     db: AsyncSession,
-    api_key_id: uuid.UUID,
+    user_id: uuid.UUID,
     status: JobStatus | None = None,
     limit: int = 50,
     offset: int = 0,
@@ -227,8 +227,8 @@ async def list_jobs(
 
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param api_key_id: The user.
-    :type api_key_id: uuid.UUID
+    :param user_id: The user.
+    :type user_id: uuid.UUID
     :param status: Only jobs in this state, if given.
     :type status: JobStatus | None
     :param limit: Most jobs to return.
@@ -238,7 +238,7 @@ async def list_jobs(
     :return: The page, and the number of matching jobs.
     :rtype: tuple[list[Job], int]
     """
-    conditions = [Job.api_key_id == api_key_id]
+    conditions = [Job.owner_id == user_id]
     if status is not None:
         conditions.append(Job.status == status)
     counted = select(func.count(Job.id)).where(*conditions)
@@ -418,7 +418,7 @@ async def submit_pipeline(
     request: PipelineSubmitRequest,
     queue: RedisJobQueue,
     store: ArtifactStore,
-    api_key: ApiKey,
+    user: User,
     release_id: uuid.UUID | None = None,
 ) -> dict:
     """
@@ -435,8 +435,8 @@ async def submit_pipeline(
     :type queue: RedisJobQueue
     :param store: Where attached files are kept.
     :type store: ArtifactStore
-    :param api_key: The submitting user.
-    :type api_key: ApiKey
+    :param user: The submitting person.
+    :type user: User
     :param release_id: Scripts release the run is pinned to.
     :type release_id: uuid.UUID | None
     :return: Submission summary with each node's job.
@@ -445,9 +445,9 @@ async def submit_pipeline(
         for a target the user may not use.
     """
     parent_counts = check_pipeline_graph(request)
-    await charge_quota(db, api_key, len(request.nodes))
+    await charge_quota(db, user, len(request.nodes))
     session = session_name(request.session_id)
-    run = await start_run(db, api_key, session, request.target_id, release_id)
+    run = await start_run(db, user, session, request.target_id, release_id)
     jobs = await add_pipeline_jobs(db, run, request, parent_counts)
     await store_attachments(store, request.files, run)
     await db.commit()
@@ -618,7 +618,7 @@ async def delete_session(
     db: AsyncSession,
     store: ArtifactStore,
     session_id: str,
-    api_key_id: uuid.UUID,
+    user_id: uuid.UUID,
 ) -> dict:
     """
     Delete one of the caller's sessions: its runs, jobs and files.
@@ -629,15 +629,15 @@ async def delete_session(
     :type store: ArtifactStore
     :param session_id: Session to delete.
     :type session_id: str
-    :param api_key_id: The caller.
-    :type api_key_id: uuid.UUID
+    :param user_id: The caller.
+    :type user_id: uuid.UUID
     :return: Summary.
     :rtype: dict
     """
     session = sanitize_identifier(session_id)
-    uploads = upload_folder(api_key_id, session)
+    uploads = upload_folder(user_id, session)
     deleted = await delete_owned_runs(
-        db, store, api_key_id, uploads, Run.session_id == session
+        db, store, user_id, uploads, Run.session_id == session
     )
     message = f"Session {session} and {deleted} jobs deleted."
     return {"status": SUCCESS, "message": message}
@@ -646,7 +646,7 @@ async def delete_session(
 async def clear_user_data(
     db: AsyncSession,
     store: ArtifactStore,
-    api_key_id: uuid.UUID,
+    user_id: uuid.UUID,
 ) -> dict:
     """
     Delete all of one user's runs, jobs and stored files.
@@ -658,12 +658,12 @@ async def clear_user_data(
     :type db: AsyncSession
     :param store: The server's file store.
     :type store: ArtifactStore
-    :param api_key_id: The caller.
-    :type api_key_id: uuid.UUID
+    :param user_id: The caller.
+    :type user_id: uuid.UUID
     :return: Summary.
     :rtype: dict
     """
-    uploads = owner_uploads_folder(api_key_id)
-    deleted = await delete_owned_runs(db, store, api_key_id, uploads)
+    uploads = owner_uploads_folder(user_id)
+    deleted = await delete_owned_runs(db, store, user_id, uploads)
     message = f"Deleted your {deleted} jobs and their files."
     return {"status": SUCCESS, "message": message}

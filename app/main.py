@@ -4,6 +4,7 @@ Configures FastAPI, lifespan hooks, middleware, and route mounting.
 """
 
 import asyncio
+import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
 from datetime import timedelta
@@ -11,7 +12,8 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import exists, select, update
+from sqlalchemy.dialects.postgresql import Insert, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.auth import provision_house_target
@@ -23,6 +25,7 @@ from app.core.security import display_prefix, hash_api_key
 from app.db.session import AsyncSessionLocal, engine
 from app.events.redis_bus import RedisEventBus
 from app.models.api_key import ApiKey
+from app.models.user import User
 from app.queue.job_queue import RedisJobQueue
 from app.releases.catalogs import ReleaseCatalogs
 from app.runs.lifecycle import SilenceLimits
@@ -32,6 +35,8 @@ from app.storage.store import LocalDiskStore
 
 ADMIN_QUOTA = 999999
 ADMIN_LABEL = "Cluster Administrator"
+# Every API process derives the same administrator id from the same key.
+ADMIN_ID_NAMESPACE = uuid.UUID("5b0f8e7e-6d2c-4f4b-9a39-6f2d7e1c3a10")
 HEALTHY = "AtomField Core Online"
 
 
@@ -72,7 +77,7 @@ async def set_up(app: FastAPI) -> None:
     app.state.catalogs = ReleaseCatalogs(unreleased)
     app.state.store = create_store()
     async with AsyncSessionLocal() as session:
-        await provision_admin_key(session)
+        await provision_admin(session)
         await provision_house_target(session)
     app.state.redis = create_redis()
     app.state.job_queue = RedisJobQueue(app.state.redis)
@@ -109,31 +114,75 @@ def create_store() -> LocalDiskStore:
     return LocalDiskStore(Path(settings.STORAGE_DIR), signer)
 
 
-async def provision_admin_key(session: AsyncSession) -> None:
+def admin_person(admin_id: uuid.UUID) -> Insert:
     """
-    Create the administrator's key from ``ADMIN_API_KEY`` if missing.
+    The insert of the administrator as a person, skipped if they exist.
 
-    One ``INSERT ... ON CONFLICT DO NOTHING`` instead of "look, then
-    insert": API processes start together, and with look-then-insert
-    two of them can both see no key, both insert, and the second one
-    crashes on the unique key_hash.
+    :param admin_id: Their id, derived from the admin key.
+    :type admin_id: uuid.UUID
+    :return: The statement.
+    :rtype: Insert
+    """
+    person = insert(User).values(
+        id=admin_id, name=ADMIN_LABEL, is_admin=True, quota_limit=ADMIN_QUOTA
+    )
+    return person.on_conflict_do_nothing(index_elements=[User.id])
+
+
+def admin_key(admin_id: uuid.UUID, key_hash: str) -> Insert:
+    """
+    The insert of the administrator's key, skipped if it exists.
+
+    :param admin_id: The administrator's id.
+    :type admin_id: uuid.UUID
+    :param key_hash: Fingerprint of ``ADMIN_API_KEY``.
+    :type key_hash: str
+    :return: The statement.
+    :rtype: Insert
+    """
+    key = insert(ApiKey).values(
+        user_id=admin_id,
+        key_hash=key_hash,
+        key_prefix=display_prefix(settings.ADMIN_API_KEY),
+        label=ADMIN_LABEL,
+    )
+    return key.on_conflict_do_nothing(index_elements=[ApiKey.key_hash])
+
+
+async def create_admin(session: AsyncSession, key_hash: str) -> None:
+    """
+    Create the administrator and their key. Neither insert can clash:
+    every process derives the same id from the key, and rows that
+    already exist are skipped, so processes starting together are fine.
+
+    :param session: Open database session; the caller commits.
+    :type session: AsyncSession
+    :param key_hash: Fingerprint of ``ADMIN_API_KEY``.
+    :type key_hash: str
+    """
+    admin_id = uuid.uuid5(ADMIN_ID_NAMESPACE, key_hash)
+    await session.execute(admin_person(admin_id))
+    await session.execute(admin_key(admin_id, key_hash))
+
+
+async def provision_admin(session: AsyncSession) -> None:
+    """
+    Make sure the administrator from ``ADMIN_API_KEY`` exists: a person
+    marked admin who owns that key. A key from before people existed
+    keeps its person, who is made admin.
 
     :param session: Open database session; committed here.
     :type session: AsyncSession
     """
     if not settings.ADMIN_API_KEY:
         return
-    statement = (
-        insert(ApiKey)
-        .values(
-            key_hash=hash_api_key(settings.ADMIN_API_KEY),
-            key_prefix=display_prefix(settings.ADMIN_API_KEY),
-            label=ADMIN_LABEL,
-            quota_limit=ADMIN_QUOTA,
-        )
-        .on_conflict_do_nothing(index_elements=[ApiKey.key_hash])
-    )
-    await session.execute(statement)
+    key_hash = hash_api_key(settings.ADMIN_API_KEY)
+    known = exists().where(ApiKey.key_hash == key_hash)
+    if not await session.scalar(select(known)):
+        await create_admin(session, key_hash)
+    owner = select(ApiKey.user_id).where(ApiKey.key_hash == key_hash)
+    promote = update(User).where(User.id == owner.scalar_subquery())
+    await session.execute(promote.values(is_admin=True))
     await session.commit()
 
 

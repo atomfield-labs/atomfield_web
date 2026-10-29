@@ -26,16 +26,16 @@ def sanitize_identifier(name: str) -> str:
     return clean_name[:MAX_IDENTIFIER_LENGTH] or fallback_id
 
 
-def user_folder_name(api_key_id: uuid.UUID) -> str:
+def user_folder_name(user_id: uuid.UUID) -> str:
     """
     Name the folder (and ``user_id`` parameter) of one user.
 
-    :param api_key_id: The user's API key id.
-    :type api_key_id: uuid.UUID
+    :param user_id: The person.
+    :type user_id: uuid.UUID
     :return: Folder name such as ``user_1a2b3c4d5e6f``.
     :rtype: str
     """
-    return f"user_{api_key_id.hex[:12]}"
+    return f"user_{user_id.hex[:12]}"
 
 
 def assign_node_keys(names: list[str]) -> dict[str, str]:

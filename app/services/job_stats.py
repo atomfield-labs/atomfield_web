@@ -85,9 +85,9 @@ async def job_counts_by_owner(db: AsyncSession) -> dict[uuid.UUID, JobCounts]:
     :rtype: dict[uuid.UUID, JobCounts]
     """
     query = (
-        select(Job.api_key_id, *PER_STATUS)
-        .where(Job.api_key_id.is_not(None))
-        .group_by(Job.api_key_id, Job.status)
+        select(Job.owner_id, *PER_STATUS)
+        .where(Job.owner_id.is_not(None))
+        .group_by(Job.owner_id, Job.status)
     )
     rows_by_owner: dict[uuid.UUID, list[Sequence]] = defaultdict(list)
     for owner, *per_status in (await db.execute(query)).all():

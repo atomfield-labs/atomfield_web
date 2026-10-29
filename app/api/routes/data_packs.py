@@ -13,11 +13,11 @@ from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_store, require_admin_key
+from app.api.dependencies import get_store, require_admin
 from app.api.errors import conflict, too_large, unprocessable
 from app.catalog.models import PACKAGE_NAME_PATTERN
 from app.db.session import get_db
-from app.models.api_key import ApiKey
+from app.models.user import User
 from app.releases.data_packs import (
     DataPackUpload,
     InvalidDataPackError,
@@ -51,7 +51,7 @@ async def publish(
     name: str = Query(pattern=NAME_QUERY),
     version: str = Query(pattern=NAME_QUERY),
     sha256: str = Query(pattern=SHA256_QUERY),
-    _admin: ApiKey = Depends(require_admin_key),
+    _admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
     store: ArtifactStore = Depends(get_store),
 ) -> DataPackInfo:
@@ -68,8 +68,8 @@ async def publish(
     :type version: str
     :param sha256: The zip's fingerprint, computed by the publisher.
     :type sha256: str
-    :param _admin: The administrator's key.
-    :type _admin: ApiKey
+    :param _admin: The administrator.
+    :type _admin: User
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :param store: Where the zip is kept.

@@ -29,7 +29,7 @@ class Run(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("api_keys.id", ondelete="SET NULL"),
+        ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.core.security import hash_api_key
 from app.models.api_key import ApiKey
 from app.models.run import Run
+from app.models.user import User
 from app.queue.job_queue import RedisJobQueue
 from app.schemas.job import PipelineSubmitRequest
 from app.services.job_service import submit_pipeline
@@ -53,32 +54,35 @@ async def room_for_one(make_session: async_sessionmaker, secret: str):
     :type make_session: async_sessionmaker
     :param secret: The user's key.
     :type secret: str
-    :return: The key's id.
+    :return: The user's id.
     :rtype: uuid.UUID
     """
+    owner = select(ApiKey.user_id).where(
+        ApiKey.key_hash == hash_api_key(secret)
+    )
     async with make_session() as session:
         statement = (
-            update(ApiKey)
-            .where(ApiKey.key_hash == hash_api_key(secret))
+            update(User)
+            .where(User.id == owner.scalar_subquery())
             .values(quota_limit=1, quota_used=0)
-            .returning(ApiKey.id)
+            .returning(User.id)
         )
-        key_id = (await session.execute(statement)).scalar_one()
+        user_id = (await session.execute(statement)).scalar_one()
         await session.commit()
-        return key_id
+        return user_id
 
 
 async def submit_twice(
-    make_session: async_sessionmaker, key_id: uuid.UUID
+    make_session: async_sessionmaker, user_id: uuid.UUID
 ) -> list:
     """
     Submit one job twice at the same moment, each submission in its own
-    session with the key as it read it.
+    session with the user as it read them.
 
     :param make_session: Session factory.
     :type make_session: async_sessionmaker
-    :param key_id: The user's key.
-    :type key_id: uuid.UUID
+    :param user_id: The user.
+    :type user_id: uuid.UUID
     :return: Each submission's summary, or the error it raised.
     :rtype: list
     """
@@ -87,30 +91,30 @@ async def submit_twice(
     try:
         async with make_session() as first, make_session() as second:
             sessions = (first, second)
-            keys = [await session.get(ApiKey, key_id) for session in sessions]
+            users = [await session.get(User, user_id) for session in sessions]
             submissions = [
-                submit_pipeline(session, ONE_JOB, queue, SlowStore(), key)
-                for session, key in zip(sessions, keys, strict=True)
+                submit_pipeline(session, ONE_JOB, queue, SlowStore(), user)
+                for session, user in zip(sessions, users, strict=True)
             ]
             return await asyncio.gather(*submissions, return_exceptions=True)
     finally:
         await redis.aclose()
 
 
-async def spent(make_session: async_sessionmaker, key_id: uuid.UUID):
+async def spent(make_session: async_sessionmaker, user_id: uuid.UUID):
     """
     How much of the quota is counted, and how many runs were made.
 
     :param make_session: Session factory.
     :type make_session: async_sessionmaker
-    :param key_id: The user's key.
-    :type key_id: uuid.UUID
+    :param user_id: The user.
+    :type user_id: uuid.UUID
     :return: (quota used, runs owned).
     :rtype: tuple[int, int]
     """
     async with make_session() as session:
-        used = (await session.get(ApiKey, key_id)).quota_used
-        runs = select(func.count(Run.id)).where(Run.owner_id == key_id)
+        used = (await session.get(User, user_id)).quota_used
+        runs = select(func.count(Run.id)).where(Run.owner_id == user_id)
         return used, (await session.execute(runs)).scalar_one()
 
 
@@ -128,11 +132,11 @@ def test_two_submissions_at_once_cannot_both_spend_the_last_of_a_quota(
     :type make_session: async_sessionmaker
     """
     secret = make_user_headers()["X-API-Key"]
-    key_id = asyncio.run(room_for_one(make_session, secret))
-    outcomes = asyncio.run(submit_twice(make_session, key_id))
+    user_id = asyncio.run(room_for_one(make_session, secret))
+    outcomes = asyncio.run(submit_twice(make_session, user_id))
     drain_queue()
     refused = [item for item in outcomes if isinstance(item, HTTPException)]
     assert [error.status_code for error in refused] == [
         status.HTTP_429_TOO_MANY_REQUESTS
     ]
-    assert asyncio.run(spent(make_session, key_id)) == (1, 1)
+    assert asyncio.run(spent(make_session, user_id)) == (1, 1)

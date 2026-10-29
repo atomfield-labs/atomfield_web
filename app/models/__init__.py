@@ -8,6 +8,7 @@ from app.models.data_pack import DataPack
 from app.models.job import Job, JobDependency
 from app.models.run import Run
 from app.models.script_release import ScriptRelease
+from app.models.user import User
 
 __all__ = [
     "ApiKey",
@@ -17,4 +18,5 @@ __all__ = [
     "JobDependency",
     "Run",
     "ScriptRelease",
+    "User",
 ]

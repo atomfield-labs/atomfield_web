@@ -272,3 +272,38 @@ def test_0004_converts_existing_jobs(
         ("Failed",),
         ("Pending",),
     ]
+
+
+def test_0013_makes_each_key_a_person(
+    scratch_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """
+    Every key becomes a person with the same id who carries its quota,
+    so jobs and runs keep their owners; a downgrade puts the quota back
+    on the key.
+
+    :param scratch_database: Name of the scratch database.
+    :type scratch_database: str
+    :param monkeypatch: Sets ALLOW_DOWNGRADE for the reverse check.
+    :type monkeypatch: pytest.MonkeyPatch
+    """
+    config = build_alembic_config()
+    command.upgrade(config, "0003")
+    asyncio.run(run_sql(*LEGACY_ROWS))
+
+    command.upgrade(config, "0013")
+
+    users, owners = asyncio.run(
+        run_sql(
+            "SELECT id::text, quota_limit, is_admin FROM users",
+            "SELECT DISTINCT owner_id::text FROM jobs",
+        )
+    )
+    assert users == [(KEY, 10, False)]
+    assert owners == [(KEY,)]
+
+    monkeypatch.setenv("ALLOW_DOWNGRADE", "1")
+    command.downgrade(config, "0012")
+    (keys,) = asyncio.run(run_sql("SELECT id::text, quota_limit FROM api_keys"))
+    assert keys == [(KEY, 10)]

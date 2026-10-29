@@ -100,9 +100,9 @@ class Job(Base):
     output_files = Column(JSONB, nullable=True)
     error_message = Column(Text, nullable=True)
 
-    api_key_id = Column(
+    owner_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("api_keys.id", ondelete="SET NULL"),
+        ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )

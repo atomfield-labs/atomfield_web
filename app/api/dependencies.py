@@ -2,9 +2,10 @@
 Shared FastAPI route dependencies for database, cache, and authentication.
 """
 
+from dataclasses import dataclass
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException, Request
+from fastapi import Depends, Header, Request
 from redis.asyncio import Redis
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,7 @@ from app.events.bus import EventBus
 from app.models.api_key import ApiKey
 from app.models.job import Job
 from app.models.run import Run
+from app.models.user import User
 from app.queue.job_queue import RedisJobQueue
 from app.releases.catalogs import CurrentCatalog, ReleaseCatalogs
 from app.storage.store import LocalDiskStore
@@ -36,7 +38,6 @@ MISSING_KEY_MESSAGE = (
     f"API key required. Please provide a valid '{API_KEY_HEADER}' header."
 )
 INVALID_KEY_MESSAGE = "Invalid or deactivated API key."
-NO_ADMIN_MESSAGE = "Admin API key is not configured on the server."
 NOT_ADMIN_MESSAGE = "Administrator privileges required."
 TOO_MANY_KEYS_MESSAGE = "Too many new API keys from this address. Try later."
 
@@ -119,138 +120,165 @@ async def get_current_catalog(
     return await request.app.state.catalogs.current(db)
 
 
-async def get_current_api_key(
-    x_api_key: str | None = Header(None, alias=API_KEY_HEADER),
-    db: AsyncSession = Depends(get_db),
-) -> ApiKey:
+@dataclass(frozen=True, slots=True)
+class Caller:
     """
-    Authenticate client request via SHA-256 hashed X-API-Key header.
+    Who is calling: the person, and the API key their script used.
 
-    :param x_api_key: Secret API token provided in HTTP request header.
-    :type x_api_key: Optional[str]
-    :param db: Asynchronous database session.
-    :type db: AsyncSession
-    :return: Validated and active ApiKey entity.
-    :rtype: ApiKey
-    :raises HTTPException: 401 if key is missing, invalid, or inactive.
+    :param user: The person.
+    :type user: User
+    :param api_key: The key in the request.
+    :type api_key: ApiKey
     """
-    if not x_api_key:
-        raise unauthorized(MISSING_KEY_MESSAGE)
-    api_key = await active_key(db, x_api_key)
-    if api_key is None:
-        raise unauthorized(INVALID_KEY_MESSAGE)
-    await mark_used(db, api_key)
-    return api_key
+
+    user: User
+    api_key: ApiKey
 
 
-async def active_key(db: AsyncSession, secret: str) -> ApiKey | None:
+async def caller_with_key(db: AsyncSession, secret: str) -> Caller | None:
     """
-    The active key with this secret (keys are stored as hashes).
+    The active key with this secret, and its active owner (keys are
+    stored as hashes).
 
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :param secret: The key as the client sent it.
     :type secret: str
-    :return: The key, or None if unknown or deactivated.
-    :rtype: ApiKey | None
+    :return: Key and person, or None if either is unknown or
+        deactivated.
+    :rtype: Caller | None
     """
-    query = select(ApiKey).where(
-        ApiKey.key_hash == hash_api_key(secret),
-        ApiKey.is_active.is_(True),
+    query = (
+        select(ApiKey, User)
+        .join(User, User.id == ApiKey.user_id)
+        .where(
+            ApiKey.key_hash == hash_api_key(secret),
+            ApiKey.is_active.is_(True),
+            User.is_active.is_(True),
+        )
     )
-    return (await db.execute(query)).scalars().first()
+    found = (await db.execute(query)).first()
+    return Caller(user=found.User, api_key=found.ApiKey) if found else None
 
 
-async def mark_used(db: AsyncSession, api_key: ApiKey) -> None:
+async def mark_used(db: AsyncSession, caller: Caller) -> None:
     """
-    Record when a key was last used.
+    Record when a key, and its owner, were last seen.
 
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param api_key: The key.
-    :type api_key: ApiKey
+    :param caller: Who called.
+    :type caller: Caller
     """
-    await db.execute(
-        update(ApiKey)
-        .where(ApiKey.id == api_key.id)
-        .values(last_used_at=func.now())
-    )
+    used = update(ApiKey).where(ApiKey.id == caller.api_key.id)
+    await db.execute(used.values(last_used_at=func.now()))
+    seen = update(User).where(User.id == caller.user.id)
+    await db.execute(seen.values(last_seen_at=func.now()))
     await db.commit()
 
 
-async def get_optional_api_key(
+async def get_optional_caller(
     x_api_key: str | None = Header(None, alias=API_KEY_HEADER),
     db: AsyncSession = Depends(get_db),
-) -> ApiKey | None:
+) -> Caller | None:
     """
-    Optionally resolve authenticated API key without enforcing rejection.
+    Who is calling, if they sent a key that works.
 
-    :param x_api_key: Optional API token from header.
-    :type x_api_key: Optional[str]
+    :param x_api_key: The key from the request header, if any.
+    :type x_api_key: str | None
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :return: Resolved ApiKey if present and valid, else None.
-    :rtype: Optional[ApiKey]
+    :return: The caller, or None.
+    :rtype: Caller | None
+    """
+    caller = await caller_with_key(db, x_api_key) if x_api_key else None
+    if caller is not None:
+        await mark_used(db, caller)
+    return caller
+
+
+async def get_caller(
+    x_api_key: str | None = Header(None, alias=API_KEY_HEADER),
+    caller: Caller | None = Depends(get_optional_caller),
+) -> Caller:
+    """
+    Who is calling; the request is refused without a working key.
+
+    :param x_api_key: The key from the request header, if any.
+    :type x_api_key: str | None
+    :param caller: The caller that key identifies, if any.
+    :type caller: Caller | None
+    :return: The caller.
+    :rtype: Caller
+    :raises HTTPException: 401 if the key is missing, unknown or
+        deactivated, or its owner is.
     """
     if not x_api_key:
-        return None
-    try:
-        return await get_current_api_key(x_api_key=x_api_key, db=db)
-    except HTTPException:
-        return None
+        raise unauthorized(MISSING_KEY_MESSAGE)
+    if caller is None:
+        raise unauthorized(INVALID_KEY_MESSAGE)
+    return caller
 
 
-async def require_admin_key(
-    api_key: ApiKey = Depends(get_current_api_key),
-) -> ApiKey:
+async def get_current_user(caller: Caller = Depends(get_caller)) -> User:
     """
-    Ensure the calling client holds cluster administrator credentials.
+    The person making the request.
 
-    :param api_key: Authenticated ApiKey entity from request header.
-    :type api_key: ApiKey
-    :return: Validated administrator ApiKey entity.
-    :rtype: ApiKey
-    :raises HTTPException: 403 if admin key unconfigured or caller lacks rights.
+    :param caller: Who is calling.
+    :type caller: Caller
+    :return: The person.
+    :rtype: User
     """
-    if not settings.ADMIN_API_KEY:
-        raise forbidden(NO_ADMIN_MESSAGE)
-    if not is_admin_key(api_key):
+    return caller.user
+
+
+async def get_optional_user(
+    caller: Caller | None = Depends(get_optional_caller),
+) -> User | None:
+    """
+    The person making the request, if they sent a working key.
+
+    :param caller: Who is calling, if known.
+    :type caller: Caller | None
+    :return: The person, or None.
+    :rtype: User | None
+    """
+    return caller.user if caller else None
+
+
+async def require_admin(user: User = Depends(get_current_user)) -> User:
+    """
+    Let only the administrator through.
+
+    :param user: The person making the request.
+    :type user: User
+    :return: The administrator.
+    :rtype: User
+    :raises HTTPException: 403 for anyone else.
+    """
+    if not user.is_admin:
         raise forbidden(NOT_ADMIN_MESSAGE)
-    return api_key
+    return user
 
 
-def is_admin_key(api_key: ApiKey) -> bool:
-    """
-    Decide whether a key is the configured administrator key.
-
-    :param api_key: Authenticated key.
-    :type api_key: ApiKey
-    :return: True only if an admin key is configured and this is it.
-    :rtype: bool
-    """
-    if not settings.ADMIN_API_KEY:
-        return False
-    return api_key.key_hash == hash_api_key(settings.ADMIN_API_KEY)
-
-
-def may_act_on(api_key: ApiKey, owner_id: UUID | None) -> bool:
+def may_act_on(user: User, owner_id: UUID | None) -> bool:
     """
     The access rule for jobs and runs: their owner, or the
     administrator.
 
-    :param api_key: Authenticated caller.
-    :type api_key: ApiKey
-    :param owner_id: The owning key's id.
+    :param user: The person making the request.
+    :type user: User
+    :param owner_id: The owner's id.
     :type owner_id: UUID | None
-    :return: True if the caller may see and change it.
+    :return: True if the person may see and change it.
     :rtype: bool
     """
-    return owner_id == api_key.id or is_admin_key(api_key)
+    return owner_id == user.id or user.is_admin
 
 
 async def get_owned_job(
     job_id: UUID,
-    api_key: ApiKey = Depends(get_current_api_key),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Job:
     """
@@ -258,8 +286,8 @@ async def get_owned_job(
 
     :param job_id: Job id from the URL path.
     :type job_id: UUID
-    :param api_key: Authenticated caller.
-    :type api_key: ApiKey
+    :param user: The person making the request.
+    :type user: User
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :return: The job.
@@ -267,14 +295,14 @@ async def get_owned_job(
     :raises HTTPException: 404 if missing or owned by someone else.
     """
     job = await db.get(Job, job_id)
-    if job is None or not may_act_on(api_key, job.api_key_id):
+    if job is None or not may_act_on(user, job.owner_id):
         raise not_found("Job", job_id)
     return job
 
 
 async def get_owned_run(
     run_id: UUID,
-    api_key: ApiKey = Depends(get_current_api_key),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Run:
     """
@@ -282,8 +310,8 @@ async def get_owned_run(
 
     :param run_id: Run id from the URL path.
     :type run_id: UUID
-    :param api_key: Authenticated caller.
-    :type api_key: ApiKey
+    :param user: The person making the request.
+    :type user: User
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :return: The run.
@@ -291,7 +319,7 @@ async def get_owned_run(
     :raises HTTPException: 404 if missing or owned by someone else.
     """
     run = await db.get(Run, run_id)
-    if run is None or not may_act_on(api_key, run.owner_id):
+    if run is None or not may_act_on(user, run.owner_id):
         raise not_found("Run", run_id)
     return run
 

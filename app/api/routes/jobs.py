@@ -6,16 +6,16 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
-    get_current_api_key,
     get_current_catalog,
+    get_current_user,
     get_job_queue,
-    get_optional_api_key,
+    get_optional_user,
     get_owned_job,
     get_store,
 )
 from app.db.session import get_db
-from app.models.api_key import ApiKey
 from app.models.job import Job
+from app.models.user import User
 from app.queue.job_queue import RedisJobQueue
 from app.releases.catalogs import CurrentCatalog
 from app.runs.states import JobStatus
@@ -46,7 +46,7 @@ MAX_PAGE_SIZE = 200
 @router.post("/submit", response_model=JobResponse, status_code=202)
 async def submit_job(
     job_req: JobSubmitRequest,
-    api_key: ApiKey = Depends(get_current_api_key),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     queue: RedisJobQueue = Depends(get_job_queue),
     current: CurrentCatalog = Depends(get_current_catalog),
@@ -56,8 +56,8 @@ async def submit_job(
 
     :param job_req: Task id and parameters for execution.
     :type job_req: JobSubmitRequest
-    :param api_key: Authenticated user API key.
-    :type api_key: ApiKey
+    :param user: The person submitting.
+    :type user: User
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :param queue: Job queue the job is sent to.
@@ -73,7 +73,7 @@ async def submit_job(
         db=db,
         request=job_req,
         queue=queue,
-        api_key=api_key,
+        user=user,
         release_id=current.release_id,
     )
 
@@ -85,7 +85,7 @@ async def submit_job(
 )
 async def submit_pipeline(
     pipeline_req: PipelineSubmitRequest,
-    api_key: ApiKey = Depends(get_current_api_key),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     queue: RedisJobQueue = Depends(get_job_queue),
     store: ArtifactStore = Depends(get_store),
@@ -96,8 +96,8 @@ async def submit_pipeline(
 
     :param pipeline_req: Graph nodes, edges, and attached input files.
     :type pipeline_req: PipelineSubmitRequest
-    :param api_key: Authenticated user API key.
-    :type api_key: ApiKey
+    :param user: The person submitting.
+    :type user: User
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :param queue: Job queue the root jobs are sent to.
@@ -116,14 +116,14 @@ async def submit_pipeline(
         request=pipeline_req,
         queue=queue,
         store=store,
-        api_key=api_key,
+        user=user,
         release_id=current.release_id,
     )
 
 
 @router.delete("/clear")
 async def clear_my_jobs(
-    api_key: ApiKey = Depends(get_current_api_key),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     store: ArtifactStore = Depends(get_store),
 ):
@@ -133,8 +133,8 @@ async def clear_my_jobs(
     Wiping the whole system is not an HTTP operation: it needs shell
     access to the server (``python -m app.cli wipe``).
 
-    :param api_key: Authenticated caller.
-    :type api_key: ApiKey
+    :param user: The person asking.
+    :type user: User
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :param store: The server's file store.
@@ -143,14 +143,14 @@ async def clear_my_jobs(
     :rtype: dict
     """
     return await job_service.clear_user_data(
-        db=db, store=store, api_key_id=api_key.id
+        db=db, store=store, user_id=user.id
     )
 
 
 @router.delete("/session/{session_id}")
 async def delete_session(
     session_id: str,
-    api_key: ApiKey = Depends(get_current_api_key),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     store: ArtifactStore = Depends(get_store),
 ):
@@ -160,8 +160,8 @@ async def delete_session(
 
     :param session_id: Pipeline session identifier.
     :type session_id: str
-    :param api_key: Authenticated caller.
-    :type api_key: ApiKey
+    :param user: The person asking.
+    :type user: User
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :param store: The server's file store.
@@ -173,7 +173,7 @@ async def delete_session(
         db=db,
         store=store,
         session_id=session_id,
-        api_key_id=api_key.id,
+        user_id=user.id,
     )
 
 
@@ -187,7 +187,7 @@ async def list_jobs(
     status: JobStatus | None = None,
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     offset: int = Query(0, ge=0),
-    api_key: ApiKey | None = Depends(get_optional_api_key),
+    user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -199,17 +199,17 @@ async def list_jobs(
     :type limit: int
     :param offset: Jobs to skip.
     :type offset: int
-    :param api_key: Optional authenticated user API key.
-    :type api_key: ApiKey | None
+    :param user: The person asking, if known.
+    :type user: User | None
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :return: Paginated list of jobs and total count.
     :rtype: JobListResponse
     """
-    if not api_key:
+    if not user:
         return JobListResponse(jobs=[], total=0)
     jobs, total = await job_service.list_jobs(
-        db, api_key.id, status=status, limit=limit, offset=offset
+        db, user.id, status=status, limit=limit, offset=offset
     )
     return JobListResponse(jobs=jobs, total=total)
 

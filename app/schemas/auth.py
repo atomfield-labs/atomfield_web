@@ -3,11 +3,12 @@ Request and response bodies for keys, quotas and job statistics.
 """
 
 from datetime import datetime
+from typing import TypeVar
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
-from app.models.api_key import DEFAULT_QUOTA_LIMIT
+from app.models.user import DEFAULT_QUOTA_LIMIT, User
 
 
 class ApiKeyCreateRequest(BaseModel):
@@ -25,14 +26,20 @@ class ApiKeyCreateRequest(BaseModel):
 
 class KeyQuota(BaseModel):
     """
-    A key as its holder knows it, and its quota; read straight from the
-    stored key.
+    A person as the key in use shows them, and their quota; read
+    straight from the stored person (``account_view``).
     """
 
     model_config = ConfigDict(from_attributes=True)
 
-    key_prefix: str = Field(..., description="Truncated key identifier.")
-    label: str | None = Field(default=None, description="Assigned label.")
+    key_prefix: str | None = Field(
+        default=None, description="Start of the key in use."
+    )
+    label: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("label", "name"),
+        description="The person's name.",
+    )
     quota_limit: int = Field(
         default=DEFAULT_QUOTA_LIMIT, description="Max calculation quota."
     )
@@ -97,9 +104,13 @@ class AdminUserSummary(KeyQuota, JobCounts):
     """
 
     id: UUID
+    email: str | None = None
     is_active: bool
     created_at: datetime | None = None
-    last_used_at: datetime | None = None
+    last_used_at: datetime | None = Field(
+        default=None,
+        validation_alias=AliasChoices("last_used_at", "last_seen_at"),
+    )
 
 
 class AdminUserListResponse(BaseModel):
@@ -125,3 +136,25 @@ class AdminQuotaUpdateRequest(BaseModel):
         default=False,
         description="Whether to reset the allocated calculation counter to 0.",
     )
+
+
+AccountView = TypeVar("AccountView", bound=KeyQuota)
+
+
+def account_view(
+    schema: type[AccountView], user: User, key_prefix: str | None
+) -> AccountView:
+    """
+    A response about a person, read from them, showing the key in use.
+
+    :param schema: The response to build.
+    :type schema: type[AccountView]
+    :param user: The person.
+    :type user: User
+    :param key_prefix: Start of their key, if one is in use.
+    :type key_prefix: str | None
+    :return: The response.
+    :rtype: AccountView
+    """
+    view = schema.model_validate(user)
+    return view.model_copy(update={"key_prefix": key_prefix})
