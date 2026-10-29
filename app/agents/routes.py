@@ -67,15 +67,20 @@ async def get_agent_services(request: Request) -> AgentServices:
 )
 async def claim(
     request: ClaimRequest,
+    connection: Request,
     target: ComputeTarget = Depends(get_agent_target),
     db: AsyncSession = Depends(get_db),
     services: AgentServices = Depends(get_agent_services),
 ):
     """
-    Give the calling agent one job, waiting up to ``wait_seconds``.
+    Give the calling agent one job, waiting up to ``wait_seconds``. A
+    job that arrives after the agent hung up goes back in line.
 
     :param request: How long the agent is willing to wait.
     :type request: ClaimRequest
+    :param connection: The agent's HTTP connection, watched for a
+        hang-up.
+    :type connection: Request
     :param target: Calling agent's target.
     :type target: ComputeTarget
     :param db: Asynchronous database session.
@@ -86,7 +91,12 @@ async def claim(
     :rtype: JobAssignment | Response
     """
     assignment = await claim_next(
-        db, services, target, request.wait_seconds, request.scheduled
+        db,
+        services,
+        target,
+        request.wait_seconds,
+        request.scheduled,
+        hung_up=connection.is_disconnected,
     )
     if assignment is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)

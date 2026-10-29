@@ -5,6 +5,7 @@ results. Routes stay thin; this module holds the rules.
 
 import asyncio
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from sqlalchemy import func, select, tuple_, update
@@ -56,6 +57,10 @@ OUTCOME_FIELDS = {
 INPUT_LINK_SECONDS = 3600
 # Small files are uploaded right before the report.
 UPLOAD_LINK_SECONDS = 600
+
+
+# Asks whether the agent waiting for a job has hung up.
+HungUp = Callable[[], Awaitable[bool]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -290,15 +295,30 @@ async def try_start(
     return await build_assignment(db, services.store, started, task, data)
 
 
+async def never_hung_up() -> bool:
+    """
+    For callers with no connection to watch: the agent is always there.
+
+    :return: False.
+    :rtype: bool
+    """
+    return False
+
+
 async def claim_next(
     db: AsyncSession,
     services: AgentServices,
     target: ComputeTarget,
     wait_seconds: float,
     scheduled: bool = False,
+    hung_up: HungUp = never_hung_up,
 ) -> JobAssignment | None:
     """
     Hold the request open until a job arrives or the wait runs out.
+    A job that arrives after the agent stopped waiting (its connection
+    closed) goes back to its place in line instead of being started:
+    otherwise it would sit "running" for nobody until its lease ran
+    out.
 
     :param db: Asynchronous database session.
     :type db: AsyncSession
@@ -310,6 +330,8 @@ async def claim_next(
     :type wait_seconds: float
     :param scheduled: The agent hands jobs to a scheduler.
     :type scheduled: bool
+    :param hung_up: Asks whether the agent stopped waiting.
+    :type hung_up: HungUp
     :return: An assignment, or None if nothing arrived in time.
     :rtype: JobAssignment | None
     """
@@ -318,10 +340,15 @@ async def claim_next(
     loop = asyncio.get_running_loop()
     give_up_at = loop.time() + wait_seconds
     while (remaining := give_up_at - loop.time()) > 0:
-        job_id = await services.queue.pop(target.id, remaining)
-        if job_id is None:
+        taken = await services.queue.take(target.id, remaining)
+        if taken is None:
             return None
-        assignment = await try_start(db, services, target, job_id, scheduled)
+        if await hung_up():
+            await services.queue.put_back(target.id, taken)
+            return None
+        assignment = await try_start(
+            db, services, target, taken.job_id, scheduled
+        )
         if assignment is not None:
             return assignment
     return None

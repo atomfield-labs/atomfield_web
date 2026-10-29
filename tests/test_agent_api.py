@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from app.agents.service import AgentServices, claim_next
 from app.core.config import settings
 from app.core.security import hash_api_key
 from app.models.compute_target import HOUSE_TARGET_ID, ComputeTarget
@@ -595,3 +596,49 @@ def test_a_scheduled_claim_starts_the_clock_only_when_reported(
     assert deadline_at - started_at == timedelta(minutes=walltime)
     client.post("/api/agent/heartbeat", json=beat, headers=HOUSE)
     assert asyncio.run(clock()) == (started_at, deadline_at)
+
+
+def test_a_job_taken_for_an_agent_that_hung_up_goes_back_in_line(
+    client: TestClient,
+    chain,
+    make_session: async_sessionmaker,
+):
+    """
+    The agent stopped waiting while the server was getting it a job
+    (its connection closed): the job is not started, and returns to
+    its place in line, ahead of a job queued after it.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param chain: Owner headers and job ids.
+    :type chain: tuple
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
+    """
+    headers, (first, _) = chain
+    later = {"script_name": "toy_opt", "parameters": {}}
+    client.post("/api/jobs/submit", json=later, headers=headers)
+
+    async def hung_up() -> bool:
+        """
+        :return: True: the agent has gone.
+        :rtype: bool
+        """
+        return True
+
+    async def scenario():
+        redis = make_redis()
+        services = AgentServices(RedisJobQueue(redis), None, None, None)
+        try:
+            async with make_session() as session:
+                target = await session.get(ComputeTarget, HOUSE_TARGET_ID)
+                return await claim_next(
+                    session, services, target, 0.2, hung_up=hung_up
+                )
+        finally:
+            await redis.aclose()
+
+    assert asyncio.run(scenario()) is None
+    job = client.get(f"/api/jobs/{first}", headers=headers).json()
+    assert job["status"] == "queued"
+    assert claim(client).json()["job_id"] == first
