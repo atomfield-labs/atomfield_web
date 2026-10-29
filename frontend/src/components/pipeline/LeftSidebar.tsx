@@ -40,7 +40,8 @@ const BUILDERS: PaletteCategory = {
       id: 'structure_input',
       title: 'Structure Input (.xyz)',
       description:
-        'Molecular coordinate file input (.xyz, .mol, .sdf, .pdb). ' +
+        'Structure file input: molecules (.xyz, .mol, .sdf, .pdb) or ' +
+        'crystals (.cif, or a pw.x .in that keeps the cell orientation). ' +
         'Drag onto canvas or upload file.',
       isStructure: true,
     },

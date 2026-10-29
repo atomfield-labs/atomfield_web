@@ -69,7 +69,7 @@ export default function StructureNode({ id, data, selected }: any) {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".xyz,.cif,.sdf,.mol,.pdb"
+        accept=".xyz,.cif,.sdf,.mol,.pdb,.in"
         className="hidden"
         onChange={handleFileChange}
       />

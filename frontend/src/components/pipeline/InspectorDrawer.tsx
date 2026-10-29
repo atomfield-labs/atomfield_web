@@ -391,7 +391,7 @@ export default function InspectorDrawer({
                   type="file"
                   id="modal-replace-file"
                   className="hidden"
-                  accept=".xyz,.cif,.sdf,.mol,.pdb"
+                  accept=".xyz,.cif,.sdf,.mol,.pdb,.in"
                   onChange={(e) => {
                     if (e.target.files && e.target.files.length > 0) {
                       const file = e.target.files[0];
