@@ -6,7 +6,6 @@ Errors use FastAPI's own 422 format, located at the exact request field
 user got wrong. Every problem in a request is reported at once.
 """
 
-from pathlib import PurePosixPath
 from typing import Any, TypeVar
 
 from fastapi.exceptions import RequestValidationError
@@ -111,8 +110,7 @@ def filename_error(
     """
     if error := path_error(name, location):
         return error
-    suffix = PurePosixPath(name).suffix.lstrip(".").lower()
-    if suffix not in port.formats:
+    if not port.takes(name):
         message = f"Expected one of {port.formats}"
         return make_error(location, "format", message, name)
     return None

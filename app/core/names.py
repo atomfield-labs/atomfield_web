@@ -6,6 +6,9 @@ Kept free of server imports: the server's file store, its submission
 checks and the agent's job folders all judge names by this one rule.
 """
 
+from collections import Counter
+from collections.abc import Iterable
+
 UNSAFE_NAMES = frozenset({"", ".", ".."})
 SEPARATORS = ("/", "\\")
 # Characters below this one are control characters (newline, tab...).
@@ -43,3 +46,16 @@ def version_label(name: str, version: str) -> str:
     :rtype: str
     """
     return f"{name} {version}"
+
+
+def given_twice(names: Iterable[str]) -> list[str]:
+    """
+    The names that appear more than once, for refusing a list that
+    must name each thing once (task ids, flags, pipeline nodes).
+
+    :param names: The names, as given.
+    :type names: Iterable[str]
+    :return: Each repeated name once, sorted.
+    :rtype: list[str]
+    """
+    return sorted(name for name, count in Counter(names).items() if count > 1)

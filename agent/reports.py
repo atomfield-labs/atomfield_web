@@ -10,6 +10,7 @@ from pathlib import Path
 
 from agent.workspace import failure_message
 from app.agents.schemas import CompletionRequest, JobAssignment
+from app.runs.states import CANCELLED_MESSAGE, JobStatus
 
 
 class StopReason(StrEnum):
@@ -42,10 +43,10 @@ def stopped_report(
     if reason is StopReason.ABANDONED:
         return None
     if reason is StopReason.CANCELLED:
-        outcome, message = "cancelled", "Cancelled by request"
+        outcome, message = JobStatus.CANCELLED, CANCELLED_MESSAGE
     else:
         limit = assignment.task.resources.walltime_minutes
-        outcome = "failed"
+        outcome = JobStatus.FAILED
         message = f"{assignment.task.id} exceeded its {limit}-minute limit"
     return CompletionRequest(
         attempt=assignment.attempt,
@@ -78,9 +79,10 @@ def exit_report(
     """
     common = {"attempt": assignment.attempt, "execution_time_seconds": duration}
     if return_code == 0:
-        return CompletionRequest(outcome="succeeded", **common)
+        return CompletionRequest(outcome=JobStatus.SUCCEEDED, **common)
     message = failure_message(assignment.task.id, workspace, return_code)
-    return CompletionRequest(outcome="failed", error_message=message, **common)
+    failed = JobStatus.FAILED
+    return CompletionRequest(outcome=failed, error_message=message, **common)
 
 
 def crash_report(
@@ -99,5 +101,7 @@ def crash_report(
     """
     message = f"{type(error).__name__}: {error}\n{traceback.format_exc()}"
     return CompletionRequest(
-        attempt=assignment.attempt, outcome="failed", error_message=message
+        attempt=assignment.attempt,
+        outcome=JobStatus.FAILED,
+        error_message=message,
     )

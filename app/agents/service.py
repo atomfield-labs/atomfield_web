@@ -582,12 +582,12 @@ async def apply_report(
     :return: The completion, or None for a stale report.
     :rtype: Completion | None
     """
-    outcome = JobStatus(report.outcome)
-    values = {name: getattr(report, name) for name in OUTCOME_FIELDS[outcome]}
+    fields = OUTCOME_FIELDS[report.outcome]
+    values = {name: getattr(report, name) for name in fields}
     return await complete_attempt(
         db,
         job_id,
-        outcome,
+        report.outcome,
         expected_attempt=report.attempt,
         expected_agent=target.id,
         output_files=[card.model_dump() for card in report.files],

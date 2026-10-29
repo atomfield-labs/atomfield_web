@@ -29,13 +29,12 @@ def accepts_file(task: TaskDefinition, filename: str) -> bool:
 
     :param task: The task.
     :type task: TaskDefinition
-    :param filename: The file's name; its extension is its type.
+    :param filename: The file's name.
     :type filename: str
-    :return: True if an input lists the extension.
+    :return: True if an input takes it (``InputPort.takes``).
     :rtype: bool
     """
-    extension = filename.rpartition(".")[2].lower()
-    return any(extension in port.formats for port in task.inputs)
+    return any(port.takes(filename) for port in task.inputs)
 
 
 class Catalog:

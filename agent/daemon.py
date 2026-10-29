@@ -41,6 +41,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
 from pathlib import Path
+from types import FrameType
 from typing import IO
 
 from agent.config import CONFIG_PATH_VARIABLE, REPO_ROOT, AgentConfig
@@ -426,7 +427,15 @@ def install_stop_handlers(
     :type current: list[subprocess.Popen]
     """
 
-    def on_signal(signal_number: int, frame) -> None:
+    def on_signal(signal_number: int, frame: FrameType | None) -> None:
+        """
+        Note the stop, and pass it on to the agent.
+
+        :param signal_number: The signal (either means stop).
+        :type signal_number: int
+        :param frame: Where the supervisor was (unused).
+        :type frame: FrameType | None
+        """
         stopping.set()
         for child in current:
             child.terminate()

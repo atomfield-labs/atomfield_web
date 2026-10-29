@@ -130,6 +130,19 @@ def test_without_settings_the_agent_says_to_log_in(tmp_path: Path):
         AgentConfig.load(tmp_path / "none.toml", environ={})
 
 
+def test_a_runner_that_does_not_exist_is_refused_by_name(tmp_path: Path):
+    """
+    A misspelled runner stops the agent with a message naming the ones
+    there are, instead of quietly running Slurm jobs as local ones.
+
+    :param tmp_path: Empty folder.
+    :type tmp_path: Path
+    """
+    settings = {**settings_for(tmp_path), "runner": "slrum"}
+    with pytest.raises(ValueError, match="process or slurm, not 'slrum'"):
+        AgentConfig.from_settings(settings)
+
+
 def test_login_from_flags_checks_the_token_and_saves(tmp_path: Path):
     """
     With every answer given as a flag and ``--yes``, nothing is asked;

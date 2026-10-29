@@ -525,6 +525,16 @@ class Agent:
             await self.pause(ERROR_BACKOFF_SECONDS)
             return
         self.reported_starts.update(str(ref.job_id) for ref in started)
+        await self.obey(reply)
+
+    async def obey(self, reply: HeartbeatResponse) -> None:
+        """
+        Do what a heartbeat reply asks: stop the jobs to cancel or to
+        abandon, and zip the runs asked for.
+
+        :param reply: The server's reply.
+        :type reply: HeartbeatResponse
+        """
         for reference in reply.cancel:
             await self.stop(reference, StopReason.CANCELLED)
         for reference in reply.abandon:

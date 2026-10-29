@@ -19,7 +19,7 @@ from app.api.router import api_router
 from app.catalog.catalog import Catalog
 from app.core.broker import create_redis
 from app.core.config import settings
-from app.core.security import hash_api_key
+from app.core.security import display_prefix, hash_api_key
 from app.db.session import AsyncSessionLocal, engine
 from app.events.redis_bus import RedisEventBus
 from app.models.api_key import ApiKey
@@ -31,46 +31,66 @@ from app.storage.links import LinkSigner
 from app.storage.store import LocalDiskStore
 
 ADMIN_QUOTA = 999999
+ADMIN_LABEL = "Cluster Administrator"
+HEALTHY = "AtomField Core Online"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
-    Manage application startup lifecycle and graceful shutdown resources.
+    Set the server up, serve, and release what it holds at shutdown.
 
     :param app: FastAPI application instance.
     :type app: FastAPI
     :return: Async generator yielding control to the application context.
     :rtype: AsyncGenerator[None, None]
     """
-    # The schema is owned by migrations (python -m app.db.migrate),
-    # which run before the server starts.
-
-    # Load (and validate) the catalog first: a broken catalog must stop
-    # the server here, not fail someone's submission later. Releases
-    # bring their own catalogs; this file serves runs without one.
-    unreleased = Catalog.from_path(Path(settings.CATALOG_PATH))
-    app.state.catalogs = ReleaseCatalogs(unreleased)
-    app.state.store = create_store()
-
-    async with AsyncSessionLocal() as session:
-        await provision_admin_key(session)
-
-    app.state.redis = create_redis()
-    app.state.job_queue = RedisJobQueue(app.state.redis)
-    app.state.event_bus = RedisEventBus(app.state.redis)
-    async with AsyncSessionLocal() as session:
-        await provision_house_target(session)
+    await set_up(app)
     sweeper_task = start_sweeper(app) if settings.SWEEPER_ENABLED else None
     try:
         yield
     finally:
-        if sweeper_task is not None:
-            sweeper_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await sweeper_task
+        await stop_task(sweeper_task)
         await app.state.redis.aclose()
         await engine.dispose()
+
+
+async def set_up(app: FastAPI) -> None:
+    """
+    Prepare what the routes use. The schema is owned by migrations
+    (``python -m app.db.migrate``), which run before the server starts.
+
+    The catalog is loaded, and checked, first: a broken catalog must
+    stop the server here, not fail someone's submission later.
+    Releases bring their own catalogs; this file serves runs without
+    one.
+
+    :param app: FastAPI application instance.
+    :type app: FastAPI
+    """
+    unreleased = Catalog.from_path(Path(settings.CATALOG_PATH))
+    app.state.catalogs = ReleaseCatalogs(unreleased)
+    app.state.store = create_store()
+    async with AsyncSessionLocal() as session:
+        await provision_admin_key(session)
+        await provision_house_target(session)
+    app.state.redis = create_redis()
+    app.state.job_queue = RedisJobQueue(app.state.redis)
+    app.state.event_bus = RedisEventBus(app.state.redis)
+
+
+async def stop_task(task: asyncio.Task | None) -> None:
+    """
+    Cancel a background task, if there is one, and wait for it to end.
+
+    :param task: The task.
+    :type task: asyncio.Task | None
+    """
+    if task is None:
+        return
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
 
 
 def create_store() -> LocalDiskStore:
@@ -107,16 +127,29 @@ async def provision_admin_key(session: AsyncSession) -> None:
         insert(ApiKey)
         .values(
             key_hash=hash_api_key(settings.ADMIN_API_KEY),
-            key_prefix=settings.ADMIN_API_KEY[:8] + "...",
-            label="Cluster Administrator",
+            key_prefix=display_prefix(settings.ADMIN_API_KEY),
+            label=ADMIN_LABEL,
             quota_limit=ADMIN_QUOTA,
-            quota_used=0,
-            is_active=True,
         )
         .on_conflict_do_nothing(index_elements=[ApiKey.key_hash])
     )
     await session.execute(statement)
     await session.commit()
+
+
+def silence_limits() -> SilenceLimits:
+    """
+    How long a job's agent may stay silent before the job counts as
+    lost, by kind of job, from the settings.
+
+    :return: The limits.
+    :rtype: SilenceLimits
+    """
+    scheduled = settings.SCHEDULED_LEASE_TIMEOUT_SECONDS
+    return SilenceLimits(
+        local=timedelta(seconds=settings.LEASE_TIMEOUT_SECONDS),
+        scheduled=timedelta(seconds=scheduled),
+    )
 
 
 def start_sweeper(app: FastAPI) -> asyncio.Task:
@@ -135,12 +168,7 @@ def start_sweeper(app: FastAPI) -> asyncio.Task:
         app.state.redis,
         app.state.store,
         interval_seconds=settings.SWEEP_INTERVAL_SECONDS,
-        limits=SilenceLimits(
-            local=timedelta(seconds=settings.LEASE_TIMEOUT_SECONDS),
-            scheduled=timedelta(
-                seconds=settings.SCHEDULED_LEASE_TIMEOUT_SECONDS
-            ),
-        ),
+        limits=silence_limits(),
         deadline_grace=timedelta(seconds=settings.DEADLINE_GRACE_SECONDS),
     )
     return asyncio.create_task(sweeper.run_forever())
@@ -156,10 +184,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Keys travel in a header, never in cookies, so no origin needs the
+# browser's credentials mode: with it, "*" would admit every site.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -177,7 +207,7 @@ async def health_check() -> dict[str, str]:
     :rtype: dict[str, str]
     """
     return {
-        "status": "AtomField Core Online",
+        "status": HEALTHY,
         "version": settings.VERSION,
         "environment": settings.ENVIRONMENT,
     }

@@ -11,6 +11,7 @@ that must never see the agent's token.
 
 import os
 import uuid
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import httpx
@@ -206,14 +207,9 @@ class AgentClient:
         :type source: Path
         :raises httpx.HTTPError: On network errors or a refused link.
         """
-
-        async def chunks():
-            with source.open("rb") as stream:
-                while chunk := stream.read(UPLOAD_CHUNK_BYTES):
-                    yield chunk
-
         headers = {"Content-Length": str(source.stat().st_size)}
-        response = await self.links.put(url, content=chunks(), headers=headers)
+        chunks = file_chunks(source)
+        response = await self.links.put(url, content=chunks, headers=headers)
         response.raise_for_status()
 
     async def download(self, url: str, destination: Path) -> None:
@@ -286,3 +282,18 @@ class AgentClient:
         """
         await self.http.aclose()
         await self.links.aclose()
+
+
+async def file_chunks(source: Path) -> AsyncIterator[bytes]:
+    """
+    A file's bytes in pieces, for streaming an upload without holding
+    the whole file in memory.
+
+    :param source: The file.
+    :type source: Path
+    :return: Its bytes, piece by piece.
+    :rtype: AsyncIterator[bytes]
+    """
+    with source.open("rb") as stream:
+        while chunk := stream.read(UPLOAD_CHUNK_BYTES):
+            yield chunk

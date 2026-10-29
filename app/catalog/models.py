@@ -6,8 +6,8 @@ field is either a typo or a newer format, and both should stop the
 platform at startup rather than be ignored.
 """
 
-from collections import Counter
 from enum import StrEnum
+from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from pydantic import (
@@ -17,6 +17,8 @@ from pydantic import (
     PositiveInt,
     model_validator,
 )
+
+from app.core.names import given_twice
 
 # Names and versions of what agents download (releases, data packs):
 # they become folder names on agents' machines.
@@ -92,6 +94,19 @@ class InputPort(ContractModel):
     formats: list[str]
     required: bool = False
     multiple: bool = False
+
+    def takes(self, filename: str) -> bool:
+        """
+        Whether this input takes a file of this name: its type is its
+        extension, in any case (a name without one has no type).
+
+        :param filename: The file's name.
+        :type filename: str
+        :return: True if its extension is one of ``formats``.
+        :rtype: bool
+        """
+        extension = PurePosixPath(filename).suffix.lstrip(".").lower()
+        return extension in self.formats
 
 
 class OutputPort(ContractModel):
@@ -191,9 +206,7 @@ class TaskDefinition(ContractModel):
         :rtype: TaskDefinition
         :raises ValueError: If a variable is used twice.
         """
-        counts = Counter(need.env for need in self.data)
-        repeated = sorted(env for env, n in counts.items() if n > 1)
-        if repeated:
+        if repeated := given_twice(need.env for need in self.data):
             raise ValueError(
                 f"{self.id}: data variables used twice: {repeated}"
             )
@@ -215,8 +228,7 @@ class TaskDefinition(ContractModel):
             for flag in (self.platform_flags.job_name, self.platform_flags.cpus)
             if flag
         ]
-        repeated = sorted(flag for flag, n in Counter(flags).items() if n > 1)
-        if repeated:
+        if repeated := given_twice(flags):
             raise ValueError(f"{self.id}: flags used twice: {repeated}")
         return self
 
@@ -278,8 +290,7 @@ class PipelineTemplate(ContractModel):
                     "not listed before it"
                 )
             earlier.append(step.key)
-        repeated = sorted(key for key, n in Counter(earlier).items() if n > 1)
-        if repeated:
+        if repeated := given_twice(earlier):
             raise ValueError(f"Template {self.id}: keys used twice: {repeated}")
         return self
 
@@ -304,9 +315,7 @@ class CatalogDocument(ContractModel):
         :rtype: CatalogDocument
         :raises ValueError: If any task id appears more than once.
         """
-        counts = Counter(task.id for task in self.tasks)
-        repeated = sorted(task_id for task_id, n in counts.items() if n > 1)
-        if repeated:
+        if repeated := given_twice(task.id for task in self.tasks):
             raise ValueError(f"Task ids used twice: {repeated}")
         return self
 
@@ -319,8 +328,7 @@ class CatalogDocument(ContractModel):
         :rtype: CatalogDocument
         :raises ValueError: If any template id appears more than once.
         """
-        counts = Counter(template.id for template in self.pipelines)
-        repeated = sorted(name for name, n in counts.items() if n > 1)
-        if repeated:
+        ids = (template.id for template in self.pipelines)
+        if repeated := given_twice(ids):
             raise ValueError(f"Template ids used twice: {repeated}")
         return self

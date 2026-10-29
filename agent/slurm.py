@@ -25,6 +25,7 @@ from app.catalog.models import Resources
 
 logger = logging.getLogger("agent.slurm")
 EXIT_FILE = ".af_exit"
+LOGIN_SHELL = "#!/bin/bash -l"
 SCRIPT_NAME = "job.sbatch"
 # Slurm states of a job that has begun running.
 RUNNING_STATES = {"RUNNING", "COMPLETING", "STOPPED", "SUSPENDED"}
@@ -101,23 +102,21 @@ def parallel_directives(resources: Resources) -> list[str]:
     return ["--ntasks=1", f"--cpus-per-task={resources.cpus}"]
 
 
-def batch_script(command: Command, settings: SlurmSettings) -> str:
+def sbatch_directives(command: Command, settings: SlurmSettings) -> list[str]:
     """
-    Write the batch script for one job.
-
-    Resources come from the task catalog; ``--time`` lets Slurm itself
-    stop the job at its limit. The command's exit code is saved to
-    ``.af_exit`` for clusters without accounting.
+    One job's ``#SBATCH`` options: its name, folder and log, its
+    resources from the task catalog (``--time`` lets Slurm itself stop
+    the job at its limit), then the cluster's own options.
 
     :param command: What to run.
     :type command: Command
-    :param settings: Cluster-specific options and setup lines.
+    :param settings: Cluster-specific options.
     :type settings: SlurmSettings
-    :return: Script text.
-    :rtype: str
+    :return: The options.
+    :rtype: list[str]
     """
     resources = command.resources
-    directives = [
+    return [
         f"--job-name={command.name}",
         f"--chdir={command.workspace}",
         f"--output={command.log_path}",
@@ -126,19 +125,49 @@ def batch_script(command: Command, settings: SlurmSettings) -> str:
         f"--time={resources.walltime_minutes}",
         *settings.options,
     ]
+
+
+def script_header(command: Command, settings: SlurmSettings) -> list[str]:
+    """
+    The start of a batch script: a login shell (on most clusters
+    ``module`` exists only there, and the setup lines usually load
+    modules), the ``#SBATCH`` options, then threads per process, set
+    before the setup lines so a module can still change it.
+
+    :param command: What to run.
+    :type command: Command
+    :param settings: Cluster-specific options.
+    :type settings: SlurmSettings
+    :return: Script lines.
+    :rtype: list[str]
+    """
+    directives = sbatch_directives(command, settings)
+    threads = OMP_THREADS_MPI if command.resources.mpi else OMP_THREADS
+    return [
+        LOGIN_SHELL,
+        *(f"#SBATCH {directive}" for directive in directives),
+        f"export OMP_NUM_THREADS={threads}",
+    ]
+
+
+def batch_script(command: Command, settings: SlurmSettings) -> str:
+    """
+    Write the batch script for one job. The command's exit code is
+    saved to ``.af_exit`` for clusters without accounting.
+
+    :param command: What to run.
+    :type command: Command
+    :param settings: Cluster-specific options and setup lines.
+    :type settings: SlurmSettings
+    :return: Script text.
+    :rtype: str
+    """
     exports = [
         f"export {name}={shlex.quote(value)}"
         for name, value in command.environment.items()
     ]
-    threads = OMP_THREADS_MPI if resources.mpi else OMP_THREADS
     lines = [
-        # A login shell: on most clusters ``module`` exists only there,
-        # and the setup lines usually load modules.
-        "#!/bin/bash -l",
-        *(f"#SBATCH {directive}" for directive in directives),
-        # Threads per process; set before the setup lines so a module
-        # can still change it.
-        f"export OMP_NUM_THREADS={threads}",
+        *script_header(command, settings),
         *settings.setup_lines,
         *exports,
         shlex.join(command.argv),
@@ -165,12 +194,7 @@ async def run_slurm(
     :raises TimeoutError: If the command takes too long.
     :raises OSError: If the command cannot be started (not installed).
     """
-    process = await asyncio.create_subprocess_exec(
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=settings.environment,
-    )
+    process = await start_slurm(args, settings)
     try:
         stdout, stderr = await asyncio.wait_for(
             process.communicate(), settings.command_timeout
@@ -182,6 +206,28 @@ async def run_slurm(
         await process.wait()
         raise
     return process.returncode, stdout.decode(), stderr.decode()
+
+
+async def start_slurm(
+    args: list[str], settings: SlurmSettings
+) -> asyncio.subprocess.Process:
+    """
+    Start one Slurm command, its output captured.
+
+    :param args: Command and arguments.
+    :type args: list[str]
+    :param settings: Holds the environment.
+    :type settings: SlurmSettings
+    :return: The running command.
+    :rtype: asyncio.subprocess.Process
+    :raises OSError: If the command cannot be started (not installed).
+    """
+    return await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=settings.environment,
+    )
 
 
 def parse_queue(text: str) -> dict[str, str]:

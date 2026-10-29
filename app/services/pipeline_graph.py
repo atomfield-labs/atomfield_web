@@ -8,26 +8,14 @@ parents have all been taken. Nodes never taken wait on each other, in
 a cycle.
 """
 
-from collections import Counter, deque
-from collections.abc import Iterable
+from collections import deque
 
 from app.api.errors import bad_request
+from app.core.names import given_twice
 from app.schemas.job import JobEdge, JobNode, PipelineSubmitRequest
 
 EMPTY_MESSAGE = "Cannot submit empty pipeline; at least one node required."
 CYCLE_MESSAGE = "Pipeline graph contains a cycle; must be a valid DAG."
-
-
-def given_twice(names: Iterable[str]) -> list[str]:
-    """
-    The names that appear more than once, in the order first given.
-
-    :param names: Node ids or edges.
-    :type names: Iterable[str]
-    :return: Each repeated name once.
-    :rtype: list[str]
-    """
-    return [name for name, count in Counter(names).items() if count > 1]
 
 
 def edge_name(edge: JobEdge) -> str:

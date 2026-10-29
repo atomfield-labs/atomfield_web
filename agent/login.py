@@ -19,7 +19,12 @@ from typing import Any
 import httpx
 
 from agent.client import TokenRefusedError
-from agent.config import agent_command, read_settings, write_settings
+from agent.config import (
+    RunnerKind,
+    agent_command,
+    read_settings,
+    write_settings,
+)
 
 CHECK_SECONDS = 10.0
 # Setting -> question, in the order they are asked.
@@ -47,7 +52,9 @@ def suggested_settings(existing: dict[str, Any]) -> dict[str, Any]:
     :rtype: dict[str, Any]
     """
     guesses = {
-        "runner": "slurm" if shutil.which("sbatch") else "process",
+        "runner": RunnerKind.SLURM
+        if shutil.which("sbatch")
+        else RunnerKind.PROCESS,
         "work_folder": str(Path.home() / "atomfield"),
         "python": sys.executable,
         # No guess for the copy address: this machine's own name (a
@@ -136,7 +143,7 @@ def ask_missing(
     if "token" not in given:
         answer = ask_secret("Agent token (from the web app, hidden): ")
         settings["token"] = answer.strip() or settings.get("token", "")
-    if settings["runner"] == "slurm":
+    if settings["runner"] == RunnerKind.SLURM:
         ask_slurm(settings, given, ask)
 
 

@@ -34,7 +34,11 @@ from app.models.compute_target import HOUSE_TARGET_ID
 from app.models.job import Job, JobDependency
 from app.models.run import Run
 from app.queue.job_queue import RedisJobQueue
-from app.runs.states import NOT_STARTED_STATUSES, JobStatus
+from app.runs.states import (
+    CANCELLED_MESSAGE,
+    NOT_STARTED_STATUSES,
+    JobStatus,
+)
 from app.runs.transitions import (
     fresh_rows,
     held_by,
@@ -45,7 +49,6 @@ from app.runs.transitions import (
 
 UPSTREAM_FAILED_MESSAGE = "Upstream dependency failed"
 UPSTREAM_CANCELLED_MESSAGE = "Upstream job was cancelled"
-CANCELLED_MESSAGE = "Cancelled by request"
 # What a job's descendants become when it ends without succeeding.
 DESCENDANT_STATUS = {
     JobStatus.FAILED: (JobStatus.UPSTREAM_FAILED, UPSTREAM_FAILED_MESSAGE),

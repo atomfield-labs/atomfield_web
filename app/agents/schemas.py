@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.catalog.models import TaskDefinition
 from app.core.names import version_label
+from app.runs.states import JobStatus
 
 MAX_CLAIM_WAIT_SECONDS = 30.0
 # Small files the UI shows, uploaded when a job ends: how many, and
@@ -297,7 +298,7 @@ class CompletionRequest(BaseModel):
     """
 
     attempt: int
-    outcome: Literal["succeeded", "failed", "cancelled"]
+    outcome: Literal[JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED]
     output_data: dict[str, Any] | None = None
     error_message: str | None = None
     execution_time_seconds: float | None = None

@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from app.catalog.argv import Invocation, build_argv
 from app.catalog.catalog import Catalog, UnknownTaskError
-from app.catalog.models import CatalogDocument
+from app.catalog.models import CatalogDocument, InputPort
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "catalog.json"
 REAL_CATALOG = Path(__file__).resolve().parents[1] / "scripts_repo"
@@ -334,3 +334,14 @@ def test_unvalidated_bookkeeping_never_reaches_the_command(catalog: Catalog):
     )
     assert "secret_pipeline" not in argv
     assert "-pipeline_id" not in argv
+
+
+def test_an_input_takes_files_by_their_extension_in_any_case():
+    """
+    A file's type is its extension, in any case; a name without one
+    (``xyz``) has no type, so no input takes it.
+    """
+    port = InputPort(name="structure", flag="-in", formats=["xyz"])
+    assert port.takes("water.XYZ")
+    assert not port.takes("xyz")
+    assert not port.takes("water.pdb")

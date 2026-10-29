@@ -9,6 +9,10 @@ finished job starting again, say) cannot be written by any code path.
 from enum import StrEnum
 from types import MappingProxyType
 
+# What a job cancelled by its owner says; the agent says it too, for
+# a running job it stopped on request.
+CANCELLED_MESSAGE = "Cancelled by request"
+
 
 class JobStatus(StrEnum):
     """

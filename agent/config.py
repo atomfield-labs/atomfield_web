@@ -30,6 +30,7 @@ import sys
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,8 @@ STATE_FILE_NAME = "agent-state.json"
 AGENT_COMMAND_VARIABLE = "ATOMFIELD_AGENT_COMMAND"
 DEFAULT_AGENT_COMMAND = "python -m agent"
 SLURM_TABLE = "slurm"
+# Settings without which the agent cannot reach its server.
+REQUIRED_SETTINGS = ("api_url", "token")
 # Environment variable -> setting; the environment wins over the file.
 ENVIRONMENT_SETTINGS = {
     "ATOMFIELD_API_URL": "api_url",
@@ -58,6 +61,15 @@ ENVIRONMENT_SETTINGS = {
     "ATOMFIELD_SSH_ADDRESS": "ssh_address",
     "ATOMFIELD_DELETE_AFTER_UPLOAD": "delete_after_upload",
 }
+
+
+class RunnerKind(StrEnum):
+    """
+    How the agent starts jobs.
+    """
+
+    PROCESS = "process"  # as its own child processes
+    SLURM = "slurm"  # through the cluster's scheduler
 
 
 class MissingSettingError(KeyError):
@@ -99,9 +111,9 @@ class AgentConfig:
     :param delete_after_upload: Remove a run's folder once its zip is
         uploaded (the house agent: our disk, not the user's).
     :type delete_after_upload: bool
-    :param runner: ``process`` (jobs are the agent's children) or
-        ``slurm`` (jobs go to the cluster's scheduler).
-    :type runner: str
+    :param runner: How jobs start: as the agent's children, or
+        through Slurm.
+    :type runner: RunnerKind
     :param slurm: How this cluster wants jobs submitted.
     :type slurm: SlurmSettings
     """
@@ -117,7 +129,7 @@ class AgentConfig:
     claim_wait_seconds: float = 25.0
     ssh_address: str | None = None
     delete_after_upload: bool = False
-    runner: str = "process"
+    runner: RunnerKind = RunnerKind.PROCESS
     slurm: SlurmSettings = field(default_factory=SlurmSettings)
 
     @property
@@ -171,42 +183,129 @@ class AgentConfig:
         :rtype: AgentConfig
         :raises MissingSettingError: If the API address or token is
             missing.
+        :raises ValueError: For a runner that does not exist.
         """
-        for required in ("api_url", "token"):
-            if not settings.get(required):
-                command = agent_command(os.environ)
-                raise MissingSettingError(
-                    f"No {required} set: run '{command} login' first"
-                )
+        require_settings(settings)
         defaults = cls(api_url="", token="")
-        work = settings.get("work_folder")
-        work_folder = Path(work).expanduser() if work else None
-        artifacts = settings.get("artifacts_dir") or work_folder
-        state = settings.get("state_file") or (
-            work_folder / STATE_FILE_NAME if work_folder else None
-        )
-        return cls(
-            api_url=str(settings["api_url"]).rstrip("/"),
-            token=str(settings["token"]),
-            max_jobs=int(settings.get("max_jobs", defaults.max_jobs)),
-            python_bin=str(settings.get("python", defaults.python_bin)),
-            pack_source_dir=optional_path(settings.get("pack_dir")),
-            artifacts_dir=Path(
-                artifacts or defaults.artifacts_dir
-            ).expanduser(),
-            state_file=Path(state or defaults.state_file).expanduser(),
-            ssh_address=settings.get("ssh_address") or None,
-            delete_after_upload=str(
-                settings.get("delete_after_upload", "")
-            ).lower()
-            in TRUE_WORDS,
-            runner=str(settings.get("runner", defaults.runner)),
-            slurm=SlurmSettings(
-                options=list(settings.get("slurm_options", [])),
-                setup_lines=list(settings.get("slurm_setup", [])),
-                poll_seconds=float(settings.get("slurm_poll_seconds", 15.0)),
-            ),
-        )
+        return cls(**config_values(settings, defaults))
+
+
+def require_settings(settings: Mapping[str, Any]) -> None:
+    """
+    Refuse settings without the API address or the token.
+
+    :param settings: Settings by name.
+    :type settings: Mapping[str, Any]
+    :raises MissingSettingError: Naming the first one missing.
+    """
+    for required in REQUIRED_SETTINGS:
+        if not settings.get(required):
+            command = agent_command(os.environ)
+            raise MissingSettingError(
+                f"No {required} set: run '{command} login' first"
+            )
+
+
+def config_values(
+    settings: Mapping[str, Any], defaults: AgentConfig
+) -> dict[str, Any]:
+    """
+    Each configuration value from the settings, or its default.
+
+    :param settings: Settings by name, the required ones present.
+    :type settings: Mapping[str, Any]
+    :param defaults: A configuration holding every default.
+    :type defaults: AgentConfig
+    :return: Field -> value, for ``AgentConfig``.
+    :rtype: dict[str, Any]
+    """
+    artifacts, state = folders(settings, defaults)
+    return {
+        "api_url": str(settings["api_url"]).rstrip("/"),
+        "token": str(settings["token"]),
+        "max_jobs": int(settings.get("max_jobs", defaults.max_jobs)),
+        "python_bin": str(settings.get("python", defaults.python_bin)),
+        "pack_source_dir": optional_path(settings.get("pack_dir")),
+        "artifacts_dir": artifacts,
+        "state_file": state,
+        "ssh_address": settings.get("ssh_address") or None,
+        "delete_after_upload": is_true(settings.get("delete_after_upload")),
+        "runner": runner_kind(settings.get("runner", defaults.runner)),
+        "slurm": slurm_settings(settings),
+    }
+
+
+def folders(
+    settings: Mapping[str, Any], defaults: AgentConfig
+) -> tuple[Path, Path]:
+    """
+    Where jobs run and where the agent keeps its state: under the work
+    folder, unless each is set on its own.
+
+    :param settings: Settings by name.
+    :type settings: Mapping[str, Any]
+    :param defaults: A configuration holding every default.
+    :type defaults: AgentConfig
+    :return: The jobs' root folder and the state file.
+    :rtype: tuple[Path, Path]
+    """
+    work = settings.get("work_folder")
+    work_folder = Path(work).expanduser() if work else None
+    artifacts = settings.get("artifacts_dir") or work_folder
+    state = settings.get("state_file") or (
+        work_folder / STATE_FILE_NAME if work_folder else None
+    )
+    artifacts_dir = Path(artifacts or defaults.artifacts_dir).expanduser()
+    return artifacts_dir, Path(state or defaults.state_file).expanduser()
+
+
+def slurm_settings(settings: Mapping[str, Any]) -> SlurmSettings:
+    """
+    How this cluster wants jobs submitted: the ``[slurm]`` table, read
+    as ``slurm_<key>`` settings.
+
+    :param settings: Settings by name.
+    :type settings: Mapping[str, Any]
+    :return: Slurm settings, defaults for those not set.
+    :rtype: SlurmSettings
+    """
+    defaults = SlurmSettings()
+    poll = settings.get("slurm_poll_seconds", defaults.poll_seconds)
+    return SlurmSettings(
+        options=list(settings.get("slurm_options", defaults.options)),
+        setup_lines=list(settings.get("slurm_setup", defaults.setup_lines)),
+        poll_seconds=float(poll),
+    )
+
+
+def is_true(value: Any) -> bool:
+    """
+    Whether a yes-or-no setting says yes (``1``, ``true`` or ``yes``,
+    in any case; a TOML ``true`` too).
+
+    :param value: The setting's value, if any.
+    :type value: Any
+    :return: True for yes.
+    :rtype: bool
+    """
+    return str(value or "").lower() in TRUE_WORDS
+
+
+def runner_kind(value: Any) -> RunnerKind:
+    """
+    The runner a setting names.
+
+    :param value: The setting's value.
+    :type value: Any
+    :return: The runner.
+    :rtype: RunnerKind
+    :raises ValueError: Naming the runners there are.
+    """
+    try:
+        return RunnerKind(value)
+    except ValueError:
+        kinds = " or ".join(RunnerKind)
+        raise ValueError(f"runner must be {kinds}, not {value!r}") from None
 
 
 def optional_path(value: Any) -> Path | None:

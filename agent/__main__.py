@@ -24,6 +24,7 @@ from agent.client import AgentClient, TokenRefusedError
 from agent.config import (
     AgentConfig,
     MissingSettingError,
+    RunnerKind,
     agent_command,
     settings_path,
 )
@@ -33,6 +34,32 @@ from agent.slurm import SlurmRunner
 from agent.state import StateFile
 from app.core.cli import EXIT_FAILED, EXIT_OK, fail, stops_cleanly
 
+DESCRIPTION = "The AtomField agent: runs your jobs on this machine."
+CONFIG_HELP = "Settings file (default: ~/.config/atomfield/agent.toml)"
+# Commands besides login, and what each does.
+COMMAND_HELP = {
+    "run": "Run in this terminal.",
+    "start": "Run in the background (survives logging out).",
+    "stop": "Stop it; Slurm jobs keep running.",
+    "status": "Is it running, and what is it doing?",
+}
+# login's options; any left out are asked for.
+LOGIN_OPTIONS: dict[str, dict] = {
+    "--api-url": {},
+    "--token": {},
+    "--work-folder": {},
+    "--python": {},
+    "--ssh-address": {},
+    "--pack-dir": {
+        "help": "Run your own copy of the scripts (folder holding "
+        "afscripts) instead of the releases the server names"
+    },
+    "--runner": {"choices": list(RunnerKind)},
+    "--max-jobs": {"type": int},
+    "--slurm-option": {"action": "append", "help": "e.g. --account=x"},
+    "--setup": {"action": "append", "help": "Shell line run before each job"},
+    "--yes": {"action": "store_true", "help": "Ask nothing; use the defaults"},
+}
 REFUSED_TOKEN_HELP = (
     "The API refused this agent's token: the cluster was removed in the "
     "web app, or its token was replaced. Make a new token there, then "
@@ -67,7 +94,7 @@ def make_runner(config: AgentConfig) -> Runner:
     :return: Slurm or local-process runner.
     :rtype: Runner
     """
-    if config.runner == "slurm":
+    if config.runner == RunnerKind.SLURM:
         return SlurmRunner(config.slurm)
     return ProcessRunner()
 
@@ -232,6 +259,22 @@ COMMANDS = {
 }
 
 
+def common_options() -> argparse.ArgumentParser:
+    """
+    The options every command takes. A command's own default would
+    overwrite a ``--config`` given before it, so commands leave the
+    value alone (``SUPPRESS``).
+
+    :return: Parser holding them, for ``parents``.
+    :rtype: argparse.ArgumentParser
+    """
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--config", type=Path, default=argparse.SUPPRESS, help=CONFIG_HELP
+    )
+    return common
+
+
 def build_parser() -> argparse.ArgumentParser:
     """
     Describe the command line.
@@ -239,36 +282,23 @@ def build_parser() -> argparse.ArgumentParser:
     :return: Parser for ``python -m agent``.
     :rtype: argparse.ArgumentParser
     """
-    # A subcommand's own default would overwrite a --config given
-    # before it, so subcommands leave the value alone (SUPPRESS).
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument(
-        "--config",
-        type=Path,
-        default=argparse.SUPPRESS,
-        help="Settings file (default: ~/.config/atomfield/agent.toml)",
-    )
+    common = common_options()
     parser = argparse.ArgumentParser(
-        prog=agent_command(os.environ),
-        description="The AtomField agent: runs your jobs on this machine.",
+        prog=agent_command(os.environ), description=DESCRIPTION
     )
     parser.add_argument("--config", type=Path, default=None)
     commands = parser.add_subparsers(dest="command")
-    commands.add_parser("run", parents=[common], help="Run in this terminal.")
     add_login_parser(commands, common)
-    for name, text in (
-        ("start", "Run in the background (survives logging out)."),
-        ("stop", "Stop it; Slurm jobs keep running."),
-        ("status", "Is it running, and what is it doing?"),
-    ):
+    for name, text in COMMAND_HELP.items():
         commands.add_parser(name, parents=[common], help=text)
+    # Started by "start", never by a person: no help line.
     commands.add_parser("supervise", parents=[common])
     return parser
 
 
 def add_login_parser(commands, common: argparse.ArgumentParser) -> None:
     """
-    Describe ``login``'s options; any left out are asked for.
+    Describe ``login`` and its options (``LOGIN_OPTIONS``).
 
     :param commands: The subcommand registry.
     :type commands: argparse._SubParsersAction
@@ -278,30 +308,8 @@ def add_login_parser(commands, common: argparse.ArgumentParser) -> None:
     login_parser = commands.add_parser(
         "login", parents=[common], help="Save this machine's settings."
     )
-    for flag in (
-        "--api-url",
-        "--token",
-        "--work-folder",
-        "--python",
-        "--ssh-address",
-    ):
-        login_parser.add_argument(flag)
-    login_parser.add_argument(
-        "--pack-dir",
-        help="Run your own copy of the scripts (folder holding afscripts) "
-        "instead of the releases the server names",
-    )
-    login_parser.add_argument("--runner", choices=["slurm", "process"])
-    login_parser.add_argument("--max-jobs", type=int)
-    login_parser.add_argument(
-        "--slurm-option", action="append", help="e.g. --account=x"
-    )
-    login_parser.add_argument(
-        "--setup", action="append", help="Shell line run before each job"
-    )
-    login_parser.add_argument(
-        "--yes", action="store_true", help="Ask nothing; use the defaults"
-    )
+    for flag, options in LOGIN_OPTIONS.items():
+        login_parser.add_argument(flag, **options)
 
 
 @stops_cleanly("Stopped.")

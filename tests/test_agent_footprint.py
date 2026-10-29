@@ -24,6 +24,8 @@ APP_FILES = {
     "app/core/cli.py",
     "app/core/fingerprints.py",
     "app/core/names.py",
+    "app/runs/__init__.py",
+    "app/runs/states.py",
 }
 SERVER_PACKAGES = {"alembic", "asyncpg", "fastapi", "redis", "sqlalchemy"}
 PROBE = """
