@@ -28,8 +28,8 @@ def test_cards_cover_subfolders_but_not_parents_or_hidden_files(
     tmp_path: Path,
 ):
     """
-    Nested outputs are carded; ``upstream/`` links and hidden files
-    (half-written downloads) are not.
+    Nested outputs are carded; ``upstream/`` links, links to a
+    parent's files and hidden files (half-written downloads) are not.
 
     :param tmp_path: A job folder.
     :type tmp_path: Path
@@ -43,6 +43,7 @@ def test_cards_cover_subfolders_but_not_parents_or_hidden_files(
     (parent / "opt.xyz").write_text("parent")
     (tmp_path / "upstream").mkdir()
     (tmp_path / "upstream" / "opt").symlink_to(parent)
+    (tmp_path / "opt.xyz").symlink_to(parent / "opt.xyz")
 
     cards = file_cards(tmp_path)
 

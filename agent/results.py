@@ -54,8 +54,9 @@ def sha256_of(path: Path) -> str:
 
 def file_cards(workspace: Path) -> list[FileCard]:
     """
-    Card every file in a job's folder, walking subfolders but not the
-    ``upstream/`` links (those are the parents' files) or hidden files.
+    Card every file in a job's folder, walking subfolders but not
+    links (``upstream/`` and any other link point at earlier jobs'
+    files, carded there) or hidden files.
 
     Slow for large outputs (hashing reads every byte): run it in a
     thread so heartbeats continue meanwhile.
@@ -71,7 +72,7 @@ def file_cards(workspace: Path) -> list[FileCard]:
             subfolders.remove(UPSTREAM_DIR)
         for name in names:
             path = Path(folder) / name
-            if name.startswith(".") or not path.is_file():
+            if name.startswith(".") or path.is_symlink() or not path.is_file():
                 continue
             cards.append(
                 FileCard(

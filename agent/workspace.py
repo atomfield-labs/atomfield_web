@@ -233,10 +233,14 @@ def success_output(
     :return: Output payload for the job record.
     :rtype: dict[str, Any]
     """
+    # A link is an earlier job's file (a later step reading it), not
+    # an output of this one.
     artifacts = sorted(
         item.name
         for item in workspace.iterdir()
-        if item.is_file() and not item.name.startswith(".")
+        if item.is_file()
+        and not item.is_symlink()
+        and not item.name.startswith(".")
     )
     script_log = f"{task_id}.log"
     has_script_log = (workspace / script_log).exists()

@@ -7,12 +7,12 @@ import {
   PanelLeftOpen,
 } from 'lucide-react';
 import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
+import type { TemplateName } from '../../api/services';
 import type { TaskDefinition } from '../../types/api';
 import { groupByCategory } from '../../utils/taskCatalog';
 
 interface LeftSidebarProps {
-  onLoadModularWorkflow?: () => void;
-  onLoadFlashWorkflow?: () => void;
+  onLoadTemplate?: (template: TemplateName) => void;
 }
 
 interface SidebarItem {
@@ -21,8 +21,8 @@ interface SidebarItem {
   filename?: string;
   description: string;
   isStructure?: boolean;
-  isWorkflow?: boolean;
-  workflowType?: 'flash' | 'pipe';
+  // A ready-made pipeline: clicking it replaces the canvas.
+  template?: TemplateName;
   task?: TaskDefinition;
 }
 
@@ -58,8 +58,7 @@ const PREBUILT_DRIVERS: PaletteCategory = {
       description:
         'Fast monolithic prebuilt run: parallel MD replicates & reaction ' +
         'network graph extraction. Click to switch pipeline.',
-      isWorkflow: true,
-      workflowType: 'flash',
+      template: 'nanoreactor',
     },
     {
       id: 'modular_nanoreactor',
@@ -69,8 +68,18 @@ const PREBUILT_DRIVERS: PaletteCategory = {
         '2D decomposed 5-node reaction discovery pipeline: xTB Opt -> ' +
         'xTB MD -> Reaction Network -> SevenNet Refine -> TS Search. ' +
         'Click to switch pipeline.',
-      isWorkflow: true,
-      workflowType: 'pipe',
+      template: 'nanoreactor_modular',
+    },
+    {
+      id: 'ahc_pipeline',
+      title: 'Anomalous Hall (AHC)',
+      filename: 'ahc',
+      description:
+        'Four-step anomalous Hall conductivity pipeline: QE SCF with ' +
+        'spin-orbit -> NSCF on the full k-mesh -> Wannier90 -> postw90 ' +
+        'Berry curvature. Set up for bcc Fe; swap in your own ' +
+        'structure. Click to switch pipeline.',
+      template: 'ahc',
     },
   ],
 };
@@ -108,8 +117,7 @@ interface TooltipState {
 }
 
 export default function LeftSidebar({
-  onLoadModularWorkflow,
-  onLoadFlashWorkflow,
+  onLoadTemplate,
 }: LeftSidebarProps = {}) {
   const { tasks, isLoading } = useTaskDefinitions();
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
@@ -137,11 +145,6 @@ export default function LeftSidebar({
       );
       event.dataTransfer.setData('scriptName', 'Structure Input');
       event.dataTransfer.effectAllowed = 'move';
-      return;
-    }
-
-    if (item.isWorkflow && onLoadModularWorkflow) {
-      onLoadModularWorkflow();
       return;
     }
 
@@ -257,29 +260,25 @@ export default function LeftSidebar({
                           items.map((item) => (
                             <div
                               key={item.id}
-                              draggable={!item.isWorkflow}
+                              draggable={!item.template}
                               onDragStart={(e) => {
-                                if (!item.isWorkflow) {
+                                if (!item.template) {
                                   onDragStart(e, item);
                                 }
                               }}
                               onClick={() => {
-                                if (item.isWorkflow) {
-                                  if (item.workflowType === 'flash' && onLoadFlashWorkflow) {
-                                    onLoadFlashWorkflow();
-                                  } else if (item.workflowType === 'pipe' && onLoadModularWorkflow) {
-                                    onLoadModularWorkflow();
-                                  }
+                                if (item.template && onLoadTemplate) {
+                                  onLoadTemplate(item.template);
                                 }
                               }}
                               className={`group flex items-center justify-between px-2.5 py-1.5 rounded text-xs text-slate-700 hover:text-blue-950 hover:bg-blue-50/80 border border-transparent hover:border-blue-200/80 transition-colors select-none ${
-                                item.isWorkflow
+                                item.template
                                   ? 'cursor-pointer active:bg-blue-100/70 font-medium'
                                   : 'cursor-grab active:cursor-grabbing font-medium'
                               }`}
                             >
                               <div className="flex items-center gap-1.5 truncate">
-                                {item.isWorkflow && (
+                                {item.template && (
                                   <span className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" />
                                 )}
                                 <span className="truncate text-[11.5px] leading-snug">

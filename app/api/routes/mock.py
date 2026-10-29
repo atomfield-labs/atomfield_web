@@ -401,6 +401,130 @@ MODULAR_NANOREACTOR_BLUEPRINT = {
 }
 
 
+# Primitive bcc Fe (a = 2.8665 Å) as a minimal pw.x input, which the
+# SCF reads as a structure. Unlike a CIF it keeps the cell's
+# orientation: the cube's axes along x, y and z, so the magnetization
+# (along z) points along [001] and sigma_xy is the Hall conductivity
+# usually reported.
+FE_BCC_PRIMITIVE_IN = (
+    "&CONTROL\n"
+    "/\n"
+    "&SYSTEM\n"
+    "  ibrav = 0, nat = 1, ntyp = 1,\n"
+    "/\n"
+    "&ELECTRONS\n"
+    "/\n"
+    "ATOMIC_SPECIES\n"
+    "  Fe 55.845 Fe.UPF\n"
+    "CELL_PARAMETERS angstrom\n"
+    "   1.43325   1.43325   1.43325\n"
+    "  -1.43325   1.43325   1.43325\n"
+    "  -1.43325  -1.43325   1.43325\n"
+    "ATOMIC_POSITIONS crystal\n"
+    "  Fe 0.0 0.0 0.0\n"
+    "K_POINTS gamma\n"
+)
+FE_BCC_FILENAME = "fe_bcc_primitive.in"
+TEMPLATE_ROW_Y = 220
+
+
+def template_task_node(
+    task_id: str,
+    label: str,
+    x: int,
+    parameters: dict | None = None,
+    inputs: dict | None = None,
+) -> dict:
+    """
+    One task node of a pipeline template, in a row, keyed by its task
+    (so its job's folder is named after it). Parameters name only what
+    differs from the task's defaults; the editor fills in the rest
+    from the catalog.
+
+    :param task_id: Catalog task.
+    :type task_id: str
+    :param label: Name shown on the node.
+    :type label: str
+    :param x: Horizontal position on the canvas.
+    :type x: int
+    :param parameters: Values that differ from the defaults.
+    :type parameters: dict | None
+    :param inputs: Input port -> uploaded files.
+    :type inputs: dict | None
+    :return: The node.
+    :rtype: dict
+    """
+    values = parameters or {}
+    return {
+        "ui_id": task_id,
+        "id": task_id,
+        "script_name": task_id,
+        "label": label,
+        "status": "Ready",
+        "parameters": values,
+        "default_parameters": values,
+        "inputs": inputs or {},
+        "position": {"x": x, "y": TEMPLATE_ROW_Y},
+    }
+
+
+def template_edge(upstream: str, downstream: str) -> dict:
+    """
+    A link from one template node's right side to the next one's left.
+
+    :param upstream: Node the data comes from.
+    :type upstream: str
+    :param downstream: Node it goes to.
+    :type downstream: str
+    :return: The edge.
+    :rtype: dict
+    """
+    is_structure = upstream.startswith("structure")
+    return {
+        "id": f"e-{upstream}-{downstream}",
+        "upstream_ui_id": upstream,
+        "downstream_ui_id": downstream,
+        "source_handle": "structure-out" if is_structure else "source-right",
+        "target_handle": "target-left",
+    }
+
+
+# Anomalous Hall conductivity in four Quantum ESPRESSO and Wannier90
+# steps, set up for bcc Fe magnetized along z.
+AHC_BLUEPRINT = {
+    "nodes": [
+        {
+            "ui_id": "structure_fe",
+            "id": "structure_fe",
+            "type": "structure",
+            "filename": FE_BCC_FILENAME,
+            "workspace_path": f"/workspace/{FE_BCC_FILENAME}",
+            "format": "IN",
+            "formula": "Fe",
+            "atom_count": 1,
+            "raw_content": FE_BCC_PRIMITIVE_IN,
+            "position": {"x": 80, "y": TEMPLATE_ROW_Y},
+        },
+        template_task_node(
+            "ahc_scf",
+            "SCF with spin-orbit",
+            340,
+            {"magnetization": "Fe=0.5", "kmesh": "10 10 10"},
+            {"structure": [FE_BCC_FILENAME]},
+        ),
+        template_task_node("ahc_nscf", "NSCF on the full mesh", 600),
+        template_task_node("ahc_wannier", "Wannier90", 860),
+        template_task_node("ahc_berry", "Berry curvature & AHC", 1120),
+    ],
+    "edges": [
+        template_edge("structure_fe", "ahc_scf"),
+        template_edge("ahc_scf", "ahc_nscf"),
+        template_edge("ahc_nscf", "ahc_wannier"),
+        template_edge("ahc_wannier", "ahc_berry"),
+    ],
+}
+
+
 @router.get("/pipeline/nanoreactor/blueprint")
 async def get_blueprint() -> dict:
     """
@@ -423,6 +547,18 @@ async def get_modular_blueprint() -> dict:
     :rtype: dict
     """
     return MODULAR_NANOREACTOR_BLUEPRINT
+
+
+@router.get("/pipeline/ahc/blueprint")
+async def get_ahc_blueprint() -> dict:
+    """
+    Retrieve the four-step anomalous Hall conductivity pipeline (SCF,
+    NSCF, Wannier90, Berry curvature), set up for bcc Fe.
+
+    :return: Dictionary containing preconfigured nodes and edges.
+    :rtype: dict
+    """
+    return AHC_BLUEPRINT
 
 
 @router.get("/auth/quota")

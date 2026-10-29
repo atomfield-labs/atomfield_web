@@ -5,12 +5,14 @@ import GraphCanvas from './GraphCanvas';
 import InspectorDrawer from './InspectorDrawer';
 import EditorHeader from './EditorHeader';
 import { jobsService, pipelineService } from '../../api/services';
+import type { TemplateName } from '../../api/services';
 import { useQuota } from '../../hooks/useQuota';
 import { useBlueprint } from '../../hooks/useBlueprint';
 import { useSessionDraft, serializeGraphToBlueprint } from '../../hooks/useSessionDraft';
 import { useRunEvents } from '../../hooks/useRunEvents';
 import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
 import { buildPipelineSubmitPayload } from '../../utils/pipelinePayload';
+import { withCatalogDefaults } from '../../utils/templates';
 import type { SessionMetadata } from '../../types/api';
 
 export type { SessionMetadata };
@@ -275,31 +277,24 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
     }
   };
 
-  const handleLoadFlashWorkflow = useCallback(async () => {
-    try {
-      const flashBp = await pipelineService.getNanoreactorBlueprint();
-      setBlueprint(flashBp);
-      localStorage.setItem(
-        `atomfield_blueprint_${activeSessionId}`,
-        JSON.stringify(flashBp)
-      );
-    } catch (e) {
-      console.error('Failed to load flash nanoreactor workflow', e);
-    }
-  }, [activeSessionId, setBlueprint]);
-
-  const handleLoadModularWorkflow = useCallback(async () => {
-    try {
-      const modularBp = await pipelineService.getModularNanoreactorBlueprint();
-      setBlueprint(modularBp);
-      localStorage.setItem(
-        `atomfield_blueprint_${activeSessionId}`,
-        JSON.stringify(modularBp)
-      );
-    } catch (e) {
-      console.error('Failed to load modular nanoreactor workflow', e);
-    }
-  }, [activeSessionId, setBlueprint]);
+  // A ready-made pipeline replaces the canvas, its tasks' settings
+  // filled in from the catalog.
+  const handleLoadTemplate = useCallback(
+    async (template: TemplateName) => {
+      try {
+        const loaded = await pipelineService.getTemplateBlueprint(template);
+        const filled = withCatalogDefaults(loaded, taskById);
+        setBlueprint(filled);
+        localStorage.setItem(
+          `atomfield_blueprint_${activeSessionId}`,
+          JSON.stringify(filled)
+        );
+      } catch (e) {
+        console.error(`Failed to load the ${template} pipeline`, e);
+      }
+    },
+    [activeSessionId, setBlueprint, taskById]
+  );
 
   return (
     <div className="flex flex-col h-screen w-full bg-slate-50">
@@ -315,10 +310,7 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
 
       <div className="flex flex-1 overflow-hidden relative">
         <ReactFlowProvider>
-          <LeftSidebar
-            onLoadModularWorkflow={handleLoadModularWorkflow}
-            onLoadFlashWorkflow={handleLoadFlashWorkflow}
-          />
+          <LeftSidebar onLoadTemplate={handleLoadTemplate} />
 
           <div className="flex-1 h-full relative">
             {isLoadingBlueprint ? (
