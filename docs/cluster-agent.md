@@ -21,7 +21,7 @@ your cluster, and AtomField never sees your cluster password.
 
 ## 1. Copy the agent to the cluster
 
-The agent is the `agent` folder plus six small files of `app`;
+The agent is the `agent` folder plus a few small files of `app`;
 nothing else of AtomField runs on the cluster. From your own computer,
 in the AtomField folder (use what you type after `ssh`):
 
@@ -32,8 +32,13 @@ uv run --python 3.11 python -m agent.ship you@login.cluster.edu
 It copies exactly the files the agent loads into `~/atomfield/code`,
 replacing any older copy, and prints how many arrived.
 
-Run it again to update the agent later. If your cluster's
-SSH listens on another port, add a shortcut to `~/.ssh/config`:
+Run it again to update the agent later. A running agent keeps its
+old copy until you restart it on the cluster (`python -m agent stop`,
+then `start`; its Slurm jobs keep running meanwhile). Stopping the
+copy with Ctrl+C is safe: run the command again to finish it.
+
+If your cluster's SSH listens on another port, add a shortcut to
+`~/.ssh/config`:
 
 ```
 Host mycluster

@@ -1,8 +1,9 @@
 """
 What a cluster gets: ``python -m agent.ship`` copies the files the
-agent loads, which are its package and six small files of app, and
-nothing of the server (FastAPI, SQLAlchemy, Redis). Both tests run the
-agent in a fresh interpreter, as on a cluster.
+agent loads, which are its package and a few small files of app (the
+job contract, the catalog models, how commands end), and nothing of
+the server (FastAPI, SQLAlchemy, Redis). Both tests run the agent in a
+fresh interpreter, as on a cluster.
 """
 
 import json
@@ -19,6 +20,8 @@ APP_FILES = {
     "app/catalog/__init__.py",
     "app/catalog/argv.py",
     "app/catalog/models.py",
+    "app/core/__init__.py",
+    "app/core/cli.py",
 }
 SERVER_PACKAGES = {"alembic", "asyncpg", "fastapi", "redis", "sqlalchemy"}
 PROBE = """
@@ -52,9 +55,9 @@ def run_python(arguments: list[str], env: dict | None = None):
     )
 
 
-def test_the_agent_needs_only_its_package_and_six_app_files():
+def test_the_agent_needs_only_its_package_and_a_few_app_files():
     """
-    Outside ``agent/``, the agent loads exactly six files of app, and
+    Outside ``agent/``, the agent loads exactly these files of app, and
     no server package at all.
     """
     loaded = json.loads(run_python(["-c", PROBE]).stdout)

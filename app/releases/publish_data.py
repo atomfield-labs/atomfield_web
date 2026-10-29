@@ -22,6 +22,7 @@ from pathlib import Path
 
 import httpx
 
+from app.core.cli import stops_cleanly
 from app.core.config import settings
 from app.releases.publish import DEFAULT_API_URL, PublishError
 
@@ -251,6 +252,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+@stops_cleanly(
+    "Stopped. Publishing again is safe: unchanged files are not sent twice."
+)
 def main(argv: list[str] | None = None) -> int:
     """
     Command line: publish, and print what happened.

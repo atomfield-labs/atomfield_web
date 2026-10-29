@@ -7,6 +7,7 @@ with a supervisor that restarts it after a crash.
 import argparse
 import os
 import signal
+import threading
 import time
 from pathlib import Path
 
@@ -276,3 +277,78 @@ def test_start_status_restart_and_stop_in_the_background(tmp_path: Path):
     assert daemon.holder(work / daemon.SUPERVISOR_LOCK) is None
     assert daemon.holder(agent_lock) is None
     assert "not running" in daemon.status(config)[0]
+
+
+def test_a_restarted_agent_runs_the_copy_at_the_agent_path(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """
+    The supervisor starts each agent in the agent's folder by path, so
+    after ``agent.ship`` swaps the copy, a restart runs the new one
+    (the folder the supervisor started in no longer exists).
+
+    :param monkeypatch: Replaces starting a process.
+    :type monkeypatch: pytest.MonkeyPatch
+    """
+    started = []
+    stopping = threading.Event()
+
+    class FinishedAgent:
+        """
+        An agent that ends at once, and asks the loop to stop.
+        """
+
+        def __init__(self, command: list[str], **options) -> None:
+            """
+            :param command: The command line.
+            :type command: list[str]
+            :param options: How it is started.
+            :type options: Any
+            """
+            started.append(options)
+            stopping.set()
+
+        def wait(self) -> int:
+            """
+            :return: Its exit code.
+            :rtype: int
+            """
+            return 0
+
+    monkeypatch.setattr(daemon.subprocess, "Popen", FinishedAgent)
+    daemon.keep_running(stopping, [])
+
+    assert started == [{"cwd": daemon.REPO_ROOT}]
+
+
+def test_settings_are_swapped_in_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """
+    New settings are written beside the old file and swapped in, so a
+    write stopped before the swap leaves the old file (and its token)
+    as it was.
+
+    :param tmp_path: Empty folder.
+    :type tmp_path: Path
+    :param monkeypatch: Stops the write at the swap.
+    :type monkeypatch: pytest.MonkeyPatch
+    """
+    path = tmp_path / "agent.toml"
+    write_settings(path, settings_for(tmp_path))
+    before = path.read_text()
+
+    def stopped(*args) -> None:
+        """
+        Ctrl+C just before the swap.
+
+        :raises KeyboardInterrupt: Always.
+        """
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("agent.config.os.replace", stopped)
+    with pytest.raises(KeyboardInterrupt):
+        write_settings(path, {"api_url": "http://new", "token": "t"})
+
+    assert path.read_text() == before
+    assert oct(path.stat().st_mode & 0o777) == oct(0o600)

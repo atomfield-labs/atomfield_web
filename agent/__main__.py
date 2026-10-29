@@ -26,6 +26,7 @@ from agent.login import TokenRefusedError, login
 from agent.runner import ProcessRunner, Runner
 from agent.slurm import SlurmRunner
 from agent.state import StateFile
+from app.core.cli import stops_cleanly
 
 EXIT_OK = 0
 EXIT_FAILED = 1
@@ -158,6 +159,23 @@ def supervise_command(config: AgentConfig, path: Path) -> int:
     return EXIT_OK
 
 
+@stops_cleanly("Login stopped; nothing was saved.")
+def login_command(options: argparse.Namespace, path: Path) -> int:
+    """
+    Ask for, check and save this machine's settings. The file is
+    written only at the end, so stopping half-way changes nothing.
+
+    :param options: Parsed ``login`` arguments.
+    :type options: argparse.Namespace
+    :param path: Settings file.
+    :type path: Path
+    :return: Exit code.
+    :rtype: int
+    """
+    print("\n".join(login(options, path)))
+    return EXIT_OK
+
+
 COMMANDS = {
     "run": run_command,
     "start": start_command,
@@ -239,6 +257,7 @@ def add_login_parser(commands, common: argparse.ArgumentParser) -> None:
     )
 
 
+@stops_cleanly("Stopped.")
 def main(argv: list[str] | None = None) -> int:
     """
     Run one command.
@@ -253,8 +272,7 @@ def main(argv: list[str] | None = None) -> int:
     command = options.command or "run"
     try:
         if command == "login":
-            print("\n".join(login(options, path)))
-            return EXIT_OK
+            return login_command(options, path)
         config = AgentConfig.load(path)
         return COMMANDS[command](config, path)
     except (MissingSettingError, TokenRefusedError, ValueError) as error:

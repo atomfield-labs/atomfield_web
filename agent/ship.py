@@ -21,6 +21,7 @@ import tarfile
 from pathlib import Path
 
 import agent.__main__  # noqa: F401  (loads the whole agent)
+from app.core.cli import stops_cleanly
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 # Unpack beside the old copy, then swap: never half old, half new.
@@ -88,9 +89,14 @@ def ship(host: str) -> str:
     if done.returncode != 0:
         raise ShipError(done.stderr.decode(errors="replace").strip())
     landed = done.stdout.decode().strip()
-    return f"Copied {len(files)} files; {host}:~/atomfield/code has {landed}."
+    return (
+        f"Copied {len(files)} files; {host}:~/atomfield/code has {landed}.\n"
+        "A running agent keeps its old copy until restarted there: "
+        "python -m agent stop, then start."
+    )
 
 
+@stops_cleanly("Stopped. Run the same command again to copy the agent.")
 def main(argv: list[str] | None = None) -> int:
     """
     Command line: copy, and say what happened.

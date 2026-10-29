@@ -268,15 +268,14 @@ def toml_value(value: Any) -> str:
     return json.dumps(str(value), ensure_ascii=False)
 
 
-def write_settings(path: Path, settings: Mapping[str, Any]) -> None:
+def settings_text(settings: Mapping[str, Any]) -> str:
     """
-    Save flat settings as a TOML file readable only by its owner (it
-    holds the agent's token).
+    Flat settings as TOML text; ``slurm_<key>`` go into ``[slurm]``.
 
-    :param path: Settings file to write.
-    :type path: Path
-    :param settings: Settings; ``slurm_<key>`` go into ``[slurm]``.
+    :param settings: Settings; None values are left out.
     :type settings: Mapping[str, Any]
+    :return: The file's text.
+    :rtype: str
     """
     prefix = f"{SLURM_TABLE}_"
     plain = {
@@ -295,8 +294,25 @@ def write_settings(path: Path, settings: Mapping[str, Any]) -> None:
         lines += [
             f"{key} = {toml_value(value)}" for key, value in slurm.items()
         ]
+    return "\n".join(lines) + "\n"
+
+
+def write_settings(path: Path, settings: Mapping[str, Any]) -> None:
+    """
+    Save flat settings as a TOML file readable only by its owner (it
+    holds the agent's token). The new file is written beside the old
+    one and then swapped in whole, so a ``login`` stopped half-way
+    never leaves a half-written file, nor loses the saved token.
+
+    :param path: Settings file to write.
+    :type path: Path
+    :param settings: Settings; ``slurm_<key>`` go into ``[slurm]``.
+    :type settings: Mapping[str, Any]
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    partial = path.with_name(f".{path.name}.partial")
+    descriptor = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-        stream.write("\n".join(lines) + "\n")
-    path.chmod(0o600)
+        stream.write(settings_text(settings))
+    partial.chmod(0o600)
+    os.replace(partial, path)

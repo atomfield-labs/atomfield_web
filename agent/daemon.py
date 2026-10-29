@@ -240,7 +240,12 @@ def keep_running(
     delay = None
     while not stopping.is_set():
         began = time.monotonic()
-        child = subprocess.Popen([sys.executable, "-m", "agent", "run"])
+        # By path: after agent.ship swaps the copy, the folder this
+        # supervisor started in is gone, and a restart must find the
+        # new one.
+        child = subprocess.Popen(
+            [sys.executable, "-m", "agent", "run"], cwd=REPO_ROOT
+        )
         current[:] = [child]
         code = child.wait()
         if stopping.is_set():

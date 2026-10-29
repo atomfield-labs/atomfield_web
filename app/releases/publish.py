@@ -31,6 +31,7 @@ from pathlib import Path
 
 import httpx
 
+from app.core.cli import stops_cleanly
 from app.core.config import settings
 from app.releases.wheel import CATALOG_NAME, package_name
 
@@ -189,15 +190,18 @@ def upload(api_url: str, admin_key: str, wheel: Path, commit: str) -> str:
     :type commit: str
     :return: One line for the person publishing.
     :rtype: str
-    :raises PublishError: If the server refused it.
+    :raises PublishError: If the server refused it or was not there.
     """
-    response = httpx.post(
-        f"{api_url.rstrip('/')}/api/releases",
-        params={"git_commit": commit},
-        content=wheel.read_bytes(),
-        headers={"X-API-Key": admin_key},
-        timeout=UPLOAD_SECONDS,
-    )
+    try:
+        response = httpx.post(
+            f"{api_url.rstrip('/')}/api/releases",
+            params={"git_commit": commit},
+            content=wheel.read_bytes(),
+            headers={"X-API-Key": admin_key},
+            timeout=UPLOAD_SECONDS,
+        )
+    except httpx.HTTPError as error:
+        raise PublishError(f"Could not reach {api_url}: {error}") from error
     if response.status_code not in (200, 201):
         raise PublishError(f"The API refused it: {response.text}")
     release = response.json()
@@ -249,6 +253,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+@stops_cleanly(
+    "Stopped. Publishing again is safe: a published commit changes nothing."
+)
 def main(argv: list[str] | None = None) -> int:
     """
     Command line: publish, and print what happened.
