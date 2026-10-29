@@ -1,5 +1,6 @@
 """
-Plain names: one file or folder name that cannot point anywhere else.
+Names: which file and folder names are plain (one name that cannot
+point anywhere else), and how a published name and version is shown.
 
 Kept free of server imports: the server's file store, its submission
 checks and the agent's job folders all judge names by this one rule.
@@ -27,3 +28,18 @@ def is_plain_name(name: str) -> bool:
     if any(separator in name for separator in SEPARATORS):
         return False
     return all(char >= FIRST_PRINTABLE for char in name)
+
+
+def version_label(name: str, version: str) -> str:
+    """
+    How people see a published name and version (a release, a data
+    pack): ``afscripts 0.2.0``.
+
+    :param name: The name.
+    :type name: str
+    :param version: The version.
+    :type version: str
+    :return: The label.
+    :rtype: str
+    """
+    return f"{name} {version}"

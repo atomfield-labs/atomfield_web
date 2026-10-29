@@ -11,8 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.schemas import ReleaseRef
+from app.core.names import version_label
 from app.models.script_release import ScriptRelease
 from app.releases.data_packs import catalog_needs, missing_data_packs
+from app.releases.published import already_published
 from app.releases.wheel import (
     InvalidReleaseError,
     ReleaseContents,
@@ -24,12 +26,6 @@ from app.storage.store import ArtifactStore
 # Agents download a release right after claiming a job; an hour is
 # ample.
 RELEASE_LINK_SECONDS = 3600
-
-
-class ReleaseConflictError(ValueError):
-    """
-    This name and version were already published with other contents.
-    """
 
 
 async def latest_release(db: AsyncSession) -> ScriptRelease | None:
@@ -92,18 +88,15 @@ async def publish_release(
     :rtype: tuple[ScriptRelease, bool]
     :raises InvalidReleaseError: If agents could not run it, or a data
         pack it needs was never published.
-    :raises ReleaseConflictError: If its version exists with other
+    :raises PublishConflictError: If its version exists with other
         contents (a release never changes).
     """
     contents = read_release(data)
     await require_data_packs(db, contents)
     existing = await find_release(db, contents.name, contents.version)
-    if existing is not None:
-        if existing.sha256 != contents.sha256:
-            raise ReleaseConflictError(
-                f"{existing.label} was already published with other "
-                "contents; give the change a new version"
-            )
+    published = existing.sha256 if existing else None
+    label = version_label(contents.name, contents.version)
+    if already_published(published, contents.sha256, label):
         return existing, False
     # The file first: a failure before the commit leaves only a file
     # that nothing points to, which publishing it again rewrites.

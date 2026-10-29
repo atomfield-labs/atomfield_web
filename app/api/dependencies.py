@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.errors import not_found, unauthorized
 from app.core.config import settings
 from app.core.rate_limit import FixedWindowRateLimiter, RateLimit
-from app.core.security import hash_api_key
+from app.core.security import API_KEY_HEADER, hash_api_key
 from app.db.session import get_db
 from app.events.bus import EventBus
 from app.models.api_key import ApiKey
@@ -28,7 +28,7 @@ SECONDS_PER_HOUR = 3600
 
 
 MISSING_KEY_MESSAGE = (
-    "API key required. Please provide a valid 'X-API-Key' header."
+    f"API key required. Please provide a valid '{API_KEY_HEADER}' header."
 )
 INVALID_KEY_MESSAGE = "Invalid or deactivated API key."
 
@@ -112,7 +112,7 @@ async def get_current_catalog(
 
 
 async def get_current_api_key(
-    x_api_key: str | None = Header(None, alias="X-API-Key"),
+    x_api_key: str | None = Header(None, alias=API_KEY_HEADER),
     db: AsyncSession = Depends(get_db),
 ) -> ApiKey:
     """
@@ -171,7 +171,7 @@ async def mark_used(db: AsyncSession, api_key: ApiKey) -> None:
 
 
 async def get_optional_api_key(
-    x_api_key: str | None = Header(None, alias="X-API-Key"),
+    x_api_key: str | None = Header(None, alias=API_KEY_HEADER),
     db: AsyncSession = Depends(get_db),
 ) -> ApiKey | None:
     """

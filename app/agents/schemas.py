@@ -10,6 +10,7 @@ from typing import Any, Literal, Self
 from pydantic import BaseModel, Field
 
 from app.catalog.models import TaskDefinition
+from app.core.names import version_label
 
 MAX_CLAIM_WAIT_SECONDS = 30.0
 # Small files the UI shows, uploaded when a job ends: how many, and
@@ -62,6 +63,16 @@ class ArchiveRef(BaseModel):
         description="Fingerprint the downloaded file must match.",
     )
     url: str
+
+    @property
+    def label(self) -> str:
+        """
+        How people see the archive.
+
+        :return: Its name and version.
+        :rtype: str
+        """
+        return version_label(self.name, self.version)
 
 
 class ReleaseRef(ArchiveRef):

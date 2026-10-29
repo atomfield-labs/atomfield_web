@@ -2,7 +2,7 @@
 HTTP routes for runs: cancel a job or a run, and watch a run live.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from app.api.dependencies import (
     get_owned_run,
     get_store,
 )
+from app.api.errors import conflict
 from app.db.session import AsyncSessionLocal, get_db
 from app.events.bus import EventBus
 from app.events.changes import commit_and_publish
@@ -68,7 +69,7 @@ async def cancel_job(
     result = await request_cancel(db, job.id)
     await commit_and_publish(db, bus)
     if result is None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Job already finished")
+        raise conflict("Job already finished")
     return JobCancelResponse(job_id=job.id, status=CANCEL_RESULTS[result])
 
 
@@ -255,9 +256,7 @@ async def make_bundle(
     :raises HTTPException: 409 while the run is still running.
     """
     if run.finished_at is None:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "The run is still running"
-        )
+        raise conflict("The run is still running")
     await request_bundle(db, run.id)
     await db.commit()
     await db.refresh(run)

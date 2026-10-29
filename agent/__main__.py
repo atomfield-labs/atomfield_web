@@ -31,10 +31,8 @@ from agent.login import login
 from agent.runner import ProcessRunner, Runner
 from agent.slurm import SlurmRunner
 from agent.state import StateFile
-from app.core.cli import stops_cleanly
+from app.core.cli import EXIT_FAILED, EXIT_OK, fail, stops_cleanly
 
-EXIT_OK = 0
-EXIT_FAILED = 1
 REFUSED_TOKEN_HELP = (
     "The API refused this agent's token: the cluster was removed in the "
     "web app, or its token was replaced. Make a new token there, then "
@@ -325,8 +323,7 @@ def main(argv: list[str] | None = None) -> int:
         config = AgentConfig.load(path)
         return COMMANDS[command](config, path)
     except (MissingSettingError, TokenRefusedError, ValueError) as error:
-        print(f"Error: {error}", file=sys.stderr)
-        return EXIT_FAILED
+        return fail(error)
 
 
 if __name__ == "__main__":

@@ -23,29 +23,41 @@ same bytes, and the server keeps the release it already has.
 import argparse
 import shutil
 import subprocess
-import sys
 import tempfile
 import tomllib
 import zipfile
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
+from typing import Any
 
 import httpx
 
-from app.core.cli import stops_cleanly
+from app.core.cli import fail, print_outcome, stops_cleanly
 from app.core.config import settings
+from app.core.names import version_label
+from app.core.security import API_KEY_HEADER
+from app.releases.published import PublishConflictError
 from app.releases.wheel import CATALOG_NAME, package_name
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_REPO = REPO_ROOT / "scripts_repo"
 DEFAULT_API_URL = "http://localhost:8000"
+RELEASES_PATH = "/api/releases"
 UPLOAD_SECONDS = 120.0
 SHORT_COMMIT = 7
+# Answers that took a request: already there (or a listing), or new.
+ACCEPTED = (httpx.codes.OK, httpx.codes.CREATED)
 
 
 class PublishError(RuntimeError):
     """
     A step of publishing failed; the message says which and why.
     """
+
+
+# What publishing can fail with, each saying why in its message.
+PUBLISH_ERRORS = (PublishError, PublishConflictError)
 
 
 def run_tool(argv: list[str]) -> str:
@@ -176,6 +188,61 @@ def build_wheel(tree: Path, out: Path) -> Path:
     return wheels[0]
 
 
+def call_api(
+    send: Callable[..., httpx.Response],
+    api_url: str,
+    path: str,
+    **options: Any,
+) -> httpx.Response:
+    """
+    Send one request to the API. Not reaching it is a PublishError
+    naming it, not a connection traceback.
+
+    :param send: ``httpx.get`` or ``httpx.post``.
+    :type send: Callable[..., httpx.Response]
+    :param api_url: The API's address.
+    :type api_url: str
+    :param path: The route, e.g. ``/api/releases``.
+    :type path: str
+    :param options: For ``send``: body, headers, timeout...
+    :type options: Any
+    :return: The response.
+    :rtype: httpx.Response
+    :raises PublishError: If the API cannot be reached.
+    """
+    try:
+        return send(f"{api_url.rstrip('/')}{path}", **options)
+    except httpx.HTTPError as error:
+        raise PublishError(f"Could not reach {api_url}: {error}") from error
+
+
+def admin_headers(admin_key: str) -> dict[str, str]:
+    """
+    Headers that carry the administrator's key.
+
+    :param admin_key: The key.
+    :type admin_key: str
+    :return: The headers.
+    :rtype: dict[str, str]
+    """
+    return {API_KEY_HEADER: admin_key}
+
+
+def accepted(response: httpx.Response) -> Any:
+    """
+    The body of an answer that took the request (``ACCEPTED``).
+
+    :param response: The API's answer.
+    :type response: httpx.Response
+    :return: Its JSON body.
+    :rtype: Any
+    :raises PublishError: If the API refused it, with its reason.
+    """
+    if response.status_code not in ACCEPTED:
+        raise PublishError(f"The API refused it: {response.text}")
+    return response.json()
+
+
 def upload(api_url: str, admin_key: str, wheel: Path, commit: str) -> str:
     """
     Publish the wheel and describe what the server did.
@@ -192,21 +259,18 @@ def upload(api_url: str, admin_key: str, wheel: Path, commit: str) -> str:
     :rtype: str
     :raises PublishError: If the server refused it or was not there.
     """
-    try:
-        response = httpx.post(
-            f"{api_url.rstrip('/')}/api/releases",
-            params={"git_commit": commit},
-            content=wheel.read_bytes(),
-            headers={"X-API-Key": admin_key},
-            timeout=UPLOAD_SECONDS,
-        )
-    except httpx.HTTPError as error:
-        raise PublishError(f"Could not reach {api_url}: {error}") from error
-    if response.status_code not in (200, 201):
-        raise PublishError(f"The API refused it: {response.text}")
-    release = response.json()
-    label = f"{release['name']} {release['version']}"
-    if response.status_code == 200:
+    response = call_api(
+        httpx.post,
+        api_url,
+        RELEASES_PATH,
+        params={"git_commit": commit},
+        content=wheel.read_bytes(),
+        headers=admin_headers(admin_key),
+        timeout=UPLOAD_SECONDS,
+    )
+    release = accepted(response)
+    label = version_label(release["name"], release["version"])
+    if response.status_code == httpx.codes.OK:
         return f"{label} was already published; nothing changed."
     return f"Published {label} (sha256 {release['sha256'][:12]})."
 
@@ -234,6 +298,23 @@ def publish(repo: Path, ref: str, api_url: str, admin_key: str) -> str:
         label_version(tree, commit)
         wheel = build_wheel(tree, Path(scratch) / "dist")
         return upload(api_url, admin_key, wheel, commit)
+
+
+def run_with_admin_key(publishing: Callable[[str], str]) -> int:
+    """
+    Publish with the administrator's key (``ADMIN_API_KEY``), and print
+    what happened.
+
+    :param publishing: Publishes with the key it is given; returns
+        what happened.
+    :type publishing: Callable[[str], str]
+    :return: The command's exit code.
+    :rtype: int
+    """
+    admin_key = settings.ADMIN_API_KEY
+    if not admin_key:
+        return fail("set ADMIN_API_KEY")
+    return print_outcome(partial(publishing, admin_key), PUBLISH_ERRORS)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -266,16 +347,9 @@ def main(argv: list[str] | None = None) -> int:
     :rtype: int
     """
     options = build_parser().parse_args(argv)
-    admin_key = settings.ADMIN_API_KEY
-    if not admin_key:
-        print("Error: set ADMIN_API_KEY", file=sys.stderr)
-        return 1
-    try:
-        print(publish(options.repo, options.ref, options.api_url, admin_key))
-    except PublishError as error:
-        print(f"Error: {error}", file=sys.stderr)
-        return 1
-    return 0
+    return run_with_admin_key(
+        partial(publish, options.repo, options.ref, options.api_url)
+    )
 
 
 if __name__ == "__main__":

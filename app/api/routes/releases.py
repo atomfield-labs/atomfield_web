@@ -10,27 +10,21 @@ use.
 ``python -m app.releases.publish`` builds the wheel and does this.
 """
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    HTTPException,
-    Query,
-    Request,
-    Response,
-    status,
-)
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_store, require_admin_key
+from app.api.errors import conflict, too_large, unprocessable
 from app.db.session import get_db
 from app.models.api_key import ApiKey
-from app.releases.service import (
-    ReleaseConflictError,
-    latest_release,
-    publish_release,
+from app.releases.published import PublishConflictError
+from app.releases.service import latest_release, publish_release
+from app.releases.wheel import (
+    MAX_RELEASE_BYTES,
+    TOO_BIG_MESSAGE,
+    InvalidReleaseError,
 )
-from app.releases.wheel import MAX_RELEASE_BYTES, InvalidReleaseError
 from app.schemas.releases import ReleaseInfo
 from app.storage.store import ArtifactStore
 
@@ -38,14 +32,13 @@ router = APIRouter(prefix="/releases", tags=["Releases"])
 COMMIT_PATTERN = r"^[0-9a-f]{7,40}$"
 
 
-async def read_upload(request: Request, max_bytes: int) -> bytes:
+async def read_upload(request: Request) -> bytes:
     """
-    Read the request body, refusing it as soon as it grows too big.
+    Read a release from the request body, refusing it as soon as it
+    grows past ``MAX_RELEASE_BYTES``.
 
     :param request: The upload request.
     :type request: Request
-    :param max_bytes: Largest body accepted.
-    :type max_bytes: int
     :return: The body.
     :rtype: bytes
     :raises HTTPException: 413 if the body is too big.
@@ -53,11 +46,8 @@ async def read_upload(request: Request, max_bytes: int) -> bytes:
     received = bytearray()
     async for chunk in request.stream():
         received.extend(chunk)
-        if len(received) > max_bytes:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"A release may be at most {max_bytes} bytes",
-            )
+        if len(received) > MAX_RELEASE_BYTES:
+            raise too_large(TOO_BIG_MESSAGE)
     return bytes(received)
 
 
@@ -99,14 +89,14 @@ async def publish(
     :raises HTTPException: 422 for an unusable wheel, 409 for a
         version that exists with other contents.
     """
-    data = await read_upload(request, MAX_RELEASE_BYTES)
+    data = await read_upload(request)
     try:
         release, created = await publish_release(db, store, data, git_commit)
     except InvalidReleaseError as error:
-        raise HTTPException(422, detail=str(error)) from error
-    except (ReleaseConflictError, IntegrityError) as error:
+        raise unprocessable(str(error)) from error
+    except (PublishConflictError, IntegrityError) as error:
         # IntegrityError: the same version published at the same moment.
-        raise HTTPException(409, detail=str(error)) from error
+        raise conflict(str(error)) from error
     if not created:
         response.status_code = status.HTTP_200_OK
     return ReleaseInfo.model_validate(release)

@@ -8,6 +8,7 @@ import uuid
 from sqlalchemy import Column, DateTime, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
+from app.core.names import version_label
 from app.db.base import Base
 
 
@@ -49,4 +50,4 @@ class ScriptRelease(Base):
         :return: Name and version.
         :rtype: str
         """
-        return f"{self.name} {self.version}"
+        return version_label(self.name, self.version)

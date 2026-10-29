@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.catalog.catalog import Catalog
 from app.catalog.models import CatalogDocument
+from app.core.names import version_label
 from app.models.job import Job
 from app.models.run import Run
 from app.models.script_release import ScriptRelease
@@ -116,5 +117,5 @@ async def run_data_packs(
     for task_id in (await db.execute(query)).scalars():
         task = catalog.tasks.get(task_id)
         for need in task.data if task else ():
-            packs.add(f"{need.name} {need.version}")
+            packs.add(version_label(need.name, need.version))
     return sorted(packs)

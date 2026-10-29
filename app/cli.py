@@ -13,13 +13,13 @@ import argparse
 import asyncio
 
 from app.core.broker import create_redis
+from app.core.cli import EXIT_FAILED, EXIT_OK
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
 from app.main import create_store
 from app.services.job_service import clear_all_data
 
-EXIT_OK = 0
-EXIT_NOT_CONFIRMED = 1
+EXIT_NOT_CONFIRMED = EXIT_FAILED
 
 
 def build_parser() -> argparse.ArgumentParser:

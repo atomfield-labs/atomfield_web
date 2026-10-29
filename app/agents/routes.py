@@ -4,14 +4,7 @@ HTTP routes of the agent API. Every route requires an agent token.
 
 import uuid
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    HTTPException,
-    Request,
-    Response,
-    status,
-)
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.auth import get_agent_target
@@ -35,6 +28,7 @@ from app.agents.service import (
     report_completion,
     upload_links,
 )
+from app.api.errors import conflict, unprocessable
 from app.db.session import get_db
 from app.models.compute_target import ComputeTarget
 from app.storage.store import InvalidKeyError
@@ -156,10 +150,7 @@ async def complete(
     """
     completion = await report_completion(db, services, target, job_id, request)
     if completion is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="This attempt no longer owns the job; nothing recorded.",
-        )
+        raise conflict("This attempt no longer owns the job; nothing recorded.")
     return CompletionResponse(
         job_id=completion.job.id,
         status=completion.job.status,
@@ -197,14 +188,10 @@ async def uploads(
     try:
         links = await upload_links(db, services, target, job_id, request)
     except InvalidKeyError as error:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            f"Not a plain file name: {error}",
-        ) from None
+        raise unprocessable(f"Not a plain file name: {error}") from None
     if links is None:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "This attempt no longer owns the job; nothing to upload.",
+        raise conflict(
+            "This attempt no longer owns the job; nothing to upload."
         )
     return links
 
@@ -229,10 +216,9 @@ async def bundle(
     :type db: AsyncSession
     :return: Empty response.
     :rtype: Response
-    :raises HTTPException: 409 if this agent was not packing the run.
+    :raises HTTPException: 409 if the run's zip was not awaiting a
+        report from this agent.
     """
     if not await report_bundle(db, target, run_id, request):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "This run was not being packed here."
-        )
+        raise conflict("This run's zip was not awaiting a report from here.")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

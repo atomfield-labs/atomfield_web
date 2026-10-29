@@ -1,5 +1,6 @@
 """
-How AtomField's command-line programs end when a person stops them.
+How AtomField's command-line programs end: with their result, with
+one line saying what went wrong, or when a person stops them.
 
 Ctrl+C, or Ctrl+D at a question, means "stop", not "crash": the
 program says what that leaves undone and exits with the code shells
@@ -14,10 +15,46 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
+EXIT_OK = 0
+EXIT_FAILED = 1
 # What shells report for a program stopped by Ctrl+C (128 + SIGINT).
 EXIT_INTERRUPTED = 130
 
 CommandLine = Callable[..., int]
+
+
+def fail(message: object) -> int:
+    """
+    Say what went wrong in one line, and give the exit code for it.
+
+    :param message: What went wrong (an exception says it itself).
+    :type message: object
+    :return: ``EXIT_FAILED``.
+    :rtype: int
+    """
+    print(f"Error: {message}", file=sys.stderr)
+    return EXIT_FAILED
+
+
+def print_outcome(
+    action: Callable[[], str], errors: tuple[type[Exception], ...]
+) -> int:
+    """
+    Run a command's work and print the line it returns; an expected
+    error is printed as one line instead of a traceback.
+
+    :param action: The work; returns what happened, for the person.
+    :type action: Callable[[], str]
+    :param errors: The failures whose message says it all.
+    :type errors: tuple[type[Exception], ...]
+    :return: ``EXIT_OK``, or ``EXIT_FAILED`` after such an error.
+    :rtype: int
+    """
+    try:
+        print(action())
+    except errors as error:
+        return fail(error)
+    return EXIT_OK
 
 
 def stops_cleanly(message: str) -> Callable[[CommandLine], CommandLine]:

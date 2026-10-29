@@ -29,6 +29,7 @@ CATALOG_NAME = "catalog.json"
 DIST_INFO_SUFFIX = ".dist-info"
 PURE_PYTHON_TAG = "py3-none-any"
 MAX_RELEASE_BYTES = 20 * 1024 * 1024
+TOO_BIG_MESSAGE = f"A release may be at most {MAX_RELEASE_BYTES} bytes"
 SAFE_NAME = re.compile(PACKAGE_NAME_PATTERN)
 
 
@@ -70,9 +71,7 @@ def read_release(data: bytes) -> ReleaseContents:
     :raises InvalidReleaseError: If agents could not run it.
     """
     if len(data) > MAX_RELEASE_BYTES:
-        raise InvalidReleaseError(
-            f"A release may be at most {MAX_RELEASE_BYTES} bytes"
-        )
+        raise InvalidReleaseError(TOO_BIG_MESSAGE)
     archive = open_wheel(data)
     require_pure_python(wheel_fields(archive, "WHEEL"))
     metadata = wheel_fields(archive, "METADATA")

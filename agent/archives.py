@@ -10,7 +10,6 @@ keeps its files while newer jobs use newer ones.
 """
 
 import asyncio
-import hashlib
 import shutil
 import uuid
 import zipfile
@@ -20,9 +19,9 @@ from pathlib import Path
 
 from agent.workspace import require_plain_name
 from app.agents.schemas import ArchiveRef
+from app.core.fingerprints import file_sha256
 
 INCOMING_PREFIX = ".incoming-"
-HASH_CHUNK_BYTES = 1024 * 1024
 Download = Callable[[str, Path], Awaitable[None]]
 
 
@@ -44,9 +43,7 @@ class ArchiveUnavailableError(RuntimeError):
         :param error: Why the download failed.
         :type error: Exception
         """
-        super().__init__(
-            f"Could not download {archive.name} {archive.version}: {error}"
-        )
+        super().__init__(f"Could not download {archive.label}: {error}")
 
 
 def folder_name(archive: ArchiveRef) -> str:
@@ -62,22 +59,6 @@ def folder_name(archive: ArchiveRef) -> str:
     """
     short = archive.sha256[:12]
     return require_plain_name(f"{archive.name}-{archive.version}-{short}")
-
-
-def file_sha256(path: Path) -> str:
-    """
-    The fingerprint of a file.
-
-    :param path: The file.
-    :type path: Path
-    :return: Its sha256, in hex.
-    :rtype: str
-    """
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while chunk := stream.read(HASH_CHUNK_BYTES):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def unpack(source: Path, incoming: Path, folder: Path) -> None:
@@ -167,8 +148,8 @@ class ArchiveCache:
             await self.download(archive.url, download)
             if file_sha256(download) != archive.sha256:
                 raise ArchiveMismatchError(
-                    f"{archive.name} {archive.version} does not match "
-                    "its fingerprint; not using it"
+                    f"{archive.label} does not match its fingerprint; "
+                    "not using it"
                 )
             await asyncio.to_thread(unpack, download, incoming, folder)
         finally:

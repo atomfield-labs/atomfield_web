@@ -18,7 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.schemas import DataRef
 from app.catalog.models import CatalogDocument, DataNeed
+from app.core.names import version_label
 from app.models.data_pack import DataPack
+from app.releases.published import already_published
 from app.storage.keys import data_pack_key
 from app.storage.store import ArtifactStore
 
@@ -27,17 +29,14 @@ MAX_DATA_PACK_BYTES = 1024**3
 DATA_LINK_SECONDS = 3600
 # Every zip file made by ``zipfile`` (or ``zip``) starts with these.
 ZIP_MAGIC = b"PK\x03\x04"
+NOT_ANNOUNCED_MESSAGE = (
+    "The upload is not a zip file with the announced fingerprint"
+)
 
 
 class InvalidDataPackError(ValueError):
     """
     The upload is not the zip file the publisher described.
-    """
-
-
-class DataPackConflictError(ValueError):
-    """
-    This name and version exist with other contents.
     """
 
 
@@ -57,6 +56,16 @@ class DataPackUpload:
     name: str
     version: str
     sha256: str
+
+    @property
+    def label(self) -> str:
+        """
+        How people see the pack.
+
+        :return: Its name and version.
+        :rtype: str
+        """
+        return version_label(self.name, self.version)
 
 
 class Fingerprint:
@@ -151,29 +160,47 @@ async def publish_data_pack(
     :type chunks: AsyncIterable[bytes]
     :return: The pack, and whether it is new.
     :rtype: tuple[DataPack, bool]
-    :raises DataPackConflictError: If the version exists with other
+    :raises PublishConflictError: If the version exists with other
         contents.
     :raises InvalidDataPackError: If the bytes are not that zip.
     :raises TooLargeError: Past ``MAX_DATA_PACK_BYTES``.
     """
     existing = await find_data_pack(db, upload.name, upload.version)
-    if existing is not None:
-        if existing.sha256 != upload.sha256:
-            raise DataPackConflictError(
-                f"{upload.name} {upload.version} was already published "
-                "with other contents; give the change a new version"
-            )
+    published = existing.sha256 if existing else None
+    if already_published(published, upload.sha256, upload.label):
         return existing, False
+    size = await store_checked(store, upload, chunks)
+    return await record_data_pack(db, upload, size), True
+
+
+async def store_checked(
+    store: ArtifactStore,
+    upload: DataPackUpload,
+    chunks: AsyncIterable[bytes],
+) -> int:
+    """
+    Store an upload as it arrives while fingerprinting it, and keep it
+    only if it is the zip that was announced.
+
+    :param store: Where the zip is kept.
+    :type store: ArtifactStore
+    :param upload: Name, version and fingerprint, as announced.
+    :type upload: DataPackUpload
+    :param chunks: The zip's bytes.
+    :type chunks: AsyncIterable[bytes]
+    :return: Its size in bytes.
+    :rtype: int
+    :raises InvalidDataPackError: If the bytes are not that zip.
+    :raises TooLargeError: Past ``MAX_DATA_PACK_BYTES``.
+    """
     key = data_pack_key(upload.name, upload.version)
     fingerprint = Fingerprint()
     watched = fingerprint.watch(chunks)
     size = await store.save_stream(key, watched, MAX_DATA_PACK_BYTES)
     if not fingerprint.matches(upload.sha256):
         await store.delete(key)
-        raise InvalidDataPackError(
-            "The upload is not a zip file with the announced fingerprint"
-        )
-    return await record_data_pack(db, upload, size), True
+        raise InvalidDataPackError(NOT_ANNOUNCED_MESSAGE)
+    return size
 
 
 async def record_data_pack(
@@ -219,7 +246,7 @@ async def missing_data_packs(
     missing = set()
     for need in needs:
         if await find_data_pack(db, need.name, need.version) is None:
-            missing.add(f"{need.name} {need.version}")
+            missing.add(version_label(need.name, need.version))
     return sorted(missing)
 
 

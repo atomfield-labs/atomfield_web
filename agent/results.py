@@ -7,7 +7,6 @@ web UI can show them; a log too long for the limit is sent as its end,
 which is what the UI shows anyway.
 """
 
-import hashlib
 from pathlib import Path
 
 from agent.workspace import own_files
@@ -17,6 +16,7 @@ from app.agents.schemas import (
     UI_FILE_MAX_BYTES,
     FileCard,
 )
+from app.core.fingerprints import file_sha256
 
 LOG_SUFFIX = ".log"
 # Text a person can read in the browser.
@@ -32,23 +32,6 @@ TEXT_SUFFIXES = {
     ".pdb",
     ".inp",
 }
-HASH_CHUNK_BYTES = 1024 * 1024
-
-
-def sha256_of(path: Path) -> str:
-    """
-    Fingerprint a file's content, reading it in chunks.
-
-    :param path: The file.
-    :type path: Path
-    :return: SHA-256 as hex.
-    :rtype: str
-    """
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while chunk := stream.read(HASH_CHUNK_BYTES):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def card_for(path: Path, workspace: Path) -> FileCard:
@@ -65,7 +48,7 @@ def card_for(path: Path, workspace: Path) -> FileCard:
     return FileCard(
         path=path.relative_to(workspace).as_posix(),
         size_bytes=path.stat().st_size,
-        sha256=sha256_of(path),
+        sha256=file_sha256(path),
     )
 
 

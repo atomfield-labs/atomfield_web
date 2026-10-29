@@ -9,34 +9,28 @@ request body, streamed to the store), and anyone may list the packs.
 ``python -m app.releases.publish_data`` zips a folder and does this.
 """
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    HTTPException,
-    Query,
-    Request,
-    Response,
-    status,
-)
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_store, require_admin_key
+from app.api.errors import conflict, too_large, unprocessable
 from app.catalog.models import PACKAGE_NAME_PATTERN
 from app.db.session import get_db
 from app.models.api_key import ApiKey
 from app.releases.data_packs import (
-    DataPackConflictError,
     DataPackUpload,
     InvalidDataPackError,
     list_data_packs,
     publish_data_pack,
 )
+from app.releases.published import PublishConflictError
 from app.schemas.releases import DataPackInfo
 from app.storage.store import ArtifactStore, TooLargeError
 
 router = APIRouter(prefix="/data-packs", tags=["Data packs"])
 NAME_QUERY = f"^{PACKAGE_NAME_PATTERN}$"
+TOO_BIG_MESSAGE = "The pack is too big"
 SHA256_QUERY = r"^[0-9a-f]{64}$"
 
 
@@ -85,16 +79,16 @@ async def publish(
     :raises HTTPException: 409, 413 or 422, as described above.
     """
     upload = DataPackUpload(name, version, sha256)
+    chunks = request.stream()
     try:
-        pack, created = await publish_data_pack(
-            db, store, upload, request.stream()
-        )
+        pack, created = await publish_data_pack(db, store, upload, chunks)
     except TooLargeError as error:
-        raise HTTPException(413, detail="The pack is too big") from error
+        raise too_large(TOO_BIG_MESSAGE) from error
     except InvalidDataPackError as error:
-        raise HTTPException(422, detail=str(error)) from error
-    except (DataPackConflictError, IntegrityError) as error:
-        raise HTTPException(409, detail=str(error)) from error
+        raise unprocessable(str(error)) from error
+    except (PublishConflictError, IntegrityError) as error:
+        # IntegrityError: the same version published at the same moment.
+        raise conflict(str(error)) from error
     if not created:
         response.status_code = status.HTTP_200_OK
     return DataPackInfo.model_validate(pack)

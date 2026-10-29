@@ -14,6 +14,7 @@ import agent.ship
 from agent.config import write_settings
 from app.core.cli import EXIT_INTERRUPTED, stops_cleanly
 from app.releases.publish import PublishError, upload
+from app.releases.publish_data import server_has
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 # Nothing listens there.
@@ -123,3 +124,12 @@ def test_publishing_to_a_server_that_is_not_there_is_one_line(
 
     with pytest.raises(PublishError, match="Could not reach"):
         upload(UNREACHABLE_API, "admin", wheel, "abc1234")
+
+
+def test_asking_a_server_that_is_not_there_for_a_pack_is_one_line():
+    """
+    Before sending a data pack, the command asks the API whether it has
+    it; an unreachable API is a PublishError naming it there too.
+    """
+    with pytest.raises(PublishError, match="Could not reach"):
+        server_has(UNREACHABLE_API, "toy-data", "1", "0" * 64)

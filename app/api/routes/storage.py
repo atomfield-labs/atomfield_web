@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.api.dependencies import get_store
+from app.api.errors import too_large
 from app.storage.links import DOWNLOAD, UPLOAD, LinkGrant
 from app.storage.store import InvalidKeyError, LocalDiskStore, TooLargeError
 
@@ -119,9 +120,8 @@ async def upload(
             raise TooLargeError(key)
         size = await store.save_stream(key, request.stream(), max_bytes)
     except TooLargeError:
-        raise HTTPException(
-            status.HTTP_413_CONTENT_TOO_LARGE,
-            f"Upload exceeds this link's limit of {max_bytes} bytes",
+        raise too_large(
+            f"Upload exceeds this link's limit of {max_bytes} bytes"
         ) from None
     except InvalidKeyError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Bad key") from None

@@ -5,6 +5,9 @@ Cryptographic security and API key token generation utilities.
 import hashlib
 import secrets
 
+# The request header that carries a user's or the administrator's key.
+API_KEY_HEADER = "X-API-Key"
+
 
 def hash_api_key(raw_key: str) -> str:
     """

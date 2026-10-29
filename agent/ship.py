@@ -27,10 +27,11 @@ import subprocess
 import sys
 import tarfile
 from collections.abc import Mapping
+from functools import partial
 from pathlib import Path
 
 import agent.__main__  # noqa: F401  (loads the whole agent)
-from app.core.cli import stops_cleanly
+from app.core.cli import print_outcome, stops_cleanly
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 # The shortcut travels inside the copy under this name, then moves to
@@ -220,12 +221,8 @@ def main(argv: list[str] | None = None) -> int:
     :rtype: int
     """
     options = build_parser().parse_args(argv)
-    try:
-        print(ship(options.host, options.python))
-    except ShipError as error:
-        print(f"Error: {error}", file=sys.stderr)
-        return 1
-    return 0
+    shipping = partial(ship, options.host, options.python)
+    return print_outcome(shipping, (ShipError,))
 
 
 if __name__ == "__main__":

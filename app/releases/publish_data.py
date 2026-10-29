@@ -12,21 +12,31 @@ there, so an unchanged pack is never sent twice.
 """
 
 import argparse
-import hashlib
 import shutil
-import sys
 import tempfile
 import zipfile
 from collections.abc import Iterator
+from functools import partial
 from pathlib import Path
 
 import httpx
 
 from app.core.cli import stops_cleanly
-from app.core.config import settings
-from app.releases.publish import DEFAULT_API_URL, PublishError
+from app.core.fingerprints import file_sha256
+from app.core.names import version_label
+from app.releases.publish import (
+    DEFAULT_API_URL,
+    PublishError,
+    accepted,
+    admin_headers,
+    call_api,
+    run_with_admin_key,
+)
+from app.releases.published import already_published
 
+DATA_PACKS_PATH = "/api/data-packs"
 CHUNK_BYTES = 1024 * 1024
+LIST_SECONDS = 30.0
 # A pack can be hundreds of megabytes on a slow line.
 UPLOAD_SECONDS = 3600.0
 ZIP_TIME = (1980, 1, 1, 0, 0, 0)
@@ -112,24 +122,10 @@ def prepare_zip(source: Path, scratch: Path) -> Path:
     return archive
 
 
-def sha256_of(path: Path) -> str:
+def server_has(api_url: str, name: str, version: str, sha256: str) -> bool:
     """
-    The fingerprint of a file.
-
-    :param path: The file.
-    :type path: Path
-    :return: Its sha256, in hex.
-    :rtype: str
-    """
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
-
-
-def already_published(
-    api_url: str, name: str, version: str, sha256: str
-) -> bool:
-    """
-    Whether the server already has this exact pack.
+    Whether the server already has this exact pack, asked before
+    sending what can be hundreds of megabytes.
 
     :param api_url: The API's address.
     :type api_url: str
@@ -141,19 +137,19 @@ def already_published(
     :type sha256: str
     :return: True if it has.
     :rtype: bool
-    :raises PublishError: If that version exists with other contents.
+    :raises PublishConflictError: If that version exists with other
+        contents.
+    :raises PublishError: If the API cannot be reached, or refuses.
     """
-    response = httpx.get(f"{api_url.rstrip('/')}/api/data-packs", timeout=30.0)
-    response.raise_for_status()
-    for pack in response.json():
-        if (pack["name"], pack["version"]) == (name, version):
-            if pack["sha256"] != sha256:
-                raise PublishError(
-                    f"{name} {version} is already published with other "
-                    "contents; give the change a new version"
-                )
-            return True
-    return False
+    response = call_api(
+        httpx.get, api_url, DATA_PACKS_PATH, timeout=LIST_SECONDS
+    )
+    published = {
+        (pack["name"], pack["version"]): pack["sha256"]
+        for pack in accepted(response)
+    }
+    label = version_label(name, version)
+    return already_published(published.get((name, version)), sha256, label)
 
 
 def file_chunks(path: Path) -> Iterator[bytes]:
@@ -186,22 +182,19 @@ def upload_pack(
     :type query: dict[str, str]
     :return: The published pack.
     :rtype: dict
-    :raises PublishError: If the server refused it.
+    :raises PublishError: If the server refused it or was not there.
     """
-    headers = {
-        "X-API-Key": admin_key,
-        "Content-Length": str(archive.stat().st_size),
-    }
-    response = httpx.post(
-        f"{api_url.rstrip('/')}/api/data-packs",
+    size = {"Content-Length": str(archive.stat().st_size)}
+    response = call_api(
+        httpx.post,
+        api_url,
+        DATA_PACKS_PATH,
         params=query,
         content=file_chunks(archive),
-        headers=headers,
+        headers={**admin_headers(admin_key), **size},
         timeout=UPLOAD_SECONDS,
     )
-    if response.status_code not in (200, 201):
-        raise PublishError(f"The API refused it: {response.text}")
-    return response.json()
+    return accepted(response)
 
 
 def publish_pack(
@@ -223,15 +216,16 @@ def publish_pack(
     :return: What happened.
     :rtype: str
     """
+    label = version_label(name, version)
     with tempfile.TemporaryDirectory() as scratch:
         archive = prepare_zip(source, Path(scratch))
-        sha256 = sha256_of(archive)
-        if already_published(api_url, name, version, sha256):
-            return f"{name} {version} is already published; nothing sent."
+        sha256 = file_sha256(archive)
+        if server_has(api_url, name, version, sha256):
+            return f"{label} is already published; nothing sent."
         query = {"name": name, "version": version, "sha256": sha256}
         pack = upload_pack(api_url, admin_key, archive, query)
     size = pack["size_bytes"] / MEGABYTE
-    return f"Published {name} {version} ({size:.0f} MB, sha256 {sha256[:12]})."
+    return f"Published {label} ({size:.0f} MB, sha256 {sha256[:12]})."
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -265,24 +259,14 @@ def main(argv: list[str] | None = None) -> int:
     :rtype: int
     """
     options = build_parser().parse_args(argv)
-    admin_key = settings.ADMIN_API_KEY
-    if not admin_key:
-        print("Error: set ADMIN_API_KEY", file=sys.stderr)
-        return 1
-    try:
-        print(
-            publish_pack(
-                options.source,
-                options.name,
-                options.version,
-                options.api_url,
-                admin_key,
-            )
-        )
-    except (PublishError, httpx.HTTPError) as error:
-        print(f"Error: {error}", file=sys.stderr)
-        return 1
-    return 0
+    publishing = partial(
+        publish_pack,
+        options.source,
+        options.name,
+        options.version,
+        options.api_url,
+    )
+    return run_with_admin_key(publishing)
 
 
 if __name__ == "__main__":
