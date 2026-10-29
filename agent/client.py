@@ -28,11 +28,34 @@ from app.agents.schemas import (
 )
 
 NO_JOB = 204
+UNAUTHORIZED = 401
 STALE = 409
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 # Longer than the server's longest long-poll, so a held claim is not
 # mistaken for a dead connection.
 READ_TIMEOUT_SECONDS = 45.0
+
+
+class TokenRefusedError(RuntimeError):
+    """
+    The API does not know this agent's token: the compute target was
+    removed in the web app, or its token replaced. Retrying cannot
+    help; the agent needs a new token (``login``).
+    """
+
+
+async def refuse_unknown_token(response: httpx.Response) -> None:
+    """
+    Response hook of the token-carrying client: a refused token ends
+    the agent's work, instead of passing for a network hiccup that the
+    agent would retry forever.
+
+    :param response: Any response to an agent API call.
+    :type response: httpx.Response
+    :raises TokenRefusedError: If the API refused the token.
+    """
+    if response.status_code == UNAUTHORIZED:
+        raise TokenRefusedError("The API refused this agent's token")
 
 
 class AgentClient:
@@ -72,6 +95,7 @@ class AgentClient:
             base_url=api_url,
             headers={"Authorization": f"Bearer {token}"},
             timeout=httpx.Timeout(10.0, read=READ_TIMEOUT_SECONDS),
+            event_hooks={"response": [refuse_unknown_token]},
         )
         links = httpx.AsyncClient(base_url=api_url, timeout=http.timeout)
         return cls(http, links)

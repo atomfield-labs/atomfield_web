@@ -164,23 +164,36 @@ def ship(host: str, python: str = DEFAULT_REMOTE_PYTHON) -> str:
     if done.returncode != 0:
         raise ShipError(done.stderr.decode(errors="replace").strip())
     landed = done.stdout.decode().strip()
+    return shipped(host, len(files), landed)
+
+
+def shipped(host: str, copied: int, landed: str) -> str:
+    """
+    What a finished copy tells the person.
+
+    :param host: Where it went.
+    :type host: str
+    :param copied: Files sent.
+    :type copied: int
+    :param landed: Files the cluster counted in its copy.
+    :type landed: str
+    :return: A few lines.
+    :rtype: str
+    """
     return (
-        f"Copied {len(files)} files; {host}:~/atomfield/code has {landed}.\n"
+        f"Copied {copied} files; {host}:~/atomfield/code has {landed}.\n"
         "On the cluster, from any folder: ~/atomfield/agent start (or "
         "login, stop, status).\nA running agent keeps its old copy until "
         "you stop and start it."
     )
 
 
-@stops_cleanly("Stopped. Run the same command again to copy the agent.")
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     """
-    Command line: copy, and say what happened.
+    Describe the command line.
 
-    :param argv: Arguments; None reads them from the command line.
-    :type argv: list[str] | None
-    :return: Exit code.
-    :rtype: int
+    :return: Parser for ``python -m agent.ship``.
+    :rtype: argparse.ArgumentParser
     """
     parser = argparse.ArgumentParser(
         prog="python -m agent.ship",
@@ -193,7 +206,20 @@ def main(argv: list[str] | None = None) -> int:
         help="The cluster's Python for the agent "
         f"(default: {DEFAULT_REMOTE_PYTHON})",
     )
-    options = parser.parse_args(argv)
+    return parser
+
+
+@stops_cleanly("Stopped. Run the same command again to copy the agent.")
+def main(argv: list[str] | None = None) -> int:
+    """
+    Command line: copy, and say what happened.
+
+    :param argv: Arguments; None reads them from the command line.
+    :type argv: list[str] | None
+    :return: Exit code.
+    :rtype: int
+    """
+    options = build_parser().parse_args(argv)
     try:
         print(ship(options.host, options.python))
     except ShipError as error:

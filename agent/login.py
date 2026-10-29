@@ -18,6 +18,7 @@ from typing import Any
 
 import httpx
 
+from agent.client import TokenRefusedError
 from agent.config import agent_command, read_settings, write_settings
 
 CHECK_SECONDS = 10.0
@@ -33,12 +34,6 @@ QUESTIONS = {
     ),
 }
 Ask = Callable[[str], str]
-
-
-class TokenRefusedError(RuntimeError):
-    """
-    The API answered that it does not know this token.
-    """
 
 
 def suggested_settings(existing: dict[str, Any]) -> dict[str, Any]:

@@ -266,14 +266,17 @@ def test_start_status_restart_and_stop_in_the_background(tmp_path: Path):
         with pytest.raises(daemon.AlreadyRunningError):
             daemon.start(config, path)
 
-        os.kill(first, signal.SIGKILL)  # a crash, as far as it can tell
+        os.kill(first.pid, signal.SIGKILL)  # a crash, as far as it can tell
         second = wait_for(
             lambda: (
-                (pid := daemon.holder(agent_lock)) not in (None, first) and pid
+                (now := daemon.holder(agent_lock))
+                and now.pid != first.pid
+                and now
             ),
             "the restarted agent",
         )
-        assert second != first
+        assert second.pid != first.pid
+        assert not second.elsewhere
     finally:
         assert daemon.stop(config)
     assert daemon.holder(work / daemon.SUPERVISOR_LOCK) is None
@@ -367,3 +370,198 @@ def test_messages_name_the_command_the_person_types():
     assert agent_command({AGENT_COMMAND_VARIABLE: shortcut}) == (
         "~/atomfield/agent"
     )
+
+
+def config_in(tmp_path: Path) -> AgentConfig:
+    """
+    The settings of an agent working in ``tmp_path/atomfield``.
+
+    :param tmp_path: Empty folder.
+    :type tmp_path: Path
+    :return: The configuration.
+    :rtype: AgentConfig
+    """
+    return AgentConfig.from_settings(settings_for(tmp_path / "atomfield"))
+
+
+def lock_from_another_machine(path: Path, age_seconds: float) -> None:
+    """
+    Write a lock record as an agent on ``login9`` would, last renewed
+    ``age_seconds`` ago.
+
+    :param path: Lock file.
+    :type path: Path
+    :param age_seconds: Seconds since its last renewal.
+    :type age_seconds: float
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("4242 login9")
+    renewed = time.time() - age_seconds
+    os.utime(path, (renewed, renewed))
+
+
+def test_a_lock_names_its_holder_and_is_emptied_on_release(tmp_path: Path):
+    """
+    While held, the file says which process on which machine holds it;
+    once released, it names nobody, for any machine.
+
+    :param tmp_path: Empty folder.
+    :type tmp_path: Path
+    """
+    lock = tmp_path / "agent.lock"
+
+    with daemon.exclusive(lock):
+        named = lock.read_text()
+        assert daemon.holder(lock) == daemon.LockHolder(
+            os.getpid(), daemon.this_host()
+        )
+
+    assert named == f"{os.getpid()} {daemon.this_host()}"
+    assert lock.read_text() == ""
+    assert daemon.holder(lock) is None
+
+
+def test_an_agent_on_another_login_node_is_respected_not_signalled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """
+    A lock another machine keeps renewing stops ``start`` here, makes
+    ``status`` say where the agent runs, and makes ``stop`` refuse
+    instead of signalling a process number that means nothing here.
+
+    :param tmp_path: Empty folder.
+    :type tmp_path: Path
+    :param monkeypatch: Catches any signal sent.
+    :type monkeypatch: pytest.MonkeyPatch
+    """
+    config = config_in(tmp_path)
+    lock_from_another_machine(config.home / daemon.SUPERVISOR_LOCK, 5.0)
+
+    def no_signals(pid: int, number: int) -> None:
+        """
+        :raises AssertionError: Always: nothing may be signalled.
+        """
+        raise AssertionError(f"signalled pid {pid}")
+
+    monkeypatch.setattr(daemon.os, "kill", no_signals)
+
+    with pytest.raises(daemon.AlreadyRunningError) as running:
+        daemon.start(config, tmp_path / "agent.toml")
+    assert running.value.holder == daemon.LockHolder(4242, "login9")
+    assert "on login9 (pid 4242)" in daemon.status(config)[0]
+    with pytest.raises(daemon.AlreadyRunningError):
+        daemon.stop(config)
+
+
+def test_a_lock_another_machine_stopped_renewing_frees_itself(
+    tmp_path: Path,
+):
+    """
+    Once another machine stops renewing its lock (its agent crashed, or
+    the node went down), the lock counts as free; a record from before
+    machines were recorded is left to this machine's file lock.
+
+    :param tmp_path: Empty folder.
+    :type tmp_path: Path
+    """
+    lock = tmp_path / "supervisor.lock"
+    lock_from_another_machine(lock, daemon.STALE_SECONDS + 60)
+    assert daemon.holder(lock) is None
+
+    lock.write_text("1234")
+    assert daemon.holder(lock) is None
+
+
+def test_every_does_its_chore_until_the_block_ends():
+    """
+    The background chore repeats while the block runs, and not after.
+    """
+    done = []
+
+    with daemon.every(0.01, lambda: done.append(1)):
+        time.sleep(0.15)
+    count = len(done)
+    time.sleep(0.05)
+
+    assert count >= 3
+    assert len(done) == count
+
+
+def test_a_refused_token_ends_the_agent_with_its_own_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+):
+    """
+    ``run`` exits with ``EXIT_TOKEN_REFUSED`` and says what to do, and
+    the supervisor does not restart it.
+
+    :param tmp_path: Empty folder.
+    :type tmp_path: Path
+    :param monkeypatch: Makes the API refuse the token.
+    :type monkeypatch: pytest.MonkeyPatch
+    :param capsys: Captured output.
+    :type capsys: pytest.CaptureFixture
+    """
+    path = tmp_path / "agent.toml"
+    write_settings(path, settings_for(tmp_path / "atomfield"))
+
+    async def refused(config: AgentConfig) -> None:
+        """
+        :raises TokenRefusedError: As the API's 401 does.
+        """
+        raise TokenRefusedError("The API refused this agent's token")
+
+    monkeypatch.setattr("agent.__main__.serve", refused)
+    code = main(["run", "--config", str(path)])
+    assert code == daemon.EXIT_TOKEN_REFUSED
+    assert "login" in capsys.readouterr().err
+
+    starts = []
+
+    class RefusedAgent:
+        """
+        An agent process that exits as a refused token makes it.
+        """
+
+        def __init__(self, command: list[str], **options) -> None:
+            """
+            :param command: The command line.
+            :type command: list[str]
+            :param options: How it is started.
+            :type options: Any
+            """
+            starts.append(command)
+
+        def wait(self) -> int:
+            """
+            :return: The refused-token exit code.
+            :rtype: int
+            """
+            return daemon.EXIT_TOKEN_REFUSED
+
+    monkeypatch.setattr(daemon.subprocess, "Popen", RefusedAgent)
+    daemon.keep_running(threading.Event(), [])
+    assert len(starts) == 1
+
+
+def test_a_long_log_is_trimmed_and_writers_carry_on(tmp_path: Path):
+    """
+    Past its size the log moves to ``agent.log.1`` and starts again;
+    a process appending to it carries on at the new end.
+
+    :param tmp_path: Empty folder.
+    :type tmp_path: Path
+    """
+    log = tmp_path / "agent.log"
+    with log.open("a") as writer:
+        writer.write("old line\n" * 20)
+        writer.flush()
+        daemon.trim_log(log, max_bytes=100)
+        writer.write("new line\n")
+        writer.flush()
+
+    assert log.read_text() == "new line\n"
+    assert (tmp_path / "agent.log.1").read_text() == "old line\n" * 20
+    daemon.trim_log(log, max_bytes=100)
+    assert log.read_text() == "new line\n"

@@ -20,14 +20,14 @@ from pathlib import Path
 
 from agent import daemon
 from agent.agent import Agent
-from agent.client import AgentClient
+from agent.client import AgentClient, TokenRefusedError
 from agent.config import (
     AgentConfig,
     MissingSettingError,
     agent_command,
     settings_path,
 )
-from agent.login import TokenRefusedError, login
+from agent.login import login
 from agent.runner import ProcessRunner, Runner
 from agent.slurm import SlurmRunner
 from agent.state import StateFile
@@ -35,6 +35,29 @@ from app.core.cli import stops_cleanly
 
 EXIT_OK = 0
 EXIT_FAILED = 1
+REFUSED_TOKEN_HELP = (
+    "The API refused this agent's token: the cluster was removed in the "
+    "web app, or its token was replaced. Make a new token there, then "
+    "run '{command} login' and '{command} start'."
+)
+
+
+def already_running(holder: daemon.LockHolder) -> str:
+    """
+    Where the agent already runs, and, if that is another machine,
+    that it is managed there.
+
+    :param holder: The lock's holder.
+    :type holder: daemon.LockHolder
+    :return: One line for the person.
+    :rtype: str
+    """
+    if holder.elsewhere:
+        return (
+            f"The agent runs {holder.where()}; log in there to manage it "
+            f"(ssh {holder.host})."
+        )
+    return f"The agent is already running {holder.where()}."
 
 
 def make_runner(config: AgentConfig) -> Runner:
@@ -87,12 +110,26 @@ def run_command(config: AgentConfig, path: Path) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     try:
-        with daemon.exclusive(config.home / daemon.AGENT_LOCK):
+        with daemon.held(config.home / daemon.AGENT_LOCK):
             asyncio.run(serve(config))
     except daemon.AlreadyRunningError as running:
-        print(f"Another agent already runs here (pid {running.pid}).")
+        where = running.holder.where()
+        print(f"Another agent already runs for this folder {where}.")
         return EXIT_FAILED
+    except TokenRefusedError:
+        print(refused_token_help(), file=sys.stderr)
+        return daemon.EXIT_TOKEN_REFUSED
     return EXIT_OK
+
+
+def refused_token_help() -> str:
+    """
+    What to do when the API refuses the agent's token.
+
+    :return: One paragraph, naming the command the person types.
+    :rtype: str
+    """
+    return REFUSED_TOKEN_HELP.format(command=agent_command(os.environ))
 
 
 def start_command(config: AgentConfig, path: Path) -> int:
@@ -109,8 +146,8 @@ def start_command(config: AgentConfig, path: Path) -> int:
     try:
         pid = daemon.start(config, path)
     except daemon.AlreadyRunningError as running:
-        print(f"The agent is already running (pid {running.pid}).")
-        return EXIT_OK
+        print(already_running(running.holder))
+        return EXIT_FAILED if running.holder.elsewhere else EXIT_OK
     print(f"Agent started (pid {pid}); log: {config.home / daemon.LOG_NAME}")
     return EXIT_OK
 
@@ -126,7 +163,14 @@ def stop_command(config: AgentConfig, path: Path) -> int:
     :return: Exit code.
     :rtype: int
     """
-    stopped = daemon.stop(config)
+    try:
+        stopped = daemon.stop(config)
+    except daemon.AlreadyRunningError as running:
+        print(already_running(running.holder))
+        return EXIT_FAILED
+    except TimeoutError as error:
+        print(f"{error}; check again with: {agent_command(os.environ)} status")
+        return EXIT_FAILED
     print("Agent stopped." if stopped else "The agent was not running.")
     return EXIT_OK
 

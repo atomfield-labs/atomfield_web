@@ -16,8 +16,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
+import pytest
 
 from agent.agent import Agent
+from agent.client import (
+    AgentClient,
+    TokenRefusedError,
+    refuse_unknown_token,
+)
 from agent.config import AgentConfig
 from agent.runner import ProcessRunner, Runner, group_is_alive
 from agent.slurm import SlurmRunner, SlurmSettings
@@ -773,3 +779,110 @@ def test_slurm_stopping_a_job_at_its_limit_fails_it_as_timed_out(
     report = client.reports[job.job_id]
     assert report.outcome == "failed"
     assert "limit" in report.error_message
+
+
+def test_stopping_with_every_slot_busy_ends_promptly(tmp_path: Path):
+    """
+    A stop request ends the agent even while every job slot is busy.
+    The agent used to wait for a slot to free up before it looked at
+    the request, so ``stop`` hung until a job finished.
+
+    :param tmp_path: Empty directory for this test.
+    :type tmp_path: Path
+    """
+    client = FakeClient(assign(charge=SLOW_CHARGE))
+    agent = make_agent(tmp_path, client, max_jobs=1)
+
+    async def scenario():
+        task = asyncio.create_task(agent.run())
+        async with asyncio.timeout(20):
+            while len(agent.running) < 1:
+                await asyncio.sleep(0.02)
+        await asyncio.sleep(0.2)
+        agent.request_stop()
+        async with asyncio.timeout(5):
+            await task
+
+    asyncio.run(scenario())
+
+
+class RefusingClient(FakeClient):
+    """
+    An API that no longer knows the agent's token (the cluster was
+    removed in the web app, or its token replaced).
+    """
+
+    async def heartbeat(
+        self,
+        held: list[JobReference],
+        started: list[JobReference] | None = None,
+    ) -> HeartbeatResponse:
+        """
+        Refuse, as the real client does on a 401.
+
+        :param held: Attempts the agent is running.
+        :type held: list[JobReference]
+        :param started: Those that have begun running.
+        :type started: list[JobReference] | None
+        :raises TokenRefusedError: Always.
+        """
+        raise TokenRefusedError("The API refused this agent's token")
+
+
+def test_a_refused_token_stops_the_agent(tmp_path: Path):
+    """
+    A refused token is not retried like a network hiccup: the agent
+    stops at once and says why.
+
+    :param tmp_path: Empty directory for this test.
+    :type tmp_path: Path
+    """
+    agent = make_agent(tmp_path, RefusingClient())
+
+    async def scenario():
+        async with asyncio.timeout(5):
+            await agent.run()
+
+    with pytest.raises(TokenRefusedError):
+        asyncio.run(scenario())
+
+
+def test_only_a_refused_token_becomes_its_own_error():
+    """
+    The token-carrying client turns a 401 into TokenRefusedError; any
+    other failure stays an HTTP error that the agent retries.
+    """
+    request = httpx.Request("POST", "http://api.test/api/agent/claims")
+    client = AgentClient.connect("http://api.test", "af_agent_x")
+
+    with pytest.raises(TokenRefusedError):
+        asyncio.run(refuse_unknown_token(httpx.Response(401, request=request)))
+    asyncio.run(refuse_unknown_token(httpx.Response(503, request=request)))
+    assert refuse_unknown_token in client.http.event_hooks["response"]
+    assert not client.links.event_hooks["response"]
+    asyncio.run(client.close())
+
+
+def test_more_slurm_jobs_than_slots_are_all_taken_over(tmp_path: Path):
+    """
+    A new agent with fewer job slots than the jobs its predecessor left
+    running in Slurm takes them all over. It used to wait for a free
+    slot before even starting, which never came.
+
+    :param tmp_path: Empty directory for this test.
+    :type tmp_path: Path
+    """
+    jobs = [assign(charge=1), assign(charge=1)]
+    first_client = FakeClient(*jobs)
+    runner = slurm(tmp_path, FAKE_SLURM_PENDING_SECONDS="1")
+    first = make_agent(tmp_path, first_client, runner, max_jobs=2)
+    run_until(first, lambda: len(first.state.load()) == 2)
+
+    second_client = FakeClient()
+    second = make_agent(
+        tmp_path, second_client, SlurmRunner(runner.settings), max_jobs=1
+    )
+    run_until(second, lambda: len(second_client.reports) == 2)
+
+    outcomes = {report.outcome for report in second_client.reports.values()}
+    assert outcomes == {"succeeded"}

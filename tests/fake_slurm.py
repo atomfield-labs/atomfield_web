@@ -48,9 +48,14 @@ script = Path(sys.argv[-1])
 text = script.read_text()
 chdir = re.search(r"--chdir=(\\S+)", text).group(1)
 output = re.search(r"--output=(\\S+)", text).group(1)
-counter = STATE / "next_id"
-job = int(counter.read_text()) if counter.exists() else 1000
-counter.write_text(str(job + 1))
+# Claim a number by creating its file: two sbatch at once never share.
+job = 1000
+while True:
+    try:
+        os.close(os.open(STATE / f"{{job}}.id", os.O_CREAT | os.O_EXCL))
+        break
+    except FileExistsError:
+        job += 1
 delay = os.environ.get("FAKE_SLURM_PENDING_SECONDS", "0")
 started = shlex.quote(str(STATE / f"{{job}}.started"))
 exit_file = shlex.quote(str(STATE / f"{{job}}.exit"))

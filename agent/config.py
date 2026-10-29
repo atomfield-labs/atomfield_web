@@ -283,23 +283,31 @@ def settings_text(settings: Mapping[str, Any]) -> str:
     :rtype: str
     """
     prefix = f"{SLURM_TABLE}_"
+    given = {key: value for key, value in settings.items() if value is not None}
     plain = {
-        key: value
-        for key, value in settings.items()
-        if not key.startswith(prefix) and value is not None
+        key: value for key, value in given.items() if not key.startswith(prefix)
     }
     slurm = {
         key.removeprefix(prefix): value
-        for key, value in settings.items()
-        if key.startswith(prefix) and value is not None
+        for key, value in given.items()
+        if key.startswith(prefix)
     }
-    lines = [f"{key} = {toml_value(value)}" for key, value in plain.items()]
+    lines = toml_lines(plain)
     if slurm:
-        lines += ["", f"[{SLURM_TABLE}]"]
-        lines += [
-            f"{key} = {toml_value(value)}" for key, value in slurm.items()
-        ]
+        lines += ["", f"[{SLURM_TABLE}]", *toml_lines(slurm)]
     return "\n".join(lines) + "\n"
+
+
+def toml_lines(table: Mapping[str, Any]) -> list[str]:
+    """
+    One ``key = value`` line per setting.
+
+    :param table: Settings by name.
+    :type table: Mapping[str, Any]
+    :return: The lines.
+    :rtype: list[str]
+    """
+    return [f"{key} = {toml_value(value)}" for key, value in table.items()]
 
 
 def agent_command(environ: Mapping[str, str]) -> str:

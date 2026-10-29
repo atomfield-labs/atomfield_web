@@ -103,12 +103,16 @@ class RunningJob:
     :type workspace: Path
     :param stop_reason: Set when the agent stops the job itself.
     :type stop_reason: StopReason | None
+    :param holds_slot: Whether it took one of the agent's job slots
+        (a job taken over from a previous agent may run without one).
+    :type holds_slot: bool
     """
 
     assignment: JobAssignment
     execution: Execution
     workspace: Path
     stop_reason: StopReason | None = None
+    holds_slot: bool = True
 
     @property
     def reference(self) -> JobReference:
@@ -182,15 +186,39 @@ class Agent:
     async def run(self) -> None:
         """
         Recover from a previous crash, then work until asked to stop.
+        Heartbeats and claims run side by side, and either one ending
+        (a stop request, or an error such as a refused token) ends
+        both: a stop never waits for a job slot to free up.
+
+        :raises TokenRefusedError: If the API refused this agent's
+            token.
         """
         await self.recover_jobs()
-        heartbeats = asyncio.create_task(self.heartbeat_loop())
+        loops = {
+            asyncio.create_task(self.heartbeat_loop()),
+            asyncio.create_task(self.claim_loop()),
+        }
         try:
-            await self.claim_loop()
+            done, _ = await asyncio.wait(
+                loops, return_when=asyncio.FIRST_COMPLETED
+            )
+            for loop in done:
+                loop.result()
         finally:
-            await self.stop_all()
-            heartbeats.cancel()
-            await self.runner.close()
+            await self.shut_down(loops)
+
+    async def shut_down(self, loops: set[asyncio.Task]) -> None:
+        """
+        End both loops and leave the jobs as ``stop_all`` says.
+
+        :param loops: The heartbeat and claim loops.
+        :type loops: set[asyncio.Task]
+        """
+        self.request_stop()
+        for loop in loops:
+            loop.cancel()
+        await self.stop_all()
+        await self.runner.close()
 
     async def recover_jobs(self) -> None:
         """
@@ -200,24 +228,55 @@ class Agent:
         reported like any other.
         """
         for job_id, entry in self.state.load().items():
-            handle = str(entry.get("handle", entry.get("process_group")))
-            saved = entry.get("assignment")
-            assignment = JobAssignment.model_validate(saved) if saved else None
-            workspace = (
-                job_folder(self.config.artifacts_dir, assignment)
-                if assignment
-                else self.config.artifacts_dir
-            )
+            handle, assignment, workspace = self.left_behind(entry)
             execution = await self.runner.adopt(handle, workspace)
             if execution is None or assignment is None:
                 logger.warning("Stopped job %s left by a crash", job_id)
                 self.state.forget(job_id)
                 continue
             logger.info("Took over job %s (%s)", job_id, handle)
+            await self.take_over(
+                job_id, RunningJob(assignment, execution, workspace)
+            )
+
+    def left_behind(
+        self, entry: dict
+    ) -> tuple[str, JobAssignment | None, Path]:
+        """
+        What the state file says about a job a previous agent left.
+
+        :param entry: The job's entry in the state file.
+        :type entry: dict
+        :return: Its runner handle, its assignment (if saved) and its
+            folder.
+        :rtype: tuple[str, JobAssignment | None, Path]
+        """
+        handle = str(entry.get("handle", entry.get("process_group")))
+        saved = entry.get("assignment")
+        assignment = JobAssignment.model_validate(saved) if saved else None
+        workspace = (
+            job_folder(self.config.artifacts_dir, assignment)
+            if assignment
+            else self.config.artifacts_dir
+        )
+        return handle, assignment, workspace
+
+    async def take_over(self, job_id: str, running: RunningJob) -> None:
+        """
+        Watch and report a job a previous agent left running. It is
+        already running, so it takes a free slot but never waits for
+        one (there may be fewer slots now than jobs left running).
+
+        :param job_id: The job.
+        :type job_id: str
+        :param running: The job and its execution.
+        :type running: RunningJob
+        """
+        running.holds_slot = not self.slots.locked()
+        if running.holds_slot:
             await self.slots.acquire()
-            running = RunningJob(assignment, execution, workspace)
-            self.running[job_id] = running
-            self.spawn(self.see_through(assignment, self.conclude(running)))
+        self.running[job_id] = running
+        self.spawn(self.see_through(running.assignment, self.conclude(running)))
 
     async def claim_loop(self) -> None:
         """
@@ -309,10 +368,11 @@ class Agent:
         :param job_id: Job id.
         :type job_id: str
         """
-        self.running.pop(job_id, None)
+        running = self.running.pop(job_id, None)
         self.reported_starts.discard(job_id)
         self.state.forget(job_id)
-        self.slots.release()
+        if running is None or running.holds_slot:
+            self.slots.release()
 
     async def execute(
         self, assignment: JobAssignment
