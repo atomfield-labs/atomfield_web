@@ -162,6 +162,18 @@ def deadline_from_now(walltime_minutes: int) -> ColumnElement[Any]:
     return func.now() + timedelta(minutes=walltime_minutes)
 
 
+def on_target(target_id: uuid.UUID) -> ColumnElement[bool]:
+    """
+    Condition: the job's run executes on this compute target.
+
+    :param target_id: The target.
+    :type target_id: uuid.UUID
+    :return: SQL condition on jobs.
+    :rtype: ColumnElement[bool]
+    """
+    return Job.run_id.in_(select(Run.id).where(Run.target_id == target_id))
+
+
 async def start_attempt(
     session: AsyncSession,
     job_id: uuid.UUID,
@@ -170,7 +182,9 @@ async def start_attempt(
     scheduled: bool = False,
 ) -> Job | None:
     """
-    Claim a queued job: new attempt number, fresh lease, deadline.
+    Claim a queued job: new attempt number, fresh lease, deadline. An
+    agent may start only its own target's jobs, checked in the same
+    statement: a job in the wrong queue is never started there.
 
     :param session: Open database session; the caller commits.
     :type session: AsyncSession
@@ -185,13 +199,15 @@ async def start_attempt(
         agent reports it running (``mark_started``).
     :type scheduled: bool
     :return: The running job, or None if it was no longer queued
-        (already claimed, or cancelled).
+        (already claimed, or cancelled) or is another target's.
     :rtype: Job | None
     """
+    own_jobs = [] if agent_id is None else [on_target(agent_id)]
     return await transition(
         session,
         job_id,
         JobStatus.RUNNING,
+        extra_conditions=own_jobs,
         attempt=Job.attempt + 1,
         agent_id=agent_id,
         last_heartbeat_at=func.now(),

@@ -3,12 +3,15 @@ Compute targets: a user adds a cluster, gets its agent token once,
 and sends runs there; nobody else can see, use or change it.
 """
 
+import asyncio
 import uuid
 from collections.abc import Callable
 
 from fastapi.testclient import TestClient
 
 from app.models.compute_target import HOUSE_TARGET_ID
+from app.queue.job_queue import RedisJobQueue
+from tests.stores import make_redis
 from tests.test_agent_api import HOUSE, claim, drain_queue
 
 UserHeadersFactory = Callable[..., dict[str, str]]
@@ -241,3 +244,51 @@ def test_retiring_a_target_cancels_the_jobs_it_can_no_longer_run(
     assert "removed" in job.json()["error_message"]
     run = client.get(f"/api/runs/{submitted['run_id']}/bundle", headers=owner)
     assert run.json()["finished"] is True
+
+
+def misroute(job_id: str, target_id: str) -> None:
+    """
+    Put a job into another cluster's queue, as a bug might.
+
+    :param job_id: The job.
+    :type job_id: str
+    :param target_id: The cluster whose queue it lands in.
+    :type target_id: str
+    """
+
+    async def scenario() -> None:
+        """
+        Add the job to that queue.
+        """
+        redis = make_redis()
+        try:
+            queue = RedisJobQueue(redis)
+            await queue.add(uuid.UUID(target_id), [uuid.UUID(job_id)])
+        finally:
+            await redis.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_an_agent_never_starts_another_clusters_job(
+    client: TestClient,
+    make_user_headers: UserHeadersFactory,
+):
+    """
+    A job that lands in the wrong cluster's queue is not started by
+    that cluster's agent: starting checks, in the database, that the
+    job's run belongs to the agent's cluster. The job stays queued.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param make_user_headers: Factory registering a user key.
+    :type make_user_headers: UserHeadersFactory
+    """
+    owner = make_user_headers()
+    mine = add_cluster(client, owner, "lab-a")["target"]["id"]
+    other = add_cluster(client, owner, "lab-b")
+    job_id = submit_to(client, owner, mine).json()["job_ids"]["only"]
+    misroute(job_id, other["target"]["id"])
+    assert claim(client, agent(other["token"])).status_code == 204
+    job = client.get(f"/api/jobs/{job_id}", headers=owner).json()
+    assert job["status"] == "queued"

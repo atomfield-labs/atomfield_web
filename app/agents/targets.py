@@ -13,9 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.errors import not_found
 from app.core.security import generate_agent_token
 from app.models.compute_target import HOUSE_TARGET_ID, ComputeTarget
-from app.models.job import Job
-from app.models.run import Run
-from app.runs.lifecycle import cancel_jobs
+from app.runs.lifecycle import cancel_jobs, on_target
 from app.schemas.targets import TargetCreate, TargetInfo, TargetToken
 
 # Agents call in at least every 30 s (claims and heartbeats).
@@ -200,8 +198,7 @@ async def retire_target(
         .where(ComputeTarget.id == target.id)
         .values(retired_at=func.now(), token_hash=None)
     )
-    runs_here = select(Run.id).where(Run.target_id == target.id)
-    await cancel_jobs(db, Job.run_id.in_(runs_here), TARGET_REMOVED_MESSAGE)
+    await cancel_jobs(db, on_target(target.id), TARGET_REMOVED_MESSAGE)
 
 
 async def usable_target(
