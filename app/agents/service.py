@@ -7,8 +7,9 @@ import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from typing import Any
 
-from sqlalchemy import func, select, tuple_, update
+from sqlalchemy import Row, func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.auth import touch_target
@@ -32,7 +33,7 @@ from app.events.changes import commit_and_publish
 from app.models.compute_target import ComputeTarget
 from app.models.job import Job, JobDependency
 from app.models.run import Run
-from app.queue.job_queue import RedisJobQueue
+from app.queue.job_queue import QueuedJob, RedisJobQueue
 from app.releases.catalogs import ReleaseCatalogs
 from app.releases.data_packs import data_refs, missing_data_packs
 from app.releases.service import release_ref
@@ -40,13 +41,16 @@ from app.runs.bundles import record_bundle, take_pack_requests
 from app.runs.lifecycle import (
     Completion,
     complete_attempt,
+    dispatch,
     mark_started,
     start_attempt,
 )
 from app.runs.states import JobStatus
+from app.runs.transitions import held_by
 from app.storage.keys import job_file_key, upload_folder
 from app.storage.store import ArtifactStore
 
+MISSING_TASK_MESSAGE = "Task {task!r} is no longer in the catalog"
 # Columns an outcome may record; anything else in a report is ignored.
 OUTCOME_FIELDS = {
     JobStatus.SUCCEEDED: ("output_data", "execution_time_seconds"),
@@ -152,7 +156,6 @@ async def build_assignment(
     :rtype: JobAssignment
     """
     run = await db.get(Run, job.run_id)
-    input_files = job.input_files or {}
     return JobAssignment(
         job_id=job.id,
         attempt=job.attempt,
@@ -161,12 +164,32 @@ async def build_assignment(
         parents=await parent_keys(db, job.id),
         task=task,
         parameters=job.parameters or {},
-        input_files=input_files,
-        inputs=await input_links(store, run, input_files),
         release=await release_ref(db, store, run.release_id),
         data=data,
         deadline_at=job.deadline_at,
+        **await input_fields(store, run, job),
     )
+
+
+async def input_fields(
+    store: ArtifactStore, run: Run, job: Job
+) -> dict[str, Any]:
+    """
+    The files a job's folder starts with: those it declares, and a
+    link to every file it gets.
+
+    :param store: Where uploads are kept.
+    :type store: ArtifactStore
+    :param run: The job's run.
+    :type run: Run
+    :param job: The job.
+    :type job: Job
+    :return: ``input_files`` and ``inputs`` of its assignment.
+    :rtype: dict[str, Any]
+    """
+    input_files = job.input_files or {}
+    links = await input_links(store, run, input_files)
+    return {"input_files": input_files, "inputs": links}
 
 
 async def find_task(
@@ -189,12 +212,40 @@ async def find_task(
     :rtype: TaskDefinition | None
     """
     run = await db.get(Run, job.run_id)
-    catalog = await services.catalogs.of_release(db, run.release_id)
-    try:
-        return catalog.get(job.script_name)
-    except UnknownTaskError:
-        message = f"Task {job.script_name!r} is no longer in the catalog"
+    task = await release_task(
+        db, services.catalogs, run.release_id, job.script_name
+    )
+    if task is None:
+        message = MISSING_TASK_MESSAGE.format(task=job.script_name)
         await fail_before_start(db, services, job, message)
+    return task
+
+
+async def release_task(
+    db: AsyncSession,
+    catalogs: ReleaseCatalogs,
+    release_id: uuid.UUID | None,
+    task_id: str,
+) -> TaskDefinition | None:
+    """
+    A task as a release's catalog defines it (a run keeps the release
+    it was submitted with, however many came since).
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param catalogs: Catalogs per release.
+    :type catalogs: ReleaseCatalogs
+    :param release_id: The run's release; None before the first one.
+    :type release_id: uuid.UUID | None
+    :param task_id: The task.
+    :type task_id: str
+    :return: Its definition, or None if that catalog lacks it.
+    :rtype: TaskDefinition | None
+    """
+    catalog = await catalogs.of_release(db, release_id)
+    try:
+        return catalog.get(task_id)
+    except UnknownTaskError:
         return None
 
 
@@ -340,17 +391,42 @@ async def claim_next(
     loop = asyncio.get_running_loop()
     give_up_at = loop.time() + wait_seconds
     while (remaining := give_up_at - loop.time()) > 0:
-        taken = await services.queue.take(target.id, remaining)
+        taken = await take_for_agent(services.queue, target, remaining, hung_up)
         if taken is None:
-            return None
-        if await hung_up():
-            await services.queue.put_back(target.id, taken)
             return None
         assignment = await try_start(
             db, services, target, taken.job_id, scheduled
         )
         if assignment is not None:
             return assignment
+    return None
+
+
+async def take_for_agent(
+    queue: RedisJobQueue,
+    target: ComputeTarget,
+    wait_seconds: float,
+    hung_up: HungUp,
+) -> QueuedJob | None:
+    """
+    Take the next job for an agent that still waits for one; a job
+    taken after the agent hung up goes back to its place in line.
+
+    :param queue: Job queue.
+    :type queue: RedisJobQueue
+    :param target: Calling agent's target.
+    :type target: ComputeTarget
+    :param wait_seconds: Longest time to wait for a job.
+    :type wait_seconds: float
+    :param hung_up: Asks whether the agent stopped waiting.
+    :type hung_up: HungUp
+    :return: The job, or None if none came in time or the agent left.
+    :rtype: QueuedJob | None
+    """
+    taken = await queue.take(target.id, wait_seconds)
+    if taken is None or not await hung_up():
+        return taken
+    await queue.put_back(target.id, taken)
     return None
 
 
@@ -379,37 +455,77 @@ async def record_heartbeat(
     :rtype: HeartbeatResponse
     """
     await touch_target(db, target)
-    held = [(report.job_id, report.attempt) for report in reports]
-    rows = []
-    if held:
-        statement = (
-            update(Job)
-            .where(
-                Job.agent_id == target.id,
-                Job.status == JobStatus.RUNNING,
-                tuple_(Job.id, Job.attempt).in_(held),
-            )
-            .values(last_heartbeat_at=func.now())
-            .returning(Job.id, Job.attempt, Job.cancel_requested)
-        )
-        rows = (await db.execute(statement)).all()
+    renewed = await renew_leases(db, target, reports)
     await start_clocks(db, services.catalogs, target, started)
     packs = await take_pack_requests(db, services.store, target.id)
     await commit_and_publish(db, services.bus)
-    alive = {(job_id, attempt) for job_id, attempt, _ in rows}
-    return HeartbeatResponse(
-        pack=packs,
-        cancel=[
-            JobReference(job_id=job_id, attempt=attempt)
-            for job_id, attempt, cancel_requested in rows
-            if cancel_requested
-        ],
-        abandon=[
-            report
-            for report in reports
-            if (report.job_id, report.attempt) not in alive
-        ],
+    return heartbeat_reply(renewed, reports, packs)
+
+
+async def renew_leases(
+    db: AsyncSession,
+    target: ComputeTarget,
+    reports: list[JobReference],
+) -> list[Row]:
+    """
+    Renew the lease of each reported attempt that still runs on this
+    agent.
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param target: Calling agent's target.
+    :type target: ComputeTarget
+    :param reports: Attempts the agent says it is running.
+    :type reports: list[JobReference]
+    :return: Each renewed attempt: job id, attempt, pending cancel.
+    :rtype: list[Row]
+    """
+    held = [(report.job_id, report.attempt) for report in reports]
+    if not held:
+        return []
+    statement = (
+        update(Job)
+        .where(
+            Job.agent_id == target.id,
+            Job.status == JobStatus.RUNNING,
+            tuple_(Job.id, Job.attempt).in_(held),
+        )
+        .values(last_heartbeat_at=func.now())
+        .returning(Job.id, Job.attempt, Job.cancel_requested)
     )
+    return list((await db.execute(statement)).all())
+
+
+def heartbeat_reply(
+    renewed: list[Row],
+    reports: list[JobReference],
+    packs: list[PackRequest],
+) -> HeartbeatResponse:
+    """
+    What the agent must do: cancel the renewed attempts whose job got
+    a cancel request, abandon those no longer its own, zip these runs.
+
+    :param renewed: Renewed attempts: job id, attempt, pending cancel.
+    :type renewed: list[Row]
+    :param reports: Attempts the agent says it is running.
+    :type reports: list[JobReference]
+    :param packs: Runs to zip.
+    :type packs: list[PackRequest]
+    :return: The reply.
+    :rtype: HeartbeatResponse
+    """
+    alive = {(row.id, row.attempt) for row in renewed}
+    cancel = [
+        JobReference(job_id=row.id, attempt=row.attempt)
+        for row in renewed
+        if row.cancel_requested
+    ]
+    abandon = [
+        report
+        for report in reports
+        if (report.job_id, report.attempt) not in alive
+    ]
+    return HeartbeatResponse(pack=packs, cancel=cancel, abandon=abandon)
 
 
 async def report_completion(
@@ -436,27 +552,47 @@ async def report_completion(
         owns the job (stale report).
     :rtype: Completion | None
     """
+    completion = await apply_report(db, target, job_id, report)
+    if completion and report.folder:
+        await record_folder(db, completion.job.run_id, report)
+    await commit_and_publish(db, services.bus)
+    if completion:
+        await dispatch(db, services.queue, completion.ready)
+    return completion
+
+
+async def apply_report(
+    db: AsyncSession,
+    target: ComputeTarget,
+    job_id: uuid.UUID,
+    report: CompletionRequest,
+) -> Completion | None:
+    """
+    Finish an attempt as its agent reports it, if that agent's attempt
+    still holds the job; only the outcome's own fields are recorded.
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param target: Calling agent's target.
+    :type target: ComputeTarget
+    :param job_id: Finished job.
+    :type job_id: uuid.UUID
+    :param report: How the attempt ended.
+    :type report: CompletionRequest
+    :return: The completion, or None for a stale report.
+    :rtype: Completion | None
+    """
     outcome = JobStatus(report.outcome)
-    values = {
-        field: getattr(report, field) for field in OUTCOME_FIELDS[outcome]
-    }
-    files = [card.model_dump() for card in report.files]
-    completion = await complete_attempt(
+    values = {name: getattr(report, name) for name in OUTCOME_FIELDS[outcome]}
+    return await complete_attempt(
         db,
         job_id,
         outcome,
         expected_attempt=report.attempt,
         expected_agent=target.id,
-        output_files=files,
+        output_files=[card.model_dump() for card in report.files],
         **values,
     )
-    if completion and report.folder:
-        await record_folder(db, completion.job.run_id, report)
-    await commit_and_publish(db, services.bus)
-    if completion and completion.ready:
-        ready_ids = [child.id for child in completion.ready]
-        await services.queue.add(target.id, ready_ids)
-    return completion
 
 
 async def record_folder(
@@ -509,13 +645,7 @@ async def upload_links(
     :rtype: UploadLinksResponse | None
     :raises InvalidKeyError: If a name is not a plain file name.
     """
-    query = select(Job.run_id).where(
-        Job.id == job_id,
-        Job.status == JobStatus.RUNNING,
-        Job.attempt == request.attempt,
-        Job.agent_id == target.id,
-    )
-    run_id = (await db.execute(query)).scalar_one_or_none()
+    run_id = await attempt_run(db, target, job_id, request.attempt)
     if run_id is None:
         return None
     links = {
@@ -527,6 +657,30 @@ async def upload_links(
         for name in request.names
     }
     return UploadLinksResponse(links=links, max_bytes=UI_FILE_MAX_BYTES)
+
+
+async def attempt_run(
+    db: AsyncSession,
+    target: ComputeTarget,
+    job_id: uuid.UUID,
+    attempt: int,
+) -> uuid.UUID | None:
+    """
+    The run of an attempt that still holds its job on this agent.
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param target: Calling agent's target.
+    :type target: ComputeTarget
+    :param job_id: The job.
+    :type job_id: uuid.UUID
+    :param attempt: The attempt.
+    :type attempt: int
+    :return: The run's id, or None if the attempt is stale.
+    :rtype: uuid.UUID | None
+    """
+    query = select(Job.run_id).where(*held_by(job_id, attempt, target.id))
+    return (await db.execute(query)).scalar_one_or_none()
 
 
 async def hand_out_packs(
@@ -597,43 +751,43 @@ async def start_clocks(
     :param started: Attempts reported running.
     :type started: list[JobReference]
     """
-    if not started:
-        return
-    ids = [reference.job_id for reference in started]
-    query = (
-        select(Job.id, Job.script_name, Run.release_id)
-        .join(Run, Run.id == Job.run_id)
-        .where(Job.id.in_(ids), Job.started_at.is_(None))
-    )
-    waiting = {row.id: row for row in (await db.execute(query)).all()}
+    waiting = await clocks_to_start(db, started)
     for reference in started:
-        if reference.job_id not in waiting:
-            continue
-        row = waiting[reference.job_id]
-        walltime = await task_walltime(db, catalogs, row)
-        if walltime is not None:
+        row = waiting.get(reference.job_id)
+        task = row and await release_task(
+            db, catalogs, row.release_id, row.script_name
+        )
+        if task:
             await mark_started(
-                db, reference.job_id, reference.attempt, target.id, walltime
+                db,
+                reference.job_id,
+                reference.attempt,
+                target.id,
+                task.resources.walltime_minutes,
             )
 
 
-async def task_walltime(
-    db: AsyncSession, catalogs: ReleaseCatalogs, row
-) -> int | None:
+async def clocks_to_start(
+    db: AsyncSession, started: list[JobReference]
+) -> dict[uuid.UUID, Row]:
     """
-    A job's time limit in minutes, from its run's release.
+    Of the jobs reported running, those whose clock has not started.
 
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param catalogs: Catalogs per release.
-    :type catalogs: ReleaseCatalogs
-    :param row: The job's id, task name and run's release.
-    :type row: sqlalchemy.Row
-    :return: Minutes, or None if its task is gone.
-    :rtype: int | None
+    :param started: Attempts reported running.
+    :type started: list[JobReference]
+    :return: Job id -> its task name and run's release.
+    :rtype: dict[uuid.UUID, Row]
     """
-    catalog = await catalogs.of_release(db, row.release_id)
-    try:
-        return catalog.get(row.script_name).resources.walltime_minutes
-    except UnknownTaskError:
-        return None
+    if not started:
+        return {}
+    query = (
+        select(Job.id, Job.script_name, Run.release_id)
+        .join(Run, Run.id == Job.run_id)
+        .where(
+            Job.id.in_([reference.job_id for reference in started]),
+            Job.started_at.is_(None),
+        )
+    )
+    return {row.id: row for row in (await db.execute(query)).all()}

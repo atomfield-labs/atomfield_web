@@ -39,6 +39,9 @@ FAILURE_STATUSES = frozenset({JobStatus.FAILED, JobStatus.UPSTREAM_FAILED})
 # A parent in one of these means its children can never run.
 UNSUCCESSFUL_STATUSES = FAILURE_STATUSES | {JobStatus.CANCELLED}
 
+# Not started yet: cancelling one needs no agent.
+NOT_STARTED_STATUSES = frozenset({JobStatus.WAITING, JobStatus.QUEUED})
+
 # Target status -> the statuses a job may move into it from. Read it as
 # "a job becomes QUEUED only from WAITING (its parents are done) or from
 # RUNNING (its agent was lost and it is retried)".

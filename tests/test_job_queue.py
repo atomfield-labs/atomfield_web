@@ -85,3 +85,46 @@ def test_an_empty_queue_times_out_and_targets_are_separate(
         return await queue.pop(mine, 0.1), await queue.size(theirs)
 
     assert run_with_queue(scenario) == (None, 1)
+
+
+def test_jobs_for_several_targets_reach_their_own_queues(
+    client: TestClient,
+):
+    """
+    One call queues jobs for several targets, each in its own queue,
+    and counts only the jobs not already queued.
+
+    :param client: Ensures the test stores were reset.
+    :type client: TestClient
+    """
+    mine, theirs = uuid.uuid4(), uuid.uuid4()
+    first, second, third = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+
+    async def scenario(queue: RedisJobQueue):
+        await queue.add(mine, [first])
+        placed = [(first, mine), (second, mine), (third, theirs)]
+        added = await queue.add_by_target(placed)
+        return added, await queue.size(mine), await queue.size(theirs)
+
+    assert run_with_queue(scenario) == (2, 2, 1)
+
+
+def test_a_job_put_back_keeps_its_place_in_line(client: TestClient):
+    """
+    A job taken and put back comes out before a job queued after it.
+
+    :param client: Ensures the test stores were reset.
+    :type client: TestClient
+    """
+    target = uuid.uuid4()
+    first, second = uuid.uuid4(), uuid.uuid4()
+
+    async def scenario(queue: RedisJobQueue):
+        await queue.add(target, [first])
+        taken = await queue.take(target, 0.1)
+        await asyncio.sleep(0.01)
+        await queue.add(target, [second])
+        await queue.put_back(target, taken)
+        return [await queue.pop(target, 0.1), await queue.pop(target, 0.1)]
+
+    assert run_with_queue(scenario) == [first, second]

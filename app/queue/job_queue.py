@@ -8,6 +8,7 @@ sweeper can safely re-add every queued job on every pass.
 
 import time
 import uuid
+from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -78,6 +79,25 @@ class RedisJobQueue:
         if not members:
             return 0
         return await self.redis.zadd(queue_key(target_id), members, nx=True)
+
+    async def add_by_target(
+        self, placed: Iterable[tuple[uuid.UUID, uuid.UUID]]
+    ) -> int:
+        """
+        Queue jobs for several targets: one ``add`` per target.
+
+        :param placed: (job id, target id) pairs.
+        :type placed: Iterable[tuple[uuid.UUID, uuid.UUID]]
+        :return: How many were not already queued.
+        :rtype: int
+        """
+        by_target: defaultdict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
+        for job_id, target_id in placed:
+            by_target[target_id].append(job_id)
+        added = 0
+        for target_id, job_ids in by_target.items():
+            added += await self.add(target_id, job_ids)
+        return added
 
     async def take(
         self,

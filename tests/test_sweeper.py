@@ -448,3 +448,47 @@ def test_a_silent_cluster_agent_gets_a_day_before_its_jobs_are_retried(
         1,
         JobStatus.QUEUED,
     )
+
+
+def test_a_requeued_job_keeps_nothing_of_its_lost_attempt(make_session):
+    """
+    Back in the queue, a lost job has no agent, lease, start time or
+    deadline left from the attempt that was lost.
+
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
+    """
+    stale = {"last_heartbeat_at": func.now() - LONG_AGO}
+
+    async def scenario(sweeper, redis):
+        async with make_session() as session:
+            ids = await build_graph(session, [("A", "B")])
+        await start_running(make_session, ids["A"], **stale)
+        await sweeper.sweep_once()
+        async with make_session() as session:
+            return await session.get(Job, ids["A"])
+
+    job = with_sweeper(make_session, scenario)
+    assert job.status == JobStatus.QUEUED
+    left = (job.agent_id, job.last_heartbeat_at, job.started_at)
+    assert left == (None, None, None)
+    assert job.deadline_at is None
+
+
+def test_cancelling_a_waiting_job_ends_it_and_nothing_upstream(
+    client: TestClient, pipeline
+):
+    """
+    A job still waiting for its parent is cancelled at once; its parent
+    is not touched.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param pipeline: Owner headers, run id and job ids.
+    :type pipeline: tuple
+    """
+    headers, _, (first, second) = pipeline
+    response = client.post(f"/api/jobs/{second}/cancel", headers=headers)
+    assert response.json()["status"] == "cancelled"
+    parent = client.get(f"/api/jobs/{first}", headers=headers).json()
+    assert parent["status"] == "queued"

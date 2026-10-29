@@ -21,6 +21,7 @@ from app.models.compute_target import HOUSE_TARGET_ID, ComputeTarget
 from app.models.job import Job
 from app.models.run import Run
 from app.queue.job_queue import RedisJobQueue
+from app.runs.bundles import BundleStatus
 from tests.fake_pack import WATER_XYZ
 from tests.graphs import run_counter
 from tests.stores import make_redis
@@ -84,6 +85,27 @@ def drain_queue() -> None:
     asyncio.run(scenario())
 
 
+def forget_pack_requests(make_session: async_sessionmaker) -> None:
+    """
+    Drop the zip requests that runs finished by earlier tests left on
+    the house target, so a reply carries only this test's.
+
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
+    """
+
+    async def scenario():
+        async with make_session() as session:
+            await session.execute(
+                update(Run)
+                .where(Run.bundle_status == BundleStatus.REQUESTED)
+                .values(bundle_status=BundleStatus.NONE)
+            )
+            await session.commit()
+
+    asyncio.run(scenario())
+
+
 def submit_chain(client: TestClient, headers: dict[str, str]) -> list[str]:
     """
     Submit a two-job chain (first -> second) and return their ids.
@@ -111,19 +133,26 @@ def submit_chain(client: TestClient, headers: dict[str, str]) -> list[str]:
 
 
 @pytest.fixture
-def chain(client: TestClient, make_user_headers: UserHeadersFactory):
+def chain(
+    client: TestClient,
+    make_user_headers: UserHeadersFactory,
+    make_session: async_sessionmaker,
+):
     """
     A fresh two-job chain; submitting it put the first job (only) on
-    the house queue.
+    the house queue, which held nothing else, and no zip was waiting.
 
     :param client: In-process API client.
     :type client: TestClient
     :param make_user_headers: Factory registering a user key.
     :type make_user_headers: UserHeadersFactory
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
     :return: (owner headers, [first id, second id]).
     :rtype: tuple[dict[str, str], list[str]]
     """
     drain_queue()
+    forget_pack_requests(make_session)
     headers = make_user_headers()
     return headers, submit_chain(client, headers)
 

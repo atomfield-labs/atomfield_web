@@ -18,12 +18,12 @@ short Redis lock.
 
 import asyncio
 import logging
-from collections import defaultdict
+import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 
 from redis.asyncio import Redis
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, Row, Select, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.events.bus import EventBus
@@ -44,6 +44,27 @@ from app.storage.store import ArtifactStore
 
 logger = logging.getLogger(__name__)
 LOCK_KEY = "sweeper:lock"
+LOST_CANCELLED_MESSAGE = "Cancelled; its agent stopped responding"
+LOST_FAILED_MESSAGE = (
+    "Its agent stopped responding; gave up after {attempts} attempts"
+)
+OVERDUE_MESSAGE = "Ran past its time limit"
+
+
+def lost_reason(outcome: JobStatus, attempt: int) -> str:
+    """
+    Why a job whose agent went silent was ended.
+
+    :param outcome: CANCELLED (a cancel was pending) or FAILED.
+    :type outcome: JobStatus
+    :param attempt: The attempt that was lost (also how many ran).
+    :type attempt: int
+    :return: The message shown on the job.
+    :rtype: str
+    """
+    if outcome is JobStatus.CANCELLED:
+        return LOST_CANCELLED_MESSAGE
+    return LOST_FAILED_MESSAGE.format(attempts=attempt)
 
 
 @dataclass(slots=True)
@@ -197,6 +218,18 @@ class Sweeper:
             await session.commit()
         return count
 
+    async def read(self, query: Select) -> list[Row]:
+        """
+        The rows of a read-only query, in a session of its own.
+
+        :param query: The query.
+        :type query: Select
+        :return: Its rows.
+        :rtype: list[Row]
+        """
+        async with self.session_factory() as session:
+            return list((await session.execute(query)).all())
+
     async def resend_queued(self) -> int:
         """
         Add every queued job to its target's queue; jobs already there
@@ -210,24 +243,17 @@ class Sweeper:
             .join(Run, Run.id == Job.run_id)
             .where(Job.status == JobStatus.QUEUED)
         )
-        async with self.session_factory() as session:
-            rows = (await session.execute(query)).all()
-        by_target = defaultdict(list)
-        for job_id, target_id in rows:
-            by_target[target_id].append(job_id)
-        added = 0
-        for target_id, job_ids in by_target.items():
-            added += await self.queue.add(target_id, job_ids)
-        return added
+        return await self.queue.add_by_target(await self.read(query))
 
     async def handle_lost_leases(self, report: SweepReport) -> None:
         """
-        Resolve every running job whose agent has gone silent.
+        Resolve every running job whose agent has gone silent: cancel it
+        if a cancel is pending, retry it if attempts remain, else fail
+        it.
 
         :param report: Pass report to update.
         :type report: SweepReport
         """
-        expired = lease_expired(self.limits)
         query = (
             select(
                 Job.id,
@@ -237,25 +263,37 @@ class Sweeper:
                 Run.target_id,
             )
             .join(Run, Run.id == Job.run_id)
-            .where(Job.status == JobStatus.RUNNING, expired)
+            .where(Job.status == JobStatus.RUNNING, lease_expired(self.limits))
         )
-        async with self.session_factory() as session:
-            rows = (await session.execute(query)).all()
-        for job_id, attempt, max_attempts, cancel, target_id in rows:
-            if cancel:
-                report.cancelled += await self.end_lost(
-                    job_id, attempt, JobStatus.CANCELLED
-                )
-            elif attempt < max_attempts:
-                report.retried += await self.retry_lost(
-                    job_id, attempt, target_id
-                )
-            else:
-                report.failed += await self.end_lost(
-                    job_id, attempt, JobStatus.FAILED
-                )
+        for lost in await self.read(query):
+            await self.resolve_lost(lost, report)
 
-    async def retry_lost(self, job_id, attempt: int, target_id) -> int:
+    async def resolve_lost(self, lost: Row, report: SweepReport) -> None:
+        """
+        Cancel, retry or fail one job whose agent went silent.
+
+        :param lost: The job's id, attempt, attempts allowed, pending
+            cancel and run target.
+        :type lost: Row
+        :param report: Pass report to update.
+        :type report: SweepReport
+        """
+        if lost.cancel_requested:
+            report.cancelled += await self.end_lost(
+                lost.id, lost.attempt, JobStatus.CANCELLED
+            )
+        elif lost.attempt < lost.max_attempts:
+            report.retried += await self.retry_lost(
+                lost.id, lost.attempt, lost.target_id
+            )
+        else:
+            report.failed += await self.end_lost(
+                lost.id, lost.attempt, JobStatus.FAILED
+            )
+
+    async def retry_lost(
+        self, job_id: uuid.UUID, attempt: int, target_id: uuid.UUID
+    ) -> int:
         """
         Queue a lost job again (an infrastructure failure, not the
         task's fault), then dispatch it.
@@ -277,7 +315,9 @@ class Sweeper:
         await self.queue.add(target_id, [job_id])
         return 1
 
-    async def end_lost(self, job_id, attempt: int, outcome: JobStatus) -> int:
+    async def end_lost(
+        self, job_id: uuid.UUID, attempt: int, outcome: JobStatus
+    ) -> int:
         """
         Finish a lost job as cancelled or failed, with its descendants.
 
@@ -290,20 +330,42 @@ class Sweeper:
         :return: 1 if finished, 0 if it turned out not to be lost.
         :rtype: int
         """
-        reason = {
-            JobStatus.CANCELLED: "Cancelled; its agent stopped responding",
-            JobStatus.FAILED: (
-                f"Its agent stopped responding; gave up after "
-                f"{attempt} attempts"
-            ),
-        }[outcome]
+        reason = lost_reason(outcome, attempt)
+        condition = lease_expired(self.limits)
+        return await self.finish(job_id, attempt, outcome, condition, reason)
+
+    async def finish(
+        self,
+        job_id: uuid.UUID,
+        attempt: int,
+        outcome: JobStatus,
+        condition: ColumnElement[bool],
+        reason: str,
+    ) -> int:
+        """
+        End one job, in a transaction of its own, if ``condition`` still
+        holds when the update runs (the agent may have just reported).
+
+        :param job_id: The job.
+        :type job_id: uuid.UUID
+        :param attempt: The attempt being ended.
+        :type attempt: int
+        :param outcome: CANCELLED or FAILED.
+        :type outcome: JobStatus
+        :param condition: Why it is ended, checked again in the update.
+        :type condition: ColumnElement[bool]
+        :param reason: Message shown on the job.
+        :type reason: str
+        :return: 1 if ended, 0 if the condition no longer held.
+        :rtype: int
+        """
         async with self.session_factory() as session:
             done = await complete_attempt(
                 session,
                 job_id,
                 outcome,
                 expected_attempt=attempt,
-                extra_conditions=[lease_expired(self.limits)],
+                extra_conditions=[condition],
                 error_message=reason,
             )
             await commit_and_publish(session, self.bus)
@@ -321,18 +383,9 @@ class Sweeper:
         query = select(Job.id, Job.attempt).where(
             Job.status == JobStatus.RUNNING, overdue
         )
-        async with self.session_factory() as session:
-            rows = (await session.execute(query)).all()
-            failed = 0
-            for job_id, attempt in rows:
-                done = await complete_attempt(
-                    session,
-                    job_id,
-                    JobStatus.FAILED,
-                    expected_attempt=attempt,
-                    extra_conditions=[overdue],
-                    error_message="Ran past its time limit",
-                )
-                await commit_and_publish(session, self.bus)
-                failed += int(done is not None)
+        failed = 0
+        for job_id, attempt in await self.read(query):
+            failed += await self.finish(
+                job_id, attempt, JobStatus.FAILED, overdue, OVERDUE_MESSAGE
+            )
         return failed

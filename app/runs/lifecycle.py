@@ -14,9 +14,19 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import timedelta
+from types import MappingProxyType
 from typing import Any
 
-from sqlalchemy import ColumnElement, case, func, literal, select, update
+from sqlalchemy import (
+    ColumnElement,
+    Select,
+    Update,
+    case,
+    func,
+    literal,
+    select,
+    update,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.events.changes import record_changes
@@ -24,16 +34,33 @@ from app.models.compute_target import HOUSE_TARGET_ID
 from app.models.job import Job, JobDependency
 from app.models.run import Run
 from app.queue.job_queue import RedisJobQueue
-from app.runs.states import JobStatus
-from app.runs.transitions import transition
+from app.runs.states import NOT_STARTED_STATUSES, JobStatus
+from app.runs.transitions import (
+    fresh_rows,
+    held_by,
+    transition,
+    update_job,
+    update_jobs,
+)
 
 UPSTREAM_FAILED_MESSAGE = "Upstream dependency failed"
 UPSTREAM_CANCELLED_MESSAGE = "Upstream job was cancelled"
+CANCELLED_MESSAGE = "Cancelled by request"
 # What a job's descendants become when it ends without succeeding.
 DESCENDANT_STATUS = {
     JobStatus.FAILED: (JobStatus.UPSTREAM_FAILED, UPSTREAM_FAILED_MESSAGE),
     JobStatus.CANCELLED: (JobStatus.CANCELLED, UPSTREAM_CANCELLED_MESSAGE),
 }
+# What a job holds only during an attempt; a job back in the queue has
+# none of it (no agent, lease, start or deadline).
+BETWEEN_ATTEMPTS = MappingProxyType(
+    {
+        "agent_id": None,
+        "last_heartbeat_at": None,
+        "started_at": None,
+        "deadline_at": None,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +132,18 @@ async def create_run(
     return run
 
 
+def deadline_from_now(walltime_minutes: int) -> ColumnElement[Any]:
+    """
+    A deadline one task time limit from now, on the database clock.
+
+    :param walltime_minutes: The task's time limit.
+    :type walltime_minutes: int
+    :return: SQL expression for the deadline.
+    :rtype: ColumnElement[Any]
+    """
+    return func.now() + timedelta(minutes=walltime_minutes)
+
+
 async def start_attempt(
     session: AsyncSession,
     job_id: uuid.UUID,
@@ -140,11 +179,7 @@ async def start_attempt(
         last_heartbeat_at=func.now(),
         scheduled=scheduled,
         started_at=None if scheduled else func.now(),
-        deadline_at=(
-            None
-            if scheduled
-            else func.now() + timedelta(minutes=walltime_minutes)
-        ),
+        deadline_at=None if scheduled else deadline_from_now(walltime_minutes),
     )
 
 
@@ -176,24 +211,13 @@ async def mark_started(
     """
     statement = (
         update(Job)
-        .where(
-            Job.id == job_id,
-            Job.status == JobStatus.RUNNING,
-            Job.attempt == attempt,
-            Job.agent_id == agent_id,
-            Job.started_at.is_(None),
-        )
+        .where(*held_by(job_id, attempt, agent_id), Job.started_at.is_(None))
         .values(
             started_at=func.now(),
-            deadline_at=func.now() + timedelta(minutes=walltime_minutes),
+            deadline_at=deadline_from_now(walltime_minutes),
         )
-        .returning(Job)
-        .execution_options(synchronize_session=False, populate_existing=True)
     )
-    job = (await session.execute(statement)).scalars().first()
-    if job is not None:
-        record_changes(session, [job])
-    return job
+    return await update_job(session, statement)
 
 
 async def release_children(
@@ -202,8 +226,7 @@ async def release_children(
 ) -> list[Job]:
     """
     Count one more finished parent for each child; queue those with
-    none left. One statement: every SET expression reads the old row,
-    so ``pending_parents = 1`` means "this parent was the last".
+    none left.
 
     :param session: Open database session; the caller commits.
     :type session: AsyncSession
@@ -212,24 +235,76 @@ async def release_children(
     :return: Children that became queued.
     :rtype: list[Job]
     """
-    children = select(JobDependency.downstream_id).where(
-        JobDependency.upstream_id == parent_id
-    )
+    statement = fresh_rows(count_down_children(parent_id))
+    result = await session.execute(statement)
+    # Only the queued ones changed status; the others just count down.
+    ready = [job for job in result.scalars() if job.status == JobStatus.QUEUED]
+    record_changes(session, ready)
+    return ready
+
+
+def count_down_children(parent_id: uuid.UUID) -> Update:
+    """
+    The UPDATE counting one more finished parent for each waiting
+    child, queueing those with none left. One statement: every SET
+    expression reads the old row, so ``pending_parents = 1`` means
+    "this parent was the last".
+
+    :param parent_id: Job that just succeeded.
+    :type parent_id: uuid.UUID
+    :return: The statement.
+    :rtype: Update
+    """
     becomes_ready = Job.pending_parents == 1
-    statement = (
+    return (
         update(Job)
-        .where(Job.id.in_(children), Job.status == JobStatus.WAITING)
+        .where(
+            Job.id.in_(children_of(parent_id)),
+            Job.status == JobStatus.WAITING,
+        )
         .values(
             pending_parents=Job.pending_parents - 1,
             status=case((becomes_ready, JobStatus.QUEUED), else_=Job.status),
         )
-        .returning(Job)
-        .execution_options(synchronize_session=False, populate_existing=True)
     )
-    result = await session.execute(statement)
-    ready = [job for job in result.scalars() if job.status == JobStatus.QUEUED]
-    record_changes(session, ready)
-    return ready
+
+
+def children_of(job_id: uuid.UUID) -> Select:
+    """
+    The jobs directly downstream of one.
+
+    :param job_id: The job.
+    :type job_id: uuid.UUID
+    :return: A query of child ids.
+    :rtype: Select
+    """
+    return select(JobDependency.downstream_id).where(
+        JobDependency.upstream_id == job_id
+    )
+
+
+def descendants_of(job_id: uuid.UUID) -> Select:
+    """
+    Every job downstream of one, found by a recursive query inside the
+    database.
+
+    :param job_id: The job.
+    :type job_id: uuid.UUID
+    :return: A query of descendant ids.
+    :rtype: Select
+    """
+    edges = JobDependency.__table__
+    found = (
+        select(edges.c.downstream_id.label("id"))
+        .where(edges.c.upstream_id == job_id)
+        .cte("descendants", recursive=True)
+    )
+    found = found.union(
+        select(edges.c.downstream_id).join(
+            found, edges.c.upstream_id == found.c.id
+        )
+    )
+    return select(found.c.id)
 
 
 async def mark_descendants(
@@ -241,9 +316,9 @@ async def mark_descendants(
     """
     Give every waiting descendant of a job the same final status.
 
-    A recursive query walks the graph inside the database. Descendants
-    of a job that never succeeded are always still waiting, because
-    each needs that job (directly or through others) to finish first.
+    Descendants of a job that never succeeded are always still
+    waiting, because each needs that job (directly or through others)
+    to finish first.
 
     :param session: Open database session; the caller commits.
     :type session: AsyncSession
@@ -256,30 +331,40 @@ async def mark_descendants(
     :return: Ids of the descendants that changed.
     :rtype: list[uuid.UUID]
     """
-    edges = JobDependency.__table__
-    descendants = (
-        select(edges.c.downstream_id.label("id"))
-        .where(edges.c.upstream_id == job_id)
-        .cte("descendants", recursive=True)
-    )
-    descendants = descendants.union(
-        select(edges.c.downstream_id).join(
-            descendants, edges.c.upstream_id == descendants.c.id
-        )
-    )
     statement = (
         update(Job)
         .where(
-            Job.id.in_(select(descendants.c.id)),
+            Job.id.in_(descendants_of(job_id)),
             Job.status == JobStatus.WAITING,
         )
         .values(status=status, error_message=message)
-        .returning(Job)
-        .execution_options(synchronize_session=False, populate_existing=True)
     )
-    changed = list((await session.execute(statement)).scalars())
-    record_changes(session, changed)
-    return [job.id for job in changed]
+    return [job.id for job in await update_jobs(session, statement)]
+
+
+async def consequences(
+    session: AsyncSession,
+    job: Job,
+    outcome: JobStatus,
+) -> list[Job]:
+    """
+    What a job's end means for the jobs after it: success releases its
+    children; failure or cancelling ends its descendants.
+
+    :param session: Open database session; the caller commits.
+    :type session: AsyncSession
+    :param job: The job that just ended.
+    :type job: Job
+    :param outcome: SUCCEEDED, FAILED or CANCELLED.
+    :type outcome: JobStatus
+    :return: Children that became queued.
+    :rtype: list[Job]
+    """
+    if outcome is JobStatus.SUCCEEDED:
+        return await release_children(session, job.id)
+    status, message = DESCENDANT_STATUS[outcome]
+    await mark_descendants(session, job.id, status, message)
+    return []
 
 
 async def complete_attempt(
@@ -327,11 +412,7 @@ async def complete_attempt(
     )
     if job is None:
         return None
-    if outcome is JobStatus.SUCCEEDED:
-        return Completion(job, await release_children(session, job.id))
-    status, message = DESCENDANT_STATUS[outcome]
-    await mark_descendants(session, job.id, status, message)
-    return Completion(job, [])
+    return Completion(job, await consequences(session, job, outcome))
 
 
 async def requeue_lost(
@@ -341,7 +422,8 @@ async def requeue_lost(
     limits: SilenceLimits,
 ) -> Job | None:
     """
-    Put a job whose agent went silent back in the queue.
+    Put a job whose agent went silent back in the queue, clearing what
+    belonged to the lost attempt.
 
     The heartbeat check is part of the same statement: if the agent
     reported in after the sweeper looked, nothing happens.
@@ -364,9 +446,7 @@ async def requeue_lost(
         JobStatus.QUEUED,
         expected_attempt=attempt,
         extra_conditions=[lease_expired(limits)],
-        agent_id=None,
-        last_heartbeat_at=None,
-        deadline_at=None,
+        **BETWEEN_ATTEMPTS,
     )
 
 
@@ -404,23 +484,37 @@ async def request_cancel(
         None if the job had already finished.
     :rtype: JobStatus | None
     """
-    for waiting_status in (JobStatus.WAITING, JobStatus.QUEUED):
-        done = await complete_attempt(
-            session,
-            job_id,
-            JobStatus.CANCELLED,
-            extra_conditions=[Job.status == waiting_status],
-            error_message="Cancelled by request",
-        )
-        if done is not None:
-            return JobStatus.CANCELLED
+    done = await complete_attempt(
+        session,
+        job_id,
+        JobStatus.CANCELLED,
+        extra_conditions=[Job.status.in_(NOT_STARTED_STATUSES)],
+        error_message=CANCELLED_MESSAGE,
+    )
+    if done is not None:
+        return JobStatus.CANCELLED
+    return JobStatus.RUNNING if await flag_cancel(session, job_id) else None
+
+
+async def flag_cancel(session: AsyncSession, job_id: uuid.UUID) -> bool:
+    """
+    Ask the agent running a job to stop it: its next heartbeat reply
+    says so.
+
+    :param session: Open database session; the caller commits.
+    :type session: AsyncSession
+    :param job_id: The job.
+    :type job_id: uuid.UUID
+    :return: False if the job was not running.
+    :rtype: bool
+    """
     flagged = await session.execute(
         update(Job)
         .where(Job.id == job_id, Job.status == JobStatus.RUNNING)
         .values(cancel_requested=True)
         .returning(Job.id)
     )
-    return JobStatus.RUNNING if flagged.first() else None
+    return flagged.first() is not None
 
 
 async def dispatch(
@@ -444,8 +538,4 @@ async def dispatch(
         return
     query = select(Run.id, Run.target_id).where(Run.id.in_(run_ids))
     target_of = dict((await session.execute(query)).all())
-    by_target: dict[uuid.UUID, list[uuid.UUID]] = {}
-    for job in jobs:
-        by_target.setdefault(target_of[job.run_id], []).append(job.id)
-    for target_id, job_ids in by_target.items():
-        await queue.add(target_id, job_ids)
+    await queue.add_by_target((job.id, target_of[job.run_id]) for job in jobs)
