@@ -9,6 +9,7 @@ from redis.asyncio import Redis
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.errors import not_found, unauthorized
 from app.core.config import settings
 from app.core.rate_limit import FixedWindowRateLimiter, RateLimit
 from app.core.security import hash_api_key
@@ -16,6 +17,7 @@ from app.db.session import get_db
 from app.events.bus import EventBus
 from app.models.api_key import ApiKey
 from app.models.job import Job
+from app.models.run import Run
 from app.queue.job_queue import RedisJobQueue
 from app.releases.catalogs import CurrentCatalog, ReleaseCatalogs
 from app.storage.store import LocalDiskStore
@@ -23,6 +25,12 @@ from app.storage.store import LocalDiskStore
 CLOUDFLARE_CLIENT_HEADER = "CF-Connecting-IP"
 UNKNOWN_CLIENT = "unknown"
 SECONDS_PER_HOUR = 3600
+
+
+MISSING_KEY_MESSAGE = (
+    "API key required. Please provide a valid 'X-API-Key' header."
+)
+INVALID_KEY_MESSAGE = "Invalid or deactivated API key."
 
 
 async def get_redis(request: Request) -> Redis:
@@ -119,38 +127,47 @@ async def get_current_api_key(
     :raises HTTPException: 401 if key is missing, invalid, or inactive.
     """
     if not x_api_key:
-        error_msg = (
-            "API key required. Please provide a valid 'X-API-Key' header."
-        )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=error_msg,
-        )
+        raise unauthorized(MISSING_KEY_MESSAGE)
+    api_key = await active_key(db, x_api_key)
+    if api_key is None:
+        raise unauthorized(INVALID_KEY_MESSAGE)
+    await mark_used(db, api_key)
+    return api_key
 
-    key_hash = hash_api_key(x_api_key)
+
+async def active_key(db: AsyncSession, secret: str) -> ApiKey | None:
+    """
+    The active key with this secret (keys are stored as hashes).
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param secret: The key as the client sent it.
+    :type secret: str
+    :return: The key, or None if unknown or deactivated.
+    :rtype: ApiKey | None
+    """
     query = select(ApiKey).where(
-        ApiKey.key_hash == key_hash,
+        ApiKey.key_hash == hash_api_key(secret),
         ApiKey.is_active.is_(True),
     )
-    result = await db.execute(query)
-    api_key = result.scalars().first()
+    return (await db.execute(query)).scalars().first()
 
-    if not api_key:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or deactivated API key.",
-        )
 
-    # Touch last_used_at timestamp asynchronously
-    touch_stmt = (
+async def mark_used(db: AsyncSession, api_key: ApiKey) -> None:
+    """
+    Record when a key was last used.
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param api_key: The key.
+    :type api_key: ApiKey
+    """
+    await db.execute(
         update(ApiKey)
         .where(ApiKey.id == api_key.id)
         .values(last_used_at=func.now())
     )
-    await db.execute(touch_stmt)
     await db.commit()
-
-    return api_key
 
 
 async def get_optional_api_key(
@@ -216,16 +233,28 @@ def is_admin_key(api_key: ApiKey) -> bool:
     return api_key.key_hash == hash_api_key(settings.ADMIN_API_KEY)
 
 
+def may_act_on(api_key: ApiKey, owner_id: UUID | None) -> bool:
+    """
+    The access rule for jobs and runs: their owner, or the
+    administrator.
+
+    :param api_key: Authenticated caller.
+    :type api_key: ApiKey
+    :param owner_id: The owning key's id.
+    :type owner_id: UUID | None
+    :return: True if the caller may see and change it.
+    :rtype: bool
+    """
+    return owner_id == api_key.id or is_admin_key(api_key)
+
+
 async def get_owned_job(
     job_id: UUID,
     api_key: ApiKey = Depends(get_current_api_key),
     db: AsyncSession = Depends(get_db),
 ) -> Job:
     """
-    Load a job the caller may see: their own, or any job for the admin.
-
-    Unknown and foreign jobs both answer 404, so a stranger cannot even
-    learn that a job id exists.
+    Load a job the caller may act on (``may_act_on``).
 
     :param job_id: Job id from the URL path.
     :type job_id: UUID
@@ -233,20 +262,38 @@ async def get_owned_job(
     :type api_key: ApiKey
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :return: The job, if the caller may access it.
+    :return: The job.
     :rtype: Job
     :raises HTTPException: 404 if missing or owned by someone else.
     """
     job = await db.get(Job, job_id)
-    visible = job is not None and (
-        job.api_key_id == api_key.id or is_admin_key(api_key)
-    )
-    if not visible:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job {job_id} not found",
-        )
+    if job is None or not may_act_on(api_key, job.api_key_id):
+        raise not_found("Job", job_id)
     return job
+
+
+async def get_owned_run(
+    run_id: UUID,
+    api_key: ApiKey = Depends(get_current_api_key),
+    db: AsyncSession = Depends(get_db),
+) -> Run:
+    """
+    Load a run the caller may act on (``may_act_on``).
+
+    :param run_id: Run id from the URL path.
+    :type run_id: UUID
+    :param api_key: Authenticated caller.
+    :type api_key: ApiKey
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :return: The run.
+    :rtype: Run
+    :raises HTTPException: 404 if missing or owned by someone else.
+    """
+    run = await db.get(Run, run_id)
+    if run is None or not may_act_on(api_key, run.owner_id):
+        raise not_found("Run", run_id)
+    return run
 
 
 def client_address(request: Request) -> str:

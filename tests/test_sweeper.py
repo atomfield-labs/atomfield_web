@@ -492,3 +492,35 @@ def test_cancelling_a_waiting_job_ends_it_and_nothing_upstream(
     assert response.json()["status"] == "cancelled"
     parent = client.get(f"/api/jobs/{first}", headers=headers).json()
     assert parent["status"] == "queued"
+
+
+def test_cancelling_a_run_counts_every_job_it_cancelled(
+    client: TestClient, make_user_headers: UserHeadersFactory
+):
+    """
+    A run of three jobs that have not started reports three cancelled,
+    whatever order the jobs are found in (cancelling the first one used
+    to take the others along uncounted).
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param make_user_headers: Factory registering a user key.
+    :type make_user_headers: UserHeadersFactory
+    """
+    headers = make_user_headers()
+    nodes = [{"ui_id": name, "script_name": "toy_opt"} for name in "abc"]
+    edges = [
+        {"upstream_ui_id": "a", "downstream_ui_id": "b"},
+        {"upstream_ui_id": "b", "downstream_ui_id": "c"},
+    ]
+    payload = {"nodes": nodes, "edges": edges}
+    body = client.post(
+        "/api/jobs/pipeline/submit", json=payload, headers=headers
+    ).json()
+
+    response = client.post(
+        f"/api/runs/{body['run_id']}/cancel", headers=headers
+    )
+
+    assert response.json()["cancelled"] == 3
+    assert response.json()["cancelling"] == 0

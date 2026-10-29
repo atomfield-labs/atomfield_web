@@ -2,32 +2,20 @@
 Agent identity: bearer tokens, stored only as hashes.
 """
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.errors import unauthorized
 from app.core.config import settings
 from app.core.security import hash_api_key
 from app.db.session import get_db
 from app.models.compute_target import HOUSE_TARGET_ID, ComputeTarget
 
 BEARER = "bearer"
-
-
-def unauthorized(detail: str) -> HTTPException:
-    """
-    Build a 401 that tells the client which scheme to use.
-
-    :param detail: Explanation for the client.
-    :type detail: str
-    :return: Exception to raise.
-    :rtype: HTTPException
-    """
-    return HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail=detail,
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+BEARER_SCHEME = "Bearer"
+MISSING_TOKEN_MESSAGE = "Agent token required: Authorization: Bearer ..."
+UNKNOWN_TOKEN_MESSAGE = "Unknown agent token."
 
 
 async def get_agent_target(
@@ -47,13 +35,13 @@ async def get_agent_target(
     """
     scheme, _, token = (authorization or "").partition(" ")
     if scheme.lower() != BEARER or not token:
-        raise unauthorized("Agent token required: Authorization: Bearer ...")
+        raise unauthorized(MISSING_TOKEN_MESSAGE, BEARER_SCHEME)
     query = select(ComputeTarget).where(
         ComputeTarget.token_hash == hash_api_key(token)
     )
     target = (await db.execute(query)).scalars().first()
     if target is None:
-        raise unauthorized("Unknown agent token.")
+        raise unauthorized(UNKNOWN_TOKEN_MESSAGE, BEARER_SCHEME)
     return target
 
 

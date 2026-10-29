@@ -3,10 +3,30 @@ The message a watcher receives when a job changes.
 """
 
 import uuid
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
 from app.runs.states import JobStatus
+
+
+def state_fields(job: Any) -> dict[str, Any]:
+    """
+    A job's state as events and snapshots carry it.
+
+    :param job: A Job, or a row with the same columns.
+    :type job: Any
+    :return: ``job_id``, ``status``, ``attempt``, ``error_message``,
+        ``started``.
+    :rtype: dict[str, Any]
+    """
+    return {
+        "job_id": job.id,
+        "status": JobStatus(job.status),
+        "attempt": job.attempt,
+        "error_message": job.error_message,
+        "started": job.started_at is not None,
+    }
 
 
 class JobEvent(BaseModel):

@@ -7,31 +7,19 @@ the shared AtomField server, never on someone else's.
 import uuid
 from datetime import timedelta
 
-from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.errors import not_found
 from app.core.security import generate_agent_token
 from app.models.compute_target import HOUSE_TARGET_ID, ComputeTarget
 from app.schemas.targets import TargetCreate, TargetInfo, TargetToken
 
 # Agents call in at least every 30 s (claims and heartbeats).
 ONLINE_WINDOW = timedelta(seconds=90)
-
-
-def not_found(target_id: uuid.UUID) -> HTTPException:
-    """
-    The answer for a target that is missing, retired, or not yours:
-    the same 404, so strangers learn nothing.
-
-    :param target_id: Requested target.
-    :type target_id: uuid.UUID
-    :return: The error to raise.
-    :rtype: HTTPException
-    """
-    return HTTPException(
-        status.HTTP_404_NOT_FOUND, f"Compute target {target_id} not found"
-    )
+# Missing, retired or not yours: the same 404, so strangers learn
+# nothing.
+TARGET_KIND = "Compute target"
 
 
 def visible_to(owner_id: uuid.UUID):
@@ -156,7 +144,7 @@ async def owned_target(
     target = await db.get(ComputeTarget, target_id)
     owned = target is not None and target.owner_id == owner_id
     if not owned or target.retired_at is not None:
-        raise not_found(target_id)
+        raise not_found(TARGET_KIND, target_id)
     return target
 
 
@@ -234,5 +222,5 @@ async def usable_target(
         ComputeTarget.id == target_id, visible_to(owner_id)
     )
     if (await db.execute(query)).scalar_one_or_none() is None:
-        raise not_found(target_id)
+        raise not_found(TARGET_KIND, target_id)
     return target_id

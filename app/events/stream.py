@@ -19,11 +19,11 @@ import json
 import uuid
 from collections.abc import AsyncIterator
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.events.bus import EventBus, Subscription
-from app.events.models import JobState, RunSnapshot
+from app.events.models import JobState, RunSnapshot, state_fields
 from app.models.job import Job
 from app.models.run import Run
 
@@ -62,7 +62,25 @@ async def read_snapshot(
     :return: The snapshot, or None if the run no longer exists.
     :rtype: RunSnapshot | None
     """
-    query = (
+    async with session_factory() as session:
+        rows = (await session.execute(snapshot_query(run_id))).all()
+    if not rows:
+        return None
+    jobs = [JobState(**state_fields(row)) for row in rows if row.id is not None]
+    return RunSnapshot(run_id=run_id, seq=rows[0].event_seq, jobs=jobs)
+
+
+def snapshot_query(run_id: uuid.UUID) -> Select:
+    """
+    The run's counter and every job's state, in one statement; a run
+    without jobs still gives one row (its counter).
+
+    :param run_id: Run to read.
+    :type run_id: uuid.UUID
+    :return: The query.
+    :rtype: Select
+    """
+    return (
         select(
             Run.event_seq,
             Job.id,
@@ -76,22 +94,6 @@ async def read_snapshot(
         .where(Run.id == run_id)
         .order_by(Job.created_at)
     )
-    async with session_factory() as session:
-        rows = (await session.execute(query)).all()
-    if not rows:
-        return None
-    jobs = [
-        JobState(
-            job_id=job_id,
-            status=status,
-            attempt=attempt,
-            error_message=error,
-            started=started_at is not None,
-        )
-        for _, job_id, status, attempt, error, started_at in rows
-        if job_id is not None
-    ]
-    return RunSnapshot(run_id=run_id, seq=rows[0].event_seq, jobs=jobs)
 
 
 async def read_counter(

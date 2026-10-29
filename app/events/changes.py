@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, SessionTransaction
 
 from app.events.bus import EventBus
-from app.events.models import JobEvent
+from app.events.models import JobEvent, state_fields
 from app.models.job import Job
 from app.models.run import Run
 from app.runs.bundles import close_run_if_finished
@@ -71,14 +71,7 @@ def record_changes(session: AsyncSession, jobs: Iterable[Job]) -> None:
     """
     pending = session.info.setdefault(CHANGES_KEY, {})
     for job in jobs:
-        pending[job.id] = JobChange(
-            job.run_id,
-            job.id,
-            JobStatus(job.status),
-            job.attempt,
-            job.error_message,
-            job.started_at is not None,
-        )
+        pending[job.id] = JobChange(run_id=job.run_id, **state_fields(job))
 
 
 def take_changes(session: AsyncSession) -> list[JobChange]:

@@ -82,6 +82,21 @@ class SilenceLimits:
 
 
 @dataclass(frozen=True, slots=True)
+class RunCancel:
+    """
+    What cancelling a run did.
+
+    :param cancelled: Jobs cancelled at once (not started yet).
+    :type cancelled: int
+    :param cancelling: Running jobs whose agents were asked to stop.
+    :type cancelling: int
+    """
+
+    cancelled: int
+    cancelling: int
+
+
+@dataclass(frozen=True, slots=True)
 class Completion:
     """
     The result of finishing one job attempt.
@@ -493,28 +508,55 @@ async def request_cancel(
     )
     if done is not None:
         return JobStatus.CANCELLED
-    return JobStatus.RUNNING if await flag_cancel(session, job_id) else None
+    flagged = await flag_cancel(session, Job.id == job_id)
+    return JobStatus.RUNNING if flagged else None
 
 
-async def flag_cancel(session: AsyncSession, job_id: uuid.UUID) -> bool:
+async def cancel_run_jobs(
+    session: AsyncSession, run_id: uuid.UUID
+) -> RunCancel:
     """
-    Ask the agent running a job to stop it: its next heartbeat reply
-    says so.
+    Cancel every unfinished job of a run: those not started at once,
+    in one statement (so no job's cascade can hide another from the
+    count), and running ones by asking their agents.
+
+    :param session: Open database session; the caller commits with
+        ``commit_and_publish``.
+    :type session: AsyncSession
+    :param run_id: The run.
+    :type run_id: uuid.UUID
+    :return: How many were cancelled, and how many are stopping.
+    :rtype: RunCancel
+    """
+    statement = (
+        update(Job)
+        .where(Job.run_id == run_id, Job.status.in_(NOT_STARTED_STATUSES))
+        .values(status=JobStatus.CANCELLED, error_message=CANCELLED_MESSAGE)
+    )
+    cancelled = await update_jobs(session, statement)
+    flagged = await flag_cancel(session, Job.run_id == run_id)
+    return RunCancel(cancelled=len(cancelled), cancelling=flagged)
+
+
+async def flag_cancel(session: AsyncSession, which: ColumnElement[bool]) -> int:
+    """
+    Ask the agents running some jobs to stop them: their next
+    heartbeat reply says so.
 
     :param session: Open database session; the caller commits.
     :type session: AsyncSession
-    :param job_id: The job.
-    :type job_id: uuid.UUID
-    :return: False if the job was not running.
-    :rtype: bool
+    :param which: Condition picking the jobs (one job, or a run's).
+    :type which: ColumnElement[bool]
+    :return: How many running jobs were flagged.
+    :rtype: int
     """
     flagged = await session.execute(
         update(Job)
-        .where(Job.id == job_id, Job.status == JobStatus.RUNNING)
+        .where(which, Job.status == JobStatus.RUNNING)
         .values(cancel_requested=True)
         .returning(Job.id)
     )
-    return flagged.first() is not None
+    return len(flagged.all())
 
 
 async def dispatch(
