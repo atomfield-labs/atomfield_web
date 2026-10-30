@@ -10,11 +10,9 @@ import {
   applyEdgeChanges,
   reconnectEdge,
   Position,
-  NodeToolbar,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { v4 as uuidv4 } from 'uuid';
-import { GitBranch } from 'lucide-react';
 import RemovableEdge from './RemovableEdge';
 import StructureNode from './StructureNode';
 import CalculationNode from './CalculationNode';
@@ -37,14 +35,50 @@ import {
 
 // A pipeline fills the canvas, but small ones stay at actual size.
 const FIT_VIEW = { maxZoom: 1, padding: 0.08 };
+// Room kept between a chosen box and the canvas's right edge.
+const VIEW_MARGIN = 24;
 // Input boxes for several chosen files stack this far apart.
 const FILE_SPACING = 70;
-// How many copies a sweep makes, typed in its toolbar.
-const COUNT_INPUT = [
-  'w-12 px-1 py-0.5 text-xs font-bold text-center bg-stone-50 border',
-  'border-stone-300 rounded text-stone-800 focus:outline-none',
-  'focus:ring-1 focus:ring-stone-400',
-].join(' ');
+
+/**
+ * How many parallel copies of a step run: itself and its circles.
+ */
+function copiesOf(node: Node, nodes: Node[]): number {
+  const data = node.data as any;
+  if (data?.branchCount) return data.branchCount;
+  if (!data?.branchGroupId) return 1;
+  const circles = nodes.filter(
+    (other) =>
+      other.type === 'branchCircle' &&
+      (other.data as any)?.branchGroupId === data.branchGroupId
+  );
+  return circles.length + 1;
+}
+
+/**
+ * What the side panel shows for a box: its stored details with its
+ * latest status, log and files.
+ */
+function panelNode(node: Node, nodes: Node[]): any {
+  const data = node.data as any;
+  if (node.type === 'structure') {
+    return { id: node.id, type: 'structure', ...data, data };
+  }
+  const stored = data?.originalData ?? node;
+  return {
+    ...stored,
+    id: node.id,
+    type: node.type || 'default',
+    status: data?.status || stored.status || 'Draft',
+    logs: data?.logs,
+    artifacts: data?.artifacts,
+    job_id: data?.job_id,
+    parameters: data?.parameters ?? stored.parameters,
+    default_parameters: data?.default_parameters || stored.default_parameters,
+    copies: copiesOf(node, nodes),
+    data,
+  };
+}
 
 const edgeTypes = {
   removable: RemovableEdge,
@@ -60,8 +94,10 @@ const nodeTypes: any = {
 
 interface GraphCanvasProps {
   blueprint: { nodes: any[]; edges: any[] };
+  // A box was clicked: its details, for the side panel.
   onNodeClick?: (node: any) => void;
-  onNodeDoubleClick?: (node: any) => void;
+  // The click landed on nothing that has details.
+  onDeselect?: () => void;
   selectedNodeId?: string | null;
   isEditable?: boolean;
   sessionId?: string;
@@ -92,8 +128,8 @@ function isGroupMemberNode(node?: Node | null, targetGroupId?: string, parentId?
 export default function GraphCanvas({ 
   blueprint, 
   onNodeClick, 
-  onNodeDoubleClick,
-  selectedNodeId: _selectedNodeId,
+  onDeselect,
+  selectedNodeId,
   isEditable = false,
   sessionId: _sessionId,
   onRegisterDeleteHandler,
@@ -107,12 +143,7 @@ export default function GraphCanvas({
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
-  const [clickedNodeId, setClickedNodeId] = useState<string | null>(null);
-  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [customToolbarCount, setCustomToolbarCount] = useState(3);
   const { taskById } = useTaskDefinitions();
-
-  const activeToolbarNodeId = clickedNodeId;
 
   const nodesRef = useRef<Node[]>(nodes);
   const edgesRef = useRef<Edge[]>(edges);
@@ -125,64 +156,42 @@ export default function GraphCanvas({
     edgesRef.current = edges;
   }, [edges]);
 
+
+  const {
+    screenToFlowPosition,
+    fitView: rfFitView,
+    getNode,
+    getViewport,
+    setViewport,
+    setNodes: setFlowNodes,
+  } = useReactFlow();
+
+  // The panel closed (its X, Escape): no box stays ringed.
   useEffect(() => {
-    return () => {
-      if (clickTimerRef.current) {
-        clearTimeout(clickTimerRef.current);
-        clickTimerRef.current = null;
-      }
-    };
-  }, []);
+    if (selectedNodeId) return;
+    setFlowNodes((current) =>
+      current.some((node) => node.selected)
+        ? current.map((node) => ({ ...node, selected: false }))
+        : current
+    );
+  }, [selectedNodeId, setFlowNodes]);
 
+  // The panel narrows the canvas: keep the chosen box in view.
   useEffect(() => {
-    if (!clickedNodeId) return;
-
-    const handleGlobalPointerDown = (event: PointerEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (!target) return;
-
-      if (
-        target.closest('.react-flow__node-toolbar') ||
-        target.closest('[data-toolbar="true"]')
-      ) {
-        return;
+    if (!selectedNodeId) return;
+    const frame = requestAnimationFrame(() => {
+      const node = getNode(selectedNodeId);
+      const canvas = reactFlowWrapper.current;
+      if (!node || !canvas) return;
+      const { x, y, zoom } = getViewport();
+      const boxRight = node.position.x + (node.measured?.width ?? 0);
+      const hidden = boxRight * zoom + x + VIEW_MARGIN - canvas.clientWidth;
+      if (hidden > 0) {
+        void setViewport({ x: x - hidden, y, zoom }, { duration: 200 });
       }
-
-      if (target.closest(`[data-id="${clickedNodeId}"]`)) {
-        return;
-      }
-
-      if (clickTimerRef.current) {
-        clearTimeout(clickTimerRef.current);
-        clickTimerRef.current = null;
-      }
-      setClickedNodeId(null);
-    };
-
-    window.addEventListener('pointerdown', handleGlobalPointerDown, true);
-    return () => {
-      window.removeEventListener('pointerdown', handleGlobalPointerDown, true);
-    };
-  }, [clickedNodeId]);
-
-  useEffect(() => {
-    if (activeToolbarNodeId) {
-      const activeNode = nodes.find((n) => n.id === activeToolbarNodeId);
-      const cnt =
-        (activeNode?.data as any)?.branchCount ||
-        ((activeNode?.data as any)?.branchGroupId
-          ? nodes.filter(
-              (n) =>
-                n.type === 'branchCircle' &&
-                (n.data as any)?.branchGroupId &&
-                (n.data as any)?.branchGroupId === (activeNode?.data as any)?.branchGroupId
-            ).length + 1
-          : 3);
-      setCustomToolbarCount(cnt > 1 ? cnt : 3);
-    }
-  }, [activeToolbarNodeId, nodes]);
-
-  const { screenToFlowPosition, fitView: rfFitView } = useReactFlow();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [selectedNodeId, getNode, getViewport, setViewport]);
 
   useEffect(() => {
     if (onGraphChange) {
@@ -1327,87 +1336,11 @@ export default function GraphCanvas({
   );
 
   const onNodeClickInternal = (_: React.MouseEvent, node: Node) => {
-    if (node.type === 'branchExpander' || node.type === 'branchDots' || node.type === 'structure') {
-      if (clickTimerRef.current) {
-        clearTimeout(clickTimerRef.current);
-        clickTimerRef.current = null;
-      }
-      setClickedNodeId(null);
-      if (onNodeClick) {
-        onNodeClick(node);
-      }
+    if (node.type === 'branchExpander' || node.type === 'branchDots') {
+      onDeselect?.();
       return;
     }
-
-    if (onNodeClick) {
-      onNodeClick(node);
-    }
-
-    if (clickTimerRef.current) {
-      clearTimeout(clickTimerRef.current);
-    }
-    clickTimerRef.current = setTimeout(() => {
-      setClickedNodeId(node.id);
-      clickTimerRef.current = null;
-    }, 250);
-  };
-
-  const onNodeDoubleClickInternal = (_: React.MouseEvent, node: Node) => {
-    if (clickTimerRef.current) {
-      clearTimeout(clickTimerRef.current);
-      clickTimerRef.current = null;
-    }
-    setClickedNodeId(null);
-
-    if (node.type === 'branchExpander' || node.type === 'branchDots') return;
-    if (!onNodeDoubleClick) return;
-
-    const nodeData = node.data as any;
-    if (node.type === 'structure') {
-      onNodeDoubleClick({
-        id: node.id,
-        type: 'structure',
-        title: nodeData.filename || 'Structure Input',
-        ...nodeData,
-        data: nodeData
-      });
-      return;
-    }
-
-    if (nodeData?.originalData) {
-      onNodeDoubleClick({
-        ...nodeData.originalData,
-        id: node.id,
-        type: node.type || 'default',
-        status: nodeData.status || nodeData.originalData.status,
-        logs: nodeData.logs,
-        artifacts: nodeData.artifacts,
-        job_id: nodeData.job_id,
-        parameters: nodeData.parameters !== undefined ? nodeData.parameters : nodeData.originalData.parameters,
-        default_parameters: nodeData.default_parameters || nodeData.originalData.default_parameters,
-        data: nodeData
-      });
-    } else {
-      onNodeDoubleClick({
-        ...node,
-        type: node.type || 'default',
-        status: nodeData?.status || (node as any).status || 'Draft',
-        logs: nodeData?.logs,
-        artifacts: nodeData?.artifacts,
-        job_id: nodeData?.job_id,
-        parameters: nodeData?.parameters,
-        default_parameters: nodeData?.default_parameters,
-        data: nodeData
-      });
-    }
-  };
-
-  const onPaneClick = () => {
-    if (clickTimerRef.current) {
-      clearTimeout(clickTimerRef.current);
-      clickTimerRef.current = null;
-    }
-    setClickedNodeId(null);
+    onNodeClick?.(panelNode(node, nodesRef.current));
   };
 
   const handleNodesDelete = useCallback(
@@ -1447,25 +1380,6 @@ export default function GraphCanvas({
     [onNodesDelete]
   );
 
-  const activeToolbarNode = nodes.find((n) => n.id === activeToolbarNodeId);
-  const canShowToolbar =
-    activeToolbarNodeId &&
-    activeToolbarNode &&
-    activeToolbarNode.type !== 'branchExpander' &&
-    activeToolbarNode.type !== 'branchDots' &&
-    activeToolbarNode.type !== 'structure';
-
-  const activeGroupCount =
-    (activeToolbarNode?.data as any)?.branchCount ||
-    ((activeToolbarNode?.data as any)?.branchGroupId
-      ? nodes.filter(
-          (n) =>
-            n.type === 'branchCircle' &&
-            (n.data as any)?.branchGroupId &&
-            (n.data as any)?.branchGroupId === (activeToolbarNode?.data as any)?.branchGroupId
-        ).length + 1
-      : 1);
-
   return (
     <div className="relative w-full h-full bg-stone-50" ref={reactFlowWrapper}>
       <ReactFlow 
@@ -1479,8 +1393,7 @@ export default function GraphCanvas({
         onConnect={onConnect}
         onReconnect={onReconnect}
         onNodeClick={onNodeClickInternal}
-        onNodeDoubleClick={onNodeDoubleClickInternal}
-        onPaneClick={onPaneClick}
+        onPaneClick={onDeselect}
         onNodesDelete={handleNodesDelete}
         deleteKeyCode={['Backspace', 'Delete']}
         onDrop={onDrop}
@@ -1494,82 +1407,6 @@ export default function GraphCanvas({
         <Background color="#E7E5E4" gap={24} size={1.3} />
         <Controls showInteractive={false} />
 
-        {canShowToolbar && (
-          <NodeToolbar
-            nodeId={activeToolbarNodeId}
-            position={Position.Right}
-            offset={16}
-            isVisible={true}
-          >
-            <div data-toolbar="true" className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg shadow-lg px-2.5 py-1 text-xs select-none">
-              <span className="font-bold text-slate-700 flex items-center gap-1 text-[11px] pr-1.5 border-r border-slate-200">
-                <GitBranch className="w-3.5 h-3.5 text-stone-500" />
-                Parallel:
-              </span>
-              {[2, 3, 5, 10].map((cnt) => (
-                <button
-                  key={cnt}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setParallelCount(activeToolbarNodeId, cnt);
-                  }}
-                  className={`px-1.5 py-0.5 font-bold rounded text-xs transition-colors cursor-pointer ${
-                    activeGroupCount === cnt
-                      ? 'bg-stone-900 text-white'
-                      : 'text-stone-700 hover:bg-stone-100'
-                  }`}
-                  title={`Set to ${cnt} parallel jobs`}
-                >
-                  &times;{cnt}
-                </button>
-              ))}
-              <div className="flex items-center gap-1 pl-1 border-l border-slate-200">
-                <input
-                  type="number"
-                  min="1"
-                  max="500"
-                  value={customToolbarCount}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) =>
-                    setCustomToolbarCount(
-                      Math.max(1, parseInt(e.target.value) || 1)
-                    )
-                  }
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.stopPropagation();
-                      setParallelCount(activeToolbarNodeId, customToolbarCount);
-                    }
-                  }}
-                  className={COUNT_INPUT}
-                  placeholder="Count"
-                />
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setParallelCount(activeToolbarNodeId, customToolbarCount);
-                  }}
-                  className="px-2 py-0.5 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded shadow-2xs transition-colors cursor-pointer"
-                  title="Set parallel jobs count"
-                >
-                  Set
-                </button>
-                {activeGroupCount > 1 && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setParallelCount(activeToolbarNodeId, 1);
-                    }}
-                    className="px-1.5 py-0.5 text-[10px] font-bold text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer ml-0.5"
-                    title="Reset to single job (remove parallelization)"
-                  >
-                    Reset
-                  </button>
-                )}
-              </div>
-            </div>
-          </NodeToolbar>
-        )}
       </ReactFlow>
       {isEditable && nodes.length === 0 && onLoadTemplate && (
         <StartScreen onLoadTemplate={onLoadTemplate} onFiles={addFiles} />

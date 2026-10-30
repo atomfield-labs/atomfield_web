@@ -101,3 +101,18 @@ export function runProgress(statuses: (string | undefined)[]): RunProgress {
   else if (total > 0 && done === total) phase = 'done';
   return { phase, done, total };
 }
+
+const PHASE_STATUS: Record<RunPhase, JobStatus> = {
+  idle: 'Draft',
+  running: 'Running',
+  done: 'Success',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+};
+
+/**
+ * One status for a whole run, read from all its steps.
+ */
+export function runStatus(statuses: string[]): JobStatus {
+  return PHASE_STATUS[runProgress(statuses).phase];
+}

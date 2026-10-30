@@ -2,13 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { useAccount } from '../hooks/useAccount';
 
 const BAR = [
-  'fixed top-0 left-0 w-full z-50 bg-slate-950 border-b',
-  'border-orange-500/20 shadow-lg shadow-slate-900/10',
+  'fixed top-0 left-0 w-full z-50 bg-stone-900 border-b border-stone-800',
   'transition-transform duration-300 ease-in-out',
 ].join(' ');
 const LINK = [
-  'text-xs sm:text-sm font-semibold tracking-wide text-slate-300',
-  'hover:text-orange-400 transition-colors',
+  'text-xs sm:text-sm font-medium tracking-wide text-stone-300',
+  'hover:text-white transition-colors',
 ].join(' ');
 const ROW = [
   'w-full px-4 sm:px-8 md:px-12 h-14 sm:h-16 flex items-center',
@@ -16,7 +15,7 @@ const ROW = [
 ].join(' ');
 const BRAND = [
   'font-bold text-lg sm:text-xl tracking-tight text-white',
-  'group-hover:text-orange-500 transition-colors',
+  'group-hover:text-orange-400 transition-colors',
 ].join(' ');
 const SHOWN = 'translate-y-0';
 const HIDDEN = '-translate-y-full';
