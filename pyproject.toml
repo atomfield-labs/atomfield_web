@@ -49,6 +49,7 @@ env = [
     # Tests register many keys from one client; the limit itself is
     # tested by lowering it in test_access_control.py.
     "D:KEY_CREATION_LIMIT_PER_HOUR=1000",
+    "D:SIGN_IN_LIMIT_PER_MINUTE=1000",
     "D:CATALOG_PATH=tests/fixtures/catalog.json",
     "D:HOUSE_AGENT_TOKEN=af_agent_test_house",
     # Tests run the sweeper explicitly, never in the background.

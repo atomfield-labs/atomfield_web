@@ -140,6 +140,30 @@ class AdminQuotaUpdateRequest(BaseModel):
     )
 
 
+class ScriptKeyView(BaseModel):
+    """
+    One of a person's keys as they see it: never the secret itself.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    key_prefix: str
+    label: str | None = None
+    created_at: datetime | None = None
+    last_used_at: datetime | None = None
+
+
+class NewScriptKey(ScriptKeyView):
+    """
+    A key just made, with its secret, which is shown this once.
+    """
+
+    api_key: str = Field(
+        ..., description="The secret. Store it now; it is not shown again."
+    )
+
+
 AccountView = TypeVar("AccountView", bound=KeyQuota)
 
 

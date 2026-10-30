@@ -7,7 +7,7 @@ secrets are shown once and stored only as hashes.
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import delete, func
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,6 +55,52 @@ def new_key(user_id: uuid.UUID, label: str | None) -> tuple[str, ApiKey]:
         user_id=user_id, key_hash=key_hash, key_prefix=prefix, label=label
     )
     return secret, key
+
+
+async def keys_of(db: AsyncSession, user_id: uuid.UUID) -> list[ApiKey]:
+    """
+    A person's keys that still work, newest first.
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param user_id: The person.
+    :type user_id: uuid.UUID
+    :return: Their working keys.
+    :rtype: list[ApiKey]
+    """
+    query = (
+        select(ApiKey)
+        .where(ApiKey.user_id == user_id, ApiKey.is_active.is_(True))
+        .order_by(ApiKey.created_at.desc())
+    )
+    return list((await db.scalars(query)).all())
+
+
+async def revoke_key(
+    db: AsyncSession, user_id: uuid.UUID, key_id: uuid.UUID
+) -> bool:
+    """
+    Stop one of a person's keys working. One conditional UPDATE: it
+    can only touch a working key of theirs.
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param user_id: The person.
+    :type user_id: uuid.UUID
+    :param key_id: The key.
+    :type key_id: uuid.UUID
+    :return: True if a key was revoked.
+    :rtype: bool
+    """
+    theirs = (
+        ApiKey.id == key_id,
+        ApiKey.user_id == user_id,
+        ApiKey.is_active.is_(True),
+    )
+    revoke = update(ApiKey).where(*theirs).values(is_active=False)
+    result = await db.execute(revoke)
+    await db.commit()
+    return result.rowcount == 1
 
 
 async def person_signing_in(

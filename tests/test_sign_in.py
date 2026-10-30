@@ -5,7 +5,7 @@ another site cannot make it do.
 """
 
 import asyncio
-from collections.abc import Iterator
+import uuid
 
 import httpx
 import pytest
@@ -13,108 +13,35 @@ from fastapi.testclient import TestClient
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.api.dependencies import get_sign_in
-from app.api.routes.auth import SIGN_IN_COOKIE, SIGN_IN_ERROR
+from app.api.routes.auth import SIGN_IN_COOKIE
 from app.core.config import settings
 from app.core.security import SESSION_COOKIE
 from app.main import app, create_sign_in
 from app.models.user import User
 from app.sign_in.provider import SignInStart
 from app.sign_in.refusals import SignInProblem
-from tests.fake_google import (
-    CLIENT_ID,
-    CLIENT_SECRET,
-    ISSUER,
-    REDIRECT_URI,
-    Account,
-    FakeGoogle,
-    new_key,
-    query_of,
+from tests.browser import (
+    CALLBACK,
+    INSTITUTE,
+    LOGIN,
+    LOGOUT,
+    MY_ACCOUNT,
+    OWN_PAGE,
+    PRINCIPAL,
+    SIGN_IN_SETTINGS,
+    STUDENT,
+    problem_in,
+    sign_in,
 )
+from tests.fake_google import Account, FakeGoogle, new_key, query_of
 
-INSTITUTE = "institute.ac.in"
-LOGIN = "/api/auth/login"
-CALLBACK = "/api/auth/callback"
-LOGOUT = "/api/auth/logout"
-MY_ACCOUNT = "/api/auth/me"
 CLEAR_JOBS = "/api/jobs/clear"
-OWN_PAGE = {"Origin": "http://testserver"}
 # Another page on the institute's domain: the same site, as browsers
 # count sites, so the session cookie goes along.
 SIBLING_PAGE = {"Origin": f"https://students.{INSTITUTE}"}
-STUDENT = Account(email=f"ada@{INSTITUTE}", domain=INSTITUTE)
-PRINCIPAL = Account(
-    email=f"grace@{INSTITUTE}", domain=INSTITUTE, name="Grace Hopper"
-)
-SIGN_IN_SETTINGS = {
-    "OIDC_ISSUER": ISSUER,
-    "OIDC_CLIENT_ID": CLIENT_ID,
-    "OIDC_CLIENT_SECRET": CLIENT_SECRET,
-    "OIDC_REDIRECT_URI": REDIRECT_URI,
-    "SIGN_IN_DOMAINS": INSTITUTE,
-    "ADMIN_EMAILS": PRINCIPAL.email,
-}
 # RFC 7636, appendix B.
 RFC_VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 RFC_CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
-
-
-@pytest.fixture
-def google(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[FakeGoogle]:
-    """
-    Sign-in set up as the settings say, against a fake Google; the
-    browser (the test client) forgets its cookies afterwards.
-
-    :param client: In-process API client.
-    :type client: TestClient
-    :param monkeypatch: Sets the sign-in settings for this test.
-    :type monkeypatch: pytest.MonkeyPatch
-    :return: The fake Google.
-    :rtype: Iterator[FakeGoogle]
-    """
-    fake = FakeGoogle()
-    for name, value in SIGN_IN_SETTINGS.items():
-        monkeypatch.setattr(settings, name, value)
-    http = httpx.AsyncClient(transport=fake.transport())
-    flow = create_sign_in(http, app.state.redis)
-    app.dependency_overrides[get_sign_in] = lambda: flow
-    yield fake
-    del app.dependency_overrides[get_sign_in]
-    client.cookies.clear()
-
-
-def sign_in(
-    client: TestClient, google: FakeGoogle, account: Account
-) -> httpx.Response:
-    """
-    Go through the whole sign-in, as a browser would.
-
-    :param client: In-process API client, the browser.
-    :type client: TestClient
-    :param google: The fake Google.
-    :type google: FakeGoogle
-    :param account: Who signs in at Google.
-    :type account: Account
-    :return: The answer to Google sending the browser back.
-    :rtype: httpx.Response
-    """
-    login = client.get(LOGIN, follow_redirects=False)
-    answer = google.consent(login.headers["location"], account)
-    return client.get(CALLBACK, params=answer, follow_redirects=False)
-
-
-def problem_in(response: httpx.Response) -> str | None:
-    """
-    What the web app is told went wrong, if anything.
-
-    :param response: A redirect back to the web app.
-    :type response: httpx.Response
-    :return: The problem, or None.
-    :rtype: str | None
-    """
-    return query_of(response.headers["location"]).get(SIGN_IN_ERROR)
 
 
 async def set_active(
@@ -396,6 +323,34 @@ def test_another_page_cannot_act_for_a_signed_in_browser(
     own = client.delete(CLEAR_JOBS, headers=OWN_PAGE).status_code
     assert (sibling, unmarked, own) == (403, 403, 200)
     assert client.get(MY_ACCOUNT).status_code == 200
+
+
+def test_a_flood_of_sign_ins_from_one_address_is_turned_back(
+    client: TestClient,
+    google: FakeGoogle,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """
+    Past the per-minute limit, an address is sent back to the web app
+    with a reason instead of to Google, so a flood of starts cannot
+    fill Redis with sign-ins nobody finishes.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param google: The fake Google.
+    :type google: FakeGoogle
+    :param monkeypatch: Lowers the limit and trusts the proxy header.
+    :type monkeypatch: pytest.MonkeyPatch
+    """
+    monkeypatch.setattr(settings, "SIGN_IN_LIMIT_PER_MINUTE", 2)
+    monkeypatch.setattr(settings, "TRUST_PROXY_HEADERS", True)
+    address = {"CF-Connecting-IP": f"203.0.113.{uuid.uuid4().int % 250 + 1}"}
+    starts = [
+        client.get(LOGIN, headers=address, follow_redirects=False)
+        for _ in range(3)
+    ]
+    problems = [problem_in(start) for start in starts]
+    assert problems == [None, None, SignInProblem.BUSY]
 
 
 def test_without_sign_in_set_up_the_web_app_is_told(client: TestClient):

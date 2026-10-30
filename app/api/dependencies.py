@@ -17,7 +17,11 @@ from app.api.errors import (
     unauthorized,
 )
 from app.core.config import settings
-from app.core.rate_limit import FixedWindowRateLimiter, RateLimit
+from app.core.rate_limit import (
+    FixedWindowRateLimiter,
+    RateDecision,
+    RateLimit,
+)
 from app.core.security import API_KEY_HEADER, SESSION_COOKIE, hash_api_key
 from app.db.session import get_db
 from app.events.bus import EventBus
@@ -34,6 +38,9 @@ from app.storage.store import LocalDiskStore
 CLOUDFLARE_CLIENT_HEADER = "CF-Connecting-IP"
 UNKNOWN_CLIENT = "unknown"
 SECONDS_PER_HOUR = 3600
+SECONDS_PER_MINUTE = 60
+KEY_CREATION_LIMIT = "api-key-creation"
+SIGN_IN_LIMIT = "sign-in"
 ORIGIN_HEADER = "Origin"
 # Requests that only read, which a browser may make from any page.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -48,6 +55,7 @@ CROSS_SITE_MESSAGE = (
     "A signed-in browser may change things only from AtomField's pages."
 )
 NOT_ADMIN_MESSAGE = "Administrator privileges required."
+BROWSER_ONLY_MESSAGE = "Keys are made and revoked in the web app."
 TOO_MANY_KEYS_MESSAGE = "Too many new API keys from this address. Try later."
 
 
@@ -344,6 +352,23 @@ async def get_optional_user(
     return caller.user if caller else None
 
 
+async def get_browser_user(caller: Caller = Depends(get_caller)) -> User:
+    """
+    The person, signed in on a browser. Keys are managed only there,
+    behind the institute sign-in, so a leaked key cannot make itself
+    new keys.
+
+    :param caller: Who is calling.
+    :type caller: Caller
+    :return: The person.
+    :rtype: User
+    :raises HTTPException: 403 for a caller using a key.
+    """
+    if caller.api_key is not None:
+        raise forbidden(BROWSER_ONLY_MESSAGE)
+    return caller.user
+
+
 async def require_admin(user: User = Depends(get_current_user)) -> User:
     """
     Let only the administrator through.
@@ -442,6 +467,25 @@ def client_address(request: Request) -> str:
     return request.client.host if request.client else UNKNOWN_CLIENT
 
 
+async def check_address(
+    request: Request, redis: Redis, limit: RateLimit
+) -> RateDecision:
+    """
+    Count this request against a limit kept per client address.
+
+    :param request: Incoming request.
+    :type request: Request
+    :param redis: Shared Redis client holding the counters.
+    :type redis: Redis
+    :param limit: The limit.
+    :type limit: RateLimit
+    :return: Whether it is within the limit, and when to retry if not.
+    :rtype: RateDecision
+    """
+    limiter = FixedWindowRateLimiter(redis, limit)
+    return await limiter.check(client_address(request))
+
+
 async def limit_key_creation(
     request: Request,
     redis: Redis = Depends(get_redis),
@@ -459,13 +503,36 @@ async def limit_key_creation(
     :raises HTTPException: 429 with Retry-After when over the limit.
     """
     limit = RateLimit(
-        name="api-key-creation",
+        name=KEY_CREATION_LIMIT,
         max_requests=settings.KEY_CREATION_LIMIT_PER_HOUR,
         window_seconds=SECONDS_PER_HOUR,
     )
-    limiter = FixedWindowRateLimiter(redis, limit)
-    decision = await limiter.check(client_address(request))
+    decision = await check_address(request, redis, limit)
     if not decision.allowed:
         raise too_many_requests(
             TOO_MANY_KEYS_MESSAGE, decision.retry_after_seconds
         )
+
+
+async def sign_in_allowed(
+    request: Request,
+    redis: Redis = Depends(get_redis),
+) -> bool:
+    """
+    Whether this address may start another sign-in. Each start keeps
+    its secrets in Redis for minutes, so a flood of starts is turned
+    back.
+
+    :param request: Incoming request.
+    :type request: Request
+    :param redis: Shared Redis client holding the counters.
+    :type redis: Redis
+    :return: True while within ``SIGN_IN_LIMIT_PER_MINUTE``.
+    :rtype: bool
+    """
+    limit = RateLimit(
+        name=SIGN_IN_LIMIT,
+        max_requests=settings.SIGN_IN_LIMIT_PER_MINUTE,
+        window_seconds=SECONDS_PER_MINUTE,
+    )
+    return (await check_address(request, redis, limit)).allowed

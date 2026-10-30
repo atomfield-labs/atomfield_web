@@ -9,18 +9,22 @@ session starts from an empty database and an empty Redis database.
 import asyncio
 from collections.abc import Callable, Iterator
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, pool, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.api.dependencies import get_sign_in
 from app.core.config import settings
 from app.db.migrate import migrate
-from app.main import app
+from app.main import app, create_sign_in
 from app.models.compute_target import HOUSE_TARGET_ID
 from app.models.data_pack import DataPack
 from app.models.run import Run
 from app.models.script_release import ScriptRelease
+from tests.browser import SIGN_IN_SETTINGS
+from tests.fake_google import FakeGoogle
 from tests.stores import make_redis, reset_test_stores
 
 UserHeadersFactory = Callable[..., dict[str, str]]
@@ -99,6 +103,32 @@ def make_session(client: TestClient) -> Iterator[async_sessionmaker]:
     yield async_sessionmaker(engine, expire_on_commit=False)
 
 
+async def empty_house_queue() -> None:
+    """
+    Drop whatever waits in the house agent's queue.
+    """
+    redis = make_redis()
+    try:
+        await redis.delete(f"queue:{HOUSE_TARGET_ID}")
+    finally:
+        await redis.aclose()
+
+
+async def forget_publications(make_session: async_sessionmaker) -> None:
+    """
+    Remove every release and data pack, unpinning the runs that used
+    them.
+
+    :param make_session: Session factory on the test database.
+    :type make_session: async_sessionmaker
+    """
+    async with make_session() as session:
+        await session.execute(update(Run).values(release_id=None))
+        await session.execute(delete(ScriptRelease))
+        await session.execute(delete(DataPack))
+        await session.commit()
+
+
 @pytest.fixture
 def releases(client: TestClient, make_session: async_sessionmaker) -> Iterator:
     """
@@ -113,21 +143,32 @@ def releases(client: TestClient, make_session: async_sessionmaker) -> Iterator:
     :return: Nothing; cleans up afterwards.
     :rtype: Iterator
     """
-
-    async def empty_house_queue():
-        redis = make_redis()
-        try:
-            await redis.delete(f"queue:{HOUSE_TARGET_ID}")
-        finally:
-            await redis.aclose()
-
-    async def forget_publications():
-        async with make_session() as session:
-            await session.execute(update(Run).values(release_id=None))
-            await session.execute(delete(ScriptRelease))
-            await session.execute(delete(DataPack))
-            await session.commit()
-
     asyncio.run(empty_house_queue())
     yield
-    asyncio.run(forget_publications())
+    asyncio.run(forget_publications(make_session))
+
+
+@pytest.fixture
+def google(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[FakeGoogle]:
+    """
+    Sign-in set up as the settings say, against a fake Google; the
+    browser (the test client) forgets its cookies afterwards.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param monkeypatch: Sets the sign-in settings for this test.
+    :type monkeypatch: pytest.MonkeyPatch
+    :return: The fake Google.
+    :rtype: Iterator[FakeGoogle]
+    """
+    fake = FakeGoogle()
+    for name, value in SIGN_IN_SETTINGS.items():
+        monkeypatch.setattr(settings, name, value)
+    http = httpx.AsyncClient(transport=fake.transport())
+    flow = create_sign_in(http, app.state.redis)
+    app.dependency_overrides[get_sign_in] = lambda: flow
+    yield fake
+    del app.dependency_overrides[get_sign_in]
+    client.cookies.clear()

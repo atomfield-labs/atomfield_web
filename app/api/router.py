@@ -13,12 +13,14 @@ from app.api.routes.data_packs import router as data_packs_router
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.releases import router as releases_router
 from app.api.routes.runs import router as runs_router
+from app.api.routes.script_keys import router as script_keys_router
 from app.api.routes.storage import router as storage_router
 from app.api.routes.targets import router as targets_router
 
 api_router = APIRouter(prefix="/api")
 
 api_router.include_router(auth_router)
+api_router.include_router(script_keys_router)
 api_router.include_router(admin_router)
 api_router.include_router(agents_router)
 api_router.include_router(catalog_router)

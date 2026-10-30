@@ -16,6 +16,7 @@ from app.api.dependencies import (
     get_caller,
     get_sign_in,
     limit_key_creation,
+    sign_in_allowed,
 )
 from app.core.config import settings
 from app.core.security import SESSION_COOKIE
@@ -112,6 +113,7 @@ def signed_in(token: str, lifetime: timedelta) -> RedirectResponse:
 @router.get("/login")
 async def begin_sign_in(
     flow: SignInFlow | None = Depends(get_sign_in),
+    allowed: bool = Depends(sign_in_allowed),
 ) -> RedirectResponse:
     """
     Send the browser to the provider to sign in; it comes back to
@@ -119,11 +121,15 @@ async def begin_sign_in(
 
     :param flow: The sign-in flow, if sign-in is set up.
     :type flow: SignInFlow | None
+    :param allowed: Whether this address may start another sign-in.
+    :type allowed: bool
     :return: Redirect to the provider's sign-in page.
     :rtype: RedirectResponse
     """
     if flow is None:
         return refused(SignInProblem.UNAVAILABLE)
+    if not allowed:
+        return refused(SignInProblem.BUSY)
     redirect = await flow.begin()
     response = RedirectResponse(
         redirect.link, status_code=status.HTTP_303_SEE_OTHER

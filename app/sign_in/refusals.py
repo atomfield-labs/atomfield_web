@@ -22,6 +22,8 @@ class SignInProblem(StrEnum):
     FAILED = "failed"
     # This server has no sign-in set up.
     UNAVAILABLE = "unavailable"
+    # Too many sign-ins started from one address; wait a minute.
+    BUSY = "busy"
 
 
 class SignInRefused(Exception):
