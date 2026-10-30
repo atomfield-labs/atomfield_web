@@ -6,6 +6,8 @@ import type { BlueprintEdge } from '../types/api';
 const STRUCTURE_OUT = 'structure-out';
 const TASK_OUT = 'source-right';
 const TASK_IN = 'target-left';
+// Every link looks the same: a thin, still, warm-grey curve.
+export const EDGE_STYLE = { stroke: '#CFCBC7', strokeWidth: 1.5 };
 
 export interface Connection {
   source: string;
@@ -62,8 +64,7 @@ export function restoreEdge(
     sourceHandle: oriented.sourceHandle || defaultSource,
     targetHandle: oriented.targetHandle || TASK_IN,
     type: 'removable',
-    animated: true,
-    style: { stroke: '#94a3b8', strokeWidth: 2 },
+    style: EDGE_STYLE,
   };
 }
 

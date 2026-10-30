@@ -37,3 +37,40 @@ export function toDisplayStatus(
 export function isFinished(status: JobStatus): boolean {
   return FINISHED.has(status);
 }
+
+// How a step's status is drawn: one small icon, never a coloured box.
+export type StatusLook =
+  | 'none'
+  | 'waiting'
+  | 'running'
+  | 'done'
+  | 'failed'
+  | 'stopped';
+
+const LOOKS: Record<string, StatusLook> = {
+  draft: 'none',
+  ready: 'none',
+  pending: 'waiting',
+  blocked: 'waiting',
+  running: 'running',
+  success: 'done',
+  completed: 'done',
+  failed: 'failed',
+  cancelled: 'stopped',
+};
+
+export const STATUS_TEXT: Record<StatusLook, string> = {
+  none: 'Not run yet',
+  waiting: 'Waiting',
+  running: 'Running',
+  done: 'Done',
+  failed: 'Failed',
+  stopped: 'Cancelled',
+};
+
+/**
+ * Which look a status gets, whatever its spelling or case.
+ */
+export function statusLook(status?: string | null): StatusLook {
+  return LOOKS[(status ?? 'draft').toLowerCase()] ?? 'none';
+}

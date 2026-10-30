@@ -36,19 +36,54 @@ body {
   text-align: center;
 }
 
-/* Graph Node Orange Light Hover State & Interaction Theme */
-.react-flow__node-default:hover,
-.react-flow__node.atomfield-pipeline-node:hover {
-  background-color: #fff7ed !important;
-  border-color: #fb923c !important;
-  box-shadow: 0 4px 14px -1px rgba(249, 115, 22, 0.2), 0 2px 6px -1px rgba(249, 115, 22, 0.12) !important;
-  cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+/* Pipeline canvas. Each box draws its own look (nodeStyle.ts), so
+   React Flow's default node frame and selection glow are cleared. */
+.react-flow__node-default.atomfield-pipeline-node,
+.react-flow__node-structure {
+  padding: 0;
+  width: auto;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
 }
 
-.react-flow__node-default.selected,
-.react-flow__node.atomfield-pipeline-node.selected {
-  border-color: #ea580c !important;
-  box-shadow: 0 0 0 2px rgba(234, 88, 12, 0.35), 0 4px 12px -2px rgba(234, 88, 12, 0.2) !important;
+.react-flow__node-default.atomfield-pipeline-node.selected,
+.react-flow__node-default.atomfield-pipeline-node:hover {
+  box-shadow: none;
 }
 
+/* Zoom buttons: one quiet white bar. */
+.react-flow__controls {
+  border: 1px solid #eeecea;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: none;
+}
+
+.react-flow__controls-button {
+  width: 32px;
+  height: 32px;
+  border-bottom: 1px solid #f0eeec;
+  color: #57534e;
+}
+
+.react-flow__controls-button:hover {
+  background: #f5f5f4;
+}
+
+/* Links run left to right; a box's top and bottom points show only
+   while the pointer is over it, or it is selected. */
+.react-flow__node .react-flow__handle-top,
+.react-flow__node .react-flow__handle-bottom {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.react-flow__node:hover .react-flow__handle-top,
+.react-flow__node:hover .react-flow__handle-bottom,
+.react-flow__node.selected .react-flow__handle-top,
+.react-flow__node.selected .react-flow__handle-bottom {
+  opacity: 1;
+}

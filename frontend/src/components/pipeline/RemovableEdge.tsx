@@ -7,6 +7,14 @@ import {
   type EdgeProps,
 } from '@xyflow/react';
 
+// Shown on the selected link; red only as you are about to remove it.
+const REMOVE_BUTTON = [
+  'w-4 h-4 rounded-full bg-white border border-stone-200 text-stone-400',
+  'hover:text-white hover:bg-red-600 hover:border-red-600',
+  'flex items-center justify-center text-[10px] leading-none',
+  'transition-colors cursor-pointer',
+].join(' ');
+
 export default function RemovableEdge({
   id,
   sourceX,
@@ -17,6 +25,7 @@ export default function RemovableEdge({
   targetPosition,
   style = {},
   markerEnd,
+  selected = false,
 }: EdgeProps) {
   const { deleteElements } = useReactFlow();
   const [edgePath, labelX, labelY] = getBezierPath({
@@ -33,6 +42,10 @@ export default function RemovableEdge({
     deleteElements({ edges: [{ id }] });
   };
 
+  // The remove button shows only on the selected link: one at a time.
+  if (!selected) {
+    return <BaseEdge path={edgePath} markerEnd={markerEnd} style={style} />;
+  }
   return (
     <>
       <BaseEdge path={edgePath} markerEnd={markerEnd} style={style} />
@@ -49,7 +62,7 @@ export default function RemovableEdge({
             type="button"
             onClick={onEdgeClick}
             title="Delete connection"
-            className="w-4 h-4 rounded-full bg-white border border-slate-300 text-slate-400 hover:text-white hover:bg-red-500 hover:border-red-500 flex items-center justify-center text-[10px] font-bold shadow-sm transition-all duration-150 hover:scale-125 cursor-pointer leading-none"
+            className={REMOVE_BUTTON}
           >
             &times;
           </button>

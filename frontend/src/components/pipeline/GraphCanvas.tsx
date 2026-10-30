@@ -28,7 +28,18 @@ import BranchExpanderNode from './BranchExpanderNode';
 import BranchCircleNode from './BranchCircleNode';
 import BranchDotsNode from './BranchDotsNode';
 import { parseStructureFile } from '../../utils/structureParser';
-import { orientConnection, restoreEdge } from '../../utils/graphEdges';
+import {
+  EDGE_STYLE,
+  orientConnection,
+  restoreEdge,
+} from '../../utils/graphEdges';
+
+// How many copies a sweep makes, typed in its toolbar.
+const COUNT_INPUT = [
+  'w-12 px-1 py-0.5 text-xs font-bold text-center bg-stone-50 border',
+  'border-stone-300 rounded text-stone-800 focus:outline-none',
+  'focus:ring-1 focus:ring-stone-400',
+].join(' ');
 
 const edgeTypes = {
   removable: RemovableEdge,
@@ -56,18 +67,6 @@ interface GraphCanvasProps {
   onNodesDelete?: (deleted: Node[]) => void;
   onGraphChange?: (graph: { nodes: Node[]; edges: Edge[] }) => void;
 }
-
-const statusColors: Record<string, string> = {
-  Draft: '#f8fafc',
-  Ready: '#f8fafc',
-  Blocked: '#cbd5e1',
-  Pending: '#fef08a',
-  Running: '#dbeafe',
-  Success: '#ecfdf5',
-  Completed: '#ecfdf5',
-  Failed: '#fee2e2',
-  Cancelled: '#e2e8f0'
-};
 
 function isGroupMemberNode(node?: Node | null, targetGroupId?: string, parentId?: string): boolean {
   if (!node || !targetGroupId) return false;
@@ -249,7 +248,6 @@ export default function GraphCanvas({
     const isSuccess = norm === 'success' || norm === 'completed';
     const isRunning = norm === 'running';
     const isFailed = norm === 'failed';
-    const isPending = norm === 'pending';
     const cleanStatus = isSuccess ? 'Success' : isRunning ? 'Running' : isFailed ? 'Failed' : status;
 
     setNodes((nds) =>
@@ -260,8 +258,6 @@ export default function GraphCanvas({
           (n.data as any)?.originalData?.ui_id === nodeId ||
           (n.data as any)?.originalData?.id === nodeId
         ) {
-          const bg = isSuccess ? '#ecfdf5' : isRunning ? '#eff6ff' : isFailed ? '#fff1f2' : (statusColors[cleanStatus] || '#f8fafc');
-          const border = isSuccess ? '2px solid #10b981' : isRunning ? '2px solid #3b82f6' : isFailed ? '2px solid #ef4444' : isPending ? '2px solid #f59e0b' : '2px solid #94a3b8';
           return {
             ...n,
             data: {
@@ -271,11 +267,6 @@ export default function GraphCanvas({
               artifacts: artifacts !== undefined ? artifacts : (n.data as any)?.artifacts,
               job_id: jobId || (n.data as any)?.job_id,
             },
-            style: {
-              ...(n.style || {}),
-              background: bg,
-              border: border,
-            }
           };
         }
         return n;
@@ -610,8 +601,7 @@ export default function GraphCanvas({
             source: sourceId,
             target: newId,
             type: 'removable',
-            animated: true,
-            style: { stroke: '#64748b', strokeWidth: 2 },
+            style: EDGE_STYLE,
           });
 
           if (
@@ -630,8 +620,7 @@ export default function GraphCanvas({
             source: newId,
             target: targetId,
             type: 'removable',
-            animated: true,
-            style: { stroke: '#64748b', strokeWidth: 2 },
+            style: EDGE_STYLE,
           });
         });
 
@@ -652,8 +641,7 @@ export default function GraphCanvas({
             source: sourceId,
             target: rep.id,
             type: 'removable',
-            animated: true,
-            style: { stroke: '#64748b', strokeWidth: 2 },
+            style: EDGE_STYLE,
           });
         }
       });
@@ -667,8 +655,7 @@ export default function GraphCanvas({
             source: rep.id,
             target: targetId,
             type: 'removable',
-            animated: true,
-            style: { stroke: '#64748b', strokeWidth: 2 },
+            style: EDGE_STYLE,
           });
         }
       });
@@ -683,8 +670,7 @@ export default function GraphCanvas({
           source: sourceId,
           target: parentNode.id,
           type: 'removable',
-          animated: true,
-          style: { stroke: '#64748b', strokeWidth: 2 },
+          style: EDGE_STYLE,
         });
       }
     });
@@ -698,8 +684,7 @@ export default function GraphCanvas({
           source: parentNode.id,
           target: targetId,
           type: 'removable',
-          animated: true,
-          style: { stroke: '#64748b', strokeWidth: 2 },
+          style: EDGE_STYLE,
         });
       }
     });
@@ -1030,16 +1015,6 @@ export default function GraphCanvas({
             default_parameters: n.default_parameters || n.parameters || {},
             originalData: n 
           },
-          style: {
-            background: statusColors[n.status || 'Draft'] || '#fff',
-            color: '#334155',
-            fontWeight: 'bold',
-            border: '2px solid #94a3b8',
-            borderRadius: '12px',
-            padding: 0,
-            width: 200,
-            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-          }
         };
       });
       setNodes(initialNodes);
@@ -1222,9 +1197,8 @@ export default function GraphCanvas({
               sourceHandle: params.sourceHandle,
               targetHandle: params.targetHandle,
               type: 'removable',
-              animated: true,
               hidden: isHidden,
-              style: { stroke: '#64748b', strokeWidth: 2 },
+              style: EDGE_STYLE,
             });
           }
         });
@@ -1321,16 +1295,6 @@ export default function GraphCanvas({
           default_parameters: defaults,
           inputs: {},
         },
-        style: {
-          background: statusColors['Draft'],
-          color: '#334155',
-          fontWeight: 'bold',
-          border: '2px solid #94a3b8',
-          borderRadius: '12px',
-          padding: 0,
-          width: 200,
-          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-        }
       };
 
       setNodes((nds) => nds.concat(newNode));
@@ -1479,7 +1443,7 @@ export default function GraphCanvas({
       : 1);
 
   return (
-    <div className="w-full h-full" ref={reactFlowWrapper}>
+    <div className="w-full h-full bg-stone-50" ref={reactFlowWrapper}>
       <ReactFlow 
         nodes={nodes} 
         edges={edges} 
@@ -1503,7 +1467,7 @@ export default function GraphCanvas({
         maxZoom={2.0}
         defaultViewport={{ x: 50, y: 50, zoom: 1.23 }}
       >
-        <Background color="#ccc" gap={16} />
+        <Background color="#E7E5E4" gap={24} size={1.3} />
         <Controls showInteractive={false} />
 
         {canShowToolbar && (
@@ -1515,7 +1479,7 @@ export default function GraphCanvas({
           >
             <div data-toolbar="true" className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg shadow-lg px-2.5 py-1 text-xs select-none">
               <span className="font-bold text-slate-700 flex items-center gap-1 text-[11px] pr-1.5 border-r border-slate-200">
-                <GitBranch className="w-3.5 h-3.5 text-orange-500" />
+                <GitBranch className="w-3.5 h-3.5 text-stone-500" />
                 Parallel:
               </span>
               {[2, 3, 5, 10].map((cnt) => (
@@ -1527,8 +1491,8 @@ export default function GraphCanvas({
                   }}
                   className={`px-1.5 py-0.5 font-bold rounded text-xs transition-colors cursor-pointer ${
                     activeGroupCount === cnt
-                      ? 'bg-orange-500 text-white shadow-2xs'
-                      : 'text-slate-700 hover:text-orange-600 hover:bg-orange-50'
+                      ? 'bg-stone-900 text-white'
+                      : 'text-stone-700 hover:bg-stone-100'
                   }`}
                   title={`Set to ${cnt} parallel jobs`}
                 >
@@ -1553,7 +1517,7 @@ export default function GraphCanvas({
                       setParallelCount(activeToolbarNodeId, customToolbarCount);
                     }
                   }}
-                  className="w-12 px-1 py-0.5 text-xs font-bold text-center bg-slate-50 border border-slate-300 rounded text-slate-800 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                  className={COUNT_INPUT}
                   placeholder="Count"
                 />
                 <button
