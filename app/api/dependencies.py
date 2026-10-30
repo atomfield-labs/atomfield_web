@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.errors import (
     forbidden,
     not_found,
-    too_many_requests,
     unauthorized,
 )
 from app.core.config import settings
@@ -39,7 +38,6 @@ CLOUDFLARE_CLIENT_HEADER = "CF-Connecting-IP"
 UNKNOWN_CLIENT = "unknown"
 SECONDS_PER_HOUR = 3600
 SECONDS_PER_MINUTE = 60
-KEY_CREATION_LIMIT = "api-key-creation"
 SIGN_IN_LIMIT = "sign-in"
 ORIGIN_HEADER = "Origin"
 # Requests that only read, which a browser may make from any page.
@@ -56,7 +54,6 @@ CROSS_SITE_MESSAGE = (
 )
 NOT_ADMIN_MESSAGE = "Administrator privileges required."
 BROWSER_ONLY_MESSAGE = "Keys are made and revoked in the web app."
-TOO_MANY_KEYS_MESSAGE = "Too many new API keys from this address. Try later."
 
 
 async def get_redis(request: Request) -> Redis:
@@ -484,34 +481,6 @@ async def check_address(
     """
     limiter = FixedWindowRateLimiter(redis, limit)
     return await limiter.check(client_address(request))
-
-
-async def limit_key_creation(
-    request: Request,
-    redis: Redis = Depends(get_redis),
-) -> None:
-    """
-    Refuse key creation beyond the hourly limit per client address.
-
-    Without it anyone could mint unlimited keys, each with its own job
-    quota, which makes the quota meaningless.
-
-    :param request: Incoming request.
-    :type request: Request
-    :param redis: Shared Redis client holding the counters.
-    :type redis: Redis
-    :raises HTTPException: 429 with Retry-After when over the limit.
-    """
-    limit = RateLimit(
-        name=KEY_CREATION_LIMIT,
-        max_requests=settings.KEY_CREATION_LIMIT_PER_HOUR,
-        window_seconds=SECONDS_PER_HOUR,
-    )
-    decision = await check_address(request, redis, limit)
-    if not decision.allowed:
-        raise too_many_requests(
-            TOO_MANY_KEYS_MESSAGE, decision.retry_after_seconds
-        )
 
 
 async def sign_in_allowed(

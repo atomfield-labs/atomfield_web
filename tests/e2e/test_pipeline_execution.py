@@ -1,7 +1,8 @@
 """
 End-to-end pipeline tests against a running stack (API, worker, Redis,
 Postgres). Skipped by default; run with ``pytest -m e2e`` after
-``docker compose up``.
+``docker compose up``, with ``ADMIN_API_KEY`` exported as the server's
+own: people sign in with Google, so the tests act as the administrator.
 """
 
 import os
@@ -22,21 +23,15 @@ UPSTREAM_FAILED_MESSAGE = "Upstream dependency failed"
 WATER_XYZ = "3\nwater\nO 0 0 0.117\nH 0 0.757 -0.467\nH 0 -0.757 -0.467\n"
 
 
-def create_user_headers(label: str = "pytest_e2e_user") -> dict[str, str]:
+def runner_headers() -> dict[str, str]:
     """
-    Register a user key on the running server.
+    Headers for the person the tests run as: the administrator, whose
+    key the running server made from its ``ADMIN_API_KEY``.
 
-    :param label: Human-readable label stored with the key.
-    :type label: str
-    :return: Headers carrying the new key.
+    :return: Headers carrying the administrator's key.
     :rtype: dict[str, str]
     """
-    response = requests.post(
-        f"{BASE_URL}/api/auth/keys",
-        json={"label": label},
-    )
-    assert response.status_code == 201
-    return {"X-API-Key": response.json()["api_key"]}
+    return {"X-API-Key": os.environ["ADMIN_API_KEY"]}
 
 
 def build_chain(nodes: list[dict], with_water: bool = False) -> dict:
@@ -119,7 +114,7 @@ def test_cascading_failure_propagation():
     A failing root marks its child and grandchild as upstream-failed.
     The root fails because it has no structure to optimize.
     """
-    headers = create_user_headers()
+    headers = runner_headers()
     nodes = [
         task_node("root_failing", "xtb_opt"),
         task_node("downstream_child", "xtb_md", time=0.2),
@@ -142,7 +137,7 @@ def test_successful_dag_execution_and_injection():
     """
     A child runs after its parent succeeds and sees the parent's result.
     """
-    headers = create_user_headers()
+    headers = runner_headers()
     parent = task_node("upstream_node", "xtb_opt")
     parent["inputs"] = {"structure": ["water.xyz"]}
     nodes = [parent, task_node("downstream_node", "xtb_md", time=0.2)]

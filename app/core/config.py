@@ -115,7 +115,6 @@ class Settings(BaseSettings):
     DEADLINE_GRACE_SECONDS: float = 600.0
 
     # --- Abuse limits ---
-    KEY_CREATION_LIMIT_PER_HOUR: int = 3
     # Each sign-in started holds a little memory in Redis for minutes.
     SIGN_IN_LIMIT_PER_MINUTE: int = 30
     # True only behind Cloudflare Tunnel with the API port closed to the

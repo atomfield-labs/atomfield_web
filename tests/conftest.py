@@ -17,12 +17,15 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api.dependencies import get_sign_in
 from app.core.config import settings
+from app.core.security import API_KEY_HEADER
 from app.db.migrate import migrate
 from app.main import app, create_sign_in
 from app.models.compute_target import HOUSE_TARGET_ID
 from app.models.data_pack import DataPack
 from app.models.run import Run
 from app.models.script_release import ScriptRelease
+from app.models.user import User
+from app.services.accounts import new_key
 from tests.browser import SIGN_IN_SETTINGS
 from tests.fake_google import FakeGoogle
 from tests.stores import make_redis, reset_test_stores
@@ -59,29 +62,51 @@ def admin_headers() -> dict[str, str]:
     return {"X-API-Key": settings.ADMIN_API_KEY}
 
 
-@pytest.fixture
-def make_user_headers(client: TestClient) -> UserHeadersFactory:
+async def add_key_holder(make_session: async_sessionmaker, label: str) -> str:
     """
-    Provide a factory that registers a new user and returns its headers.
+    Make a person holding one API key, straight in the database: people
+    sign in with Google, which most tests have no need to go through.
 
-    :param client: In-process API client.
-    :type client: TestClient
+    :param make_session: Session factory on the test database.
+    :type make_session: async_sessionmaker
+    :param label: The person's name, and the key's label.
+    :type label: str
+    :return: The key's secret.
+    :rtype: str
+    """
+    async with make_session() as session:
+        user = User(name=label)
+        session.add(user)
+        await session.flush()
+        secret, key = new_key(user.id, label)
+        session.add(key)
+        await session.commit()
+    return secret
+
+
+@pytest.fixture
+def make_user_headers(make_session: async_sessionmaker) -> UserHeadersFactory:
+    """
+    Provide a factory that makes a new person and returns headers
+    carrying their key.
+
+    :param make_session: Session factory on the test database.
+    :type make_session: async_sessionmaker
     :return: Callable taking an optional label, returning headers.
     :rtype: UserHeadersFactory
     """
 
     def create_user_headers(label: str = "pytest_user") -> dict[str, str]:
         """
-        Register a user key through the public API.
+        Make one person with a key.
 
-        :param label: Human-readable label stored with the key.
+        :param label: The person's name, and the key's label.
         :type label: str
         :return: Headers carrying the new key.
         :rtype: dict[str, str]
         """
-        response = client.post("/api/auth/keys", json={"label": label})
-        assert response.status_code == 201
-        return {"X-API-Key": response.json()["api_key"]}
+        secret = asyncio.run(add_key_holder(make_session, label))
+        return {API_KEY_HEADER: secret}
 
     return create_user_headers
 

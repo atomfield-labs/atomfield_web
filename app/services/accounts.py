@@ -22,23 +22,6 @@ from app.models.user import NAME_LENGTH, User
 from app.sign_in.provider import Identity
 
 
-async def add_person(db: AsyncSession, name: str | None) -> User:
-    """
-    Add a new person, flushed so they have an id.
-
-    :param db: Asynchronous database session; the caller commits.
-    :type db: AsyncSession
-    :param name: How they are shown, if known.
-    :type name: str | None
-    :return: The person.
-    :rtype: User
-    """
-    user = User(name=name)
-    db.add(user)
-    await db.flush()
-    return user
-
-
 def new_key(user_id: uuid.UUID, label: str | None) -> tuple[str, ApiKey]:
     """
     A new API key for a person's scripts.

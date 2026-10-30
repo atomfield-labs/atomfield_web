@@ -192,31 +192,16 @@ def test_delete_session_cannot_touch_other_users(
     assert store.existing_path(upload) is None
 
 
-def test_key_creation_is_rate_limited(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-):
+def test_nobody_gets_a_key_without_signing_in(client: TestClient):
     """
-    A client address gets a 429 with Retry-After once over the limit.
+    There is no way to get an account, or a key, without signing in
+    with an institute account: the old open route is gone.
 
     :param client: In-process API client.
     :type client: TestClient
-    :param monkeypatch: Lowers the limit and trusts the proxy header.
-    :type monkeypatch: pytest.MonkeyPatch
     """
-    monkeypatch.setattr(settings, "KEY_CREATION_LIMIT_PER_HOUR", 2)
-    monkeypatch.setattr(settings, "TRUST_PROXY_HEADERS", True)
-    address = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
-    headers = {"CF-Connecting-IP": address}
-
-    statuses = [
-        client.post("/api/auth/keys", json={}, headers=headers).status_code
-        for _ in range(3)
-    ]
-
-    assert statuses == [201, 201, 429]
-    refused = client.post("/api/auth/keys", json={}, headers=headers)
-    assert 0 < int(refused.headers["Retry-After"]) <= 3600
+    anonymous = client.post("/api/auth/keys", json={"label": "stranger"})
+    assert anonymous.status_code == 404
 
 
 def test_forged_proxy_header_is_ignored_by_default(

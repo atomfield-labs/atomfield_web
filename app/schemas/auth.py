@@ -64,20 +64,6 @@ class JobCounts(BaseModel):
     total_compute_seconds: float = 0.0
 
 
-class ApiKeyCreateResponse(KeyQuota):
-    """
-    Response payload returned upon generating a new API key.
-    """
-
-    api_key: str = Field(
-        ...,
-        description=(
-            "Full secret API key. Store this securely; it will not be shown "
-            "again."
-        ),
-    )
-
-
 class ApiKeyInfoResponse(KeyQuota):
     """
     Metadata representation of an authenticated user API key.

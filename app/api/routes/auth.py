@@ -1,6 +1,6 @@
 """
-HTTP routes for signing in with an institute account, API keys for
-scripts, identity, and usage analytics.
+HTTP routes for signing in with an institute account, identity, and
+usage analytics.
 """
 
 from datetime import timedelta
@@ -15,7 +15,6 @@ from app.api.dependencies import (
     check_origin,
     get_caller,
     get_sign_in,
-    limit_key_creation,
     sign_in_allowed,
 )
 from app.core.config import settings
@@ -23,19 +22,11 @@ from app.core.security import SESSION_COOKIE
 from app.db.session import get_db
 from app.models.job import Job
 from app.schemas.auth import (
-    ApiKeyCreateRequest,
-    ApiKeyCreateResponse,
     ApiKeyInfoResponse,
-    KeyQuota,
     UserStatsResponse,
     account_view,
 )
-from app.services.accounts import (
-    add_person,
-    new_key,
-    sign_in_browser,
-    sign_out_browser,
-)
+from app.services.accounts import sign_in_browser, sign_out_browser
 from app.services.job_stats import job_counts
 from app.sign_in.flow import PENDING_SECONDS, SignInFlow
 from app.sign_in.refusals import SignInProblem, SignInRefused
@@ -204,36 +195,6 @@ async def sign_out(
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     response.delete_cookie(SESSION_COOKIE, **cookie_rules())
     return response
-
-
-@router.post(
-    "/keys",
-    response_model=ApiKeyCreateResponse,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(limit_key_creation)],
-)
-async def create_api_key(
-    request: ApiKeyCreateRequest,
-    db: AsyncSession = Depends(get_db),
-) -> ApiKeyCreateResponse:
-    """
-    Make a new person and their first API key (shown once); the label
-    names both.
-
-    :param request: Creation payload with optional laboratory or user label.
-    :type request: ApiKeyCreateRequest
-    :param db: Asynchronous database session.
-    :type db: AsyncSession
-    :return: Full secret key token (shown once) and public prefix metadata.
-    :rtype: ApiKeyCreateResponse
-    """
-    user = await add_person(db, request.label)
-    secret, key = new_key(user.id, request.label)
-    db.add(key)
-    await db.commit()
-    await db.refresh(user)
-    quota = account_view(KeyQuota, user, key.key_prefix).model_dump()
-    return ApiKeyCreateResponse(api_key=secret, **quota)
 
 
 @router.get("/me", response_model=ApiKeyInfoResponse)

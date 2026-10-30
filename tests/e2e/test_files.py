@@ -16,8 +16,8 @@ import requests
 from tests.e2e.test_pipeline_execution import (
     BASE_URL,
     build_chain,
-    create_user_headers,
     fetch_job,
+    runner_headers,
     task_node,
 )
 
@@ -31,12 +31,12 @@ TIMEOUT_SECONDS = 60
 @pytest.fixture(scope="module")
 def headers() -> dict[str, str]:
     """
-    One user for the whole module: key creation is rate limited.
+    The person the module's tests run as.
 
-    :return: Headers carrying the user's key.
+    :return: Headers carrying their key.
     :rtype: dict[str, str]
     """
-    return create_user_headers("pytest_e2e_files")
+    return runner_headers()
 
 
 def wait_for(check, what: str):

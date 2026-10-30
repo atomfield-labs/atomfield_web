@@ -244,20 +244,6 @@ export interface UserStatsResponse extends AccountQuota {
   pending_jobs: number;
 }
 
-// One of a person's keys for scripts; never the secret itself.
-export interface ScriptKey {
-  id: string;
-  key_prefix: string;
-  label?: string | null;
-  created_at?: string | null;
-  last_used_at?: string | null;
-}
-
-// A key just made, with its secret, which is shown this once.
-export interface NewScriptKey extends ScriptKey {
-  api_key: string;
-}
-
 export interface AdminStatsResponse {
   total_users: number;
   total_jobs: number;
