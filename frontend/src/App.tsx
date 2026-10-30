@@ -10,15 +10,24 @@ import PipelineEditor from './components/pipeline/PipelineEditor'
 import AccountProvider from './components/auth/AccountProvider'
 import AccountPage from './components/auth/AccountPage'
 import SignInPage from './components/auth/SignInPage'
+import PairPage from './components/pairing/PairPage'
 import { useAccount } from './hooks/useAccount'
 
 // Views for a signed-in person; the landing page is open to all.
-const PRIVATE_VIEWS = ['#dashboard', '#pipeline', '#admin', '#account'];
+const PRIVATE_VIEWS = [
+  '#dashboard',
+  '#pipeline',
+  '#admin',
+  '#account',
+  '#pair',
+];
 
 const CRASH_SCREEN = [
   'p-10 text-red-600 bg-red-50 font-bold font-mono z-[9999] relative',
   'h-screen w-screen',
 ].join(' ');
+// #pair, or #pair/<code> from an agent's link.
+const PAIR_VIEW = /^#pair\/?/;
 const PAGE = 'absolute inset-0 z-40 overflow-y-auto bg-slate-50';
 const EDITOR = 'absolute inset-0 z-50 overflow-hidden bg-slate-50';
 const LANDING = [
@@ -80,6 +89,10 @@ function View({ hash }: { hash: string }) {
   }
   if (hash.startsWith('#account')) {
     return <div className={PAGE}><AccountPage /></div>
+  }
+  if (hash.startsWith('#pair')) {
+    const code = hash.replace(PAIR_VIEW, '')
+    return <div className={PAGE}><PairPage code={code} /></div>
   }
   if (hash.startsWith('#pipeline/new')) {
     return <div className={EDITOR}><PipelineEditor /></div>

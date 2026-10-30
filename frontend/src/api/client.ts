@@ -28,4 +28,11 @@ export function describeError(error: unknown, fallback: string): string {
   return fallback;
 }
 
+/**
+ * The HTTP status a failed request got, if it got an answer at all.
+ */
+export function statusOf(error: unknown): number | undefined {
+  return axios.isAxiosError(error) ? error.response?.status : undefined;
+}
+
 export default client;

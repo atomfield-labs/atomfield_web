@@ -9,6 +9,7 @@ import os
 import signal
 import threading
 import time
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -71,7 +72,7 @@ def login_options(**given) -> argparse.Namespace:
         "slurm_option",
         "setup",
     ]
-    values = dict.fromkeys(names) | {"yes": False} | given
+    values = dict.fromkeys(names) | {"yes": False, "pair": False} | given
     return argparse.Namespace(**values)
 
 
@@ -163,7 +164,12 @@ def test_login_from_flags_checks_the_token_and_saves(tmp_path: Path):
         yes=True,
     )
 
-    lines = login(options, path, check=lambda *args: checked.append(args))
+    lines = login(
+        options,
+        path,
+        check=lambda *args: checked.append(args),
+        pairing=lambda *args: pytest.fail("a given token needs no pairing"),
+    )
 
     assert checked == [("https://api.example.org", "af_agent_secret")]
     assert lines[0] == "The API accepted the token."
@@ -174,8 +180,8 @@ def test_login_from_flags_checks_the_token_and_saves(tmp_path: Path):
 
 def test_login_asks_for_what_is_missing(tmp_path: Path):
     """
-    Questions for everything not given; the token is read without
-    echo; Slurm questions only for a Slurm agent.
+    Questions for everything not given; the token comes from pairing,
+    never typed; Slurm questions only for a Slurm agent.
 
     :param tmp_path: Empty folder.
     :type tmp_path: Path
@@ -192,15 +198,14 @@ def test_login_asks_for_what_is_missing(tmp_path: Path):
             "",  # no more setup lines
         ]
     )
-    secrets = iter(["af_agent_secret"])
     path = tmp_path / "agent.toml"
 
     login(
         login_options(),
         path,
         ask=lambda question: next(answers),
-        ask_secret=lambda question: next(secrets),
         check=lambda url, token: None,
+        pairing=lambda url, runner: "af_agent_secret",
     )
 
     config = AgentConfig.load(path, environ={})
@@ -210,6 +215,33 @@ def test_login_asks_for_what_is_missing(tmp_path: Path):
         "--account=my_project",
         "--partition=standard",
     ]
+
+
+def test_login_pairs_again_only_when_asked(tmp_path: Path):
+    """
+    A saved token is kept when login runs again to change a setting;
+    ``--pair`` fetches a fresh one.
+
+    :param tmp_path: Empty folder.
+    :type tmp_path: Path
+    """
+    path = tmp_path / "agent.toml"
+    paired = iter(["af_agent_first", "af_agent_second"])
+    run_login = partial(
+        login,
+        path=path,
+        check=lambda url, token: None,
+        pairing=lambda url, runner: next(paired),
+    )
+    flags = {"api_url": "https://x", "runner": "process", "yes": True}
+
+    run_login(login_options(**flags))
+    run_login(login_options(**flags, max_jobs=2))
+    kept = read_settings(path)["token"]
+    run_login(login_options(**flags, pair=True))
+
+    assert kept == "af_agent_first"
+    assert read_settings(path)["token"] == "af_agent_second"
 
 
 def test_a_refused_token_is_not_saved(tmp_path: Path):

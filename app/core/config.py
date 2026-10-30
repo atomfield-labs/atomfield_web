@@ -117,6 +117,8 @@ class Settings(BaseSettings):
     # --- Abuse limits ---
     # Each sign-in started holds a little memory in Redis for minutes.
     SIGN_IN_LIMIT_PER_MINUTE: int = 30
+    # Agents asking to pair, and people typing pairing codes.
+    PAIRING_LIMIT_PER_MINUTE: int = 10
     # True only behind Cloudflare Tunnel with the API port closed to the
     # internet; otherwise anyone could forge CF-Connecting-IP.
     TRUST_PROXY_HEADERS: bool = False

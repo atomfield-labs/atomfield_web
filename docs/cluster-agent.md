@@ -69,16 +69,10 @@ conda clean -a -y
 
 `--override-channels -c conda-forge` uses only the free, community
 conda-forge packages. Simulation engines (Quantum ESPRESSO, ORCA...)
-usually come from your cluster's own modules instead; step 4 loads
+usually come from your cluster's own modules instead; step 3 loads
 them for every job.
 
-## 3. Add the cluster in the web app
-
-In the pipeline editor, open **Run on**, choose **+ Add a cluster…**,
-give it a name, and copy the **agent token**. It is shown only once;
-if you lose it, make a new one (the old one stops working).
-
-## 4. Log the agent in
+## 3. Log the agent in
 
 ```bash
 ~/atomfield/agent login
@@ -94,18 +88,28 @@ it):
 | Work folder | `/home/you/atomfield` (must be visible to compute nodes) |
 | Python that runs the job scripts | `/home/you/atomfield/env/bin/python` |
 | Address to copy results from | your `ssh` target, e.g. `mycluster` |
-| Agent token | the token from step 3 (not shown as you type) |
 | Extra `#SBATCH` options | `--account=my_project` |
 | Setup line for each job | `module load quantum-espresso/7.2`, then Enter |
 
 The settings are saved in `~/.config/atomfield/agent.toml`, readable
-only by you (it holds the token). Run `login` again to change them.
+only by you (it holds the agent's token). Run `login` again to change
+them; it keeps the token, and `login --pair` fetches a new one.
 
 Each job's script runs in a login shell (`#!/bin/bash -l`), so
 `module` works in the setup lines as it does when you log in. Quantum
 ESPRESSO tasks start `pw.x` with `mpirun -np N` from the loaded
 module. If your cluster wants `srun` instead, add one more setup
 line: `export AFSCRIPTS_MPI_LAUNCHER="srun"`.
+
+## 4. Approve its code
+
+At the end, `login` shows a code and a link, such as
+`https://atomfield.example.org/#pair/QKTW-MZRB`. Open the link while
+signed in to AtomField, or in the pipeline editor choose **Run on**,
+then **+ Add a cluster…**, and type the code. Check that the computer,
+user and address are this login node's, name the cluster, and press
+**Connect**. Within seconds `login` collects the agent's token and
+saves the settings: nobody copies a token. A code lasts 10 minutes.
 
 ## 5. Start the agent
 
@@ -204,9 +208,8 @@ Delete old runs you no longer need.
   when the run started; publish a release (see `docs/releases.md`) and
   run the pipeline again.
 - **The agent stopped and its log says the API refused its token**:
-  the cluster was removed in the web app, or its token replaced. Make
-  a new token there, then `~/atomfield/agent login` and
-  `~/atomfield/agent start`. Slurm jobs keep running meanwhile.
+  the cluster was removed in the web app. Pair it again with
+  `~/atomfield/agent login --pair`, then `~/atomfield/agent start`.
 - **`start` says the agent runs on another login node**: log in to
   that node to stop or restart it. If that node went down, its lock
   frees itself after 3 minutes.

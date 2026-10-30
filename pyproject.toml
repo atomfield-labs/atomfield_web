@@ -49,6 +49,7 @@ env = [
     # Tests start many sign-ins from one client; the limit itself is
     # tested by lowering it in test_sign_in.py.
     "D:SIGN_IN_LIMIT_PER_MINUTE=1000",
+    "D:PAIRING_LIMIT_PER_MINUTE=1000",
     "D:CATALOG_PATH=tests/fixtures/catalog.json",
     "D:HOUSE_AGENT_TOKEN=af_agent_test_house",
     # Tests run the sweeper explicitly, never in the background.

@@ -29,6 +29,7 @@ from agent.config import (
     settings_path,
 )
 from agent.login import login
+from agent.pairing import PairingFailedError
 from agent.runner import ProcessRunner, Runner
 from agent.slurm import SlurmRunner
 from agent.state import StateFile
@@ -59,11 +60,15 @@ LOGIN_OPTIONS: dict[str, dict] = {
     "--slurm-option": {"action": "append", "help": "e.g. --account=x"},
     "--setup": {"action": "append", "help": "Shell line run before each job"},
     "--yes": {"action": "store_true", "help": "Ask nothing; use the defaults"},
+    "--pair": {
+        "action": "store_true",
+        "help": "Pair again with a code, even if a token is saved",
+    },
 }
 REFUSED_TOKEN_HELP = (
     "The API refused this agent's token: the cluster was removed in the "
-    "web app, or its token was replaced. Make a new token there, then "
-    "run '{command} login' and '{command} start'."
+    "web app, or its token was replaced. Pair it again: run "
+    "'{command} login --pair', then '{command} start'."
 )
 
 
@@ -330,7 +335,12 @@ def main(argv: list[str] | None = None) -> int:
             return login_command(options, path)
         config = AgentConfig.load(path)
         return COMMANDS[command](config, path)
-    except (MissingSettingError, TokenRefusedError, ValueError) as error:
+    except (
+        MissingSettingError,
+        PairingFailedError,
+        TokenRefusedError,
+        ValueError,
+    ) as error:
         return fail(error)
 
 

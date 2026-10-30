@@ -81,9 +81,9 @@ export default function RunOnPicker({ value, onChange }: RunOnPickerProps) {
       <AddClusterModal
         isOpen={isAdding}
         onClose={() => setIsAdding(false)}
-        onCreated={(created) => {
+        onPaired={(target) => {
           void targetsService.list().then(setTargets);
-          onChange(created.target.id);
+          onChange(target.id);
         }}
       />
     </label>

@@ -244,6 +244,16 @@ export interface UserStatsResponse extends AccountQuota {
   pending_jobs: number;
 }
 
+// A computer asking to be paired, as its agent describes it.
+export interface PairingView {
+  code: string;
+  hostname: string;
+  username: string;
+  address: string;
+  kind: string;
+  requested_at: string;
+}
+
 export interface AdminStatsResponse {
   total_users: number;
   total_jobs: number;

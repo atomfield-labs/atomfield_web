@@ -9,15 +9,6 @@ export const targetsService = {
     return response.data;
   },
 
-  // The token in the answer is shown this once.
-  async create(name: string, kind: 'slurm' | 'local'): Promise<TargetToken> {
-    const response = await apiClient.post<TargetToken>('/api/targets', {
-      name,
-      kind,
-    });
-    return response.data;
-  },
-
   async newToken(targetId: string): Promise<TargetToken> {
     const response = await apiClient.post<TargetToken>(
       `/api/targets/${targetId}/token`

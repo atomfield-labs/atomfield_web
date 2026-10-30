@@ -89,6 +89,40 @@ def describe(target: ComputeTarget, online: bool) -> TargetInfo:
     )
 
 
+async def add_target(
+    db: AsyncSession,
+    owner_id: uuid.UUID,
+    request: TargetCreate,
+) -> ComputeTarget:
+    """
+    Register a new place to run jobs, flushed but without a token: it
+    gets one next (``create_target``), or when its agent collects one
+    after pairing.
+
+    Results stay where its jobs run, so its runs are not zipped and
+    uploaded automatically.
+
+    :param db: Asynchronous database session; the caller commits.
+    :type db: AsyncSession
+    :param owner_id: The person it belongs to.
+    :type owner_id: uuid.UUID
+    :param request: Name and kind.
+    :type request: TargetCreate
+    :return: The target.
+    :rtype: ComputeTarget
+    """
+    target = ComputeTarget(
+        id=uuid.uuid4(),
+        owner_id=owner_id,
+        name=request.name,
+        kind=request.kind,
+        bundles_automatically=False,
+    )
+    db.add(target)
+    await db.flush()
+    return target
+
+
 async def create_target(
     db: AsyncSession,
     owner_id: uuid.UUID,
@@ -97,28 +131,17 @@ async def create_target(
     """
     Register a new place to run jobs, with a fresh agent token.
 
-    Results stay where its jobs run, so its runs are not zipped and
-    uploaded automatically.
-
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param owner_id: The user's API key id.
+    :param owner_id: The person it belongs to.
     :type owner_id: uuid.UUID
     :param request: Name and kind.
     :type request: TargetCreate
     :return: The target and its token (shown once).
     :rtype: TargetToken
     """
-    token, token_hash = generate_agent_token()
-    target = ComputeTarget(
-        id=uuid.uuid4(),
-        owner_id=owner_id,
-        name=request.name,
-        kind=request.kind,
-        token_hash=token_hash,
-        bundles_automatically=False,
-    )
-    db.add(target)
+    target = await add_target(db, owner_id, request)
+    token, target.token_hash = generate_agent_token()
     await db.commit()
     await db.refresh(target)
     return TargetToken(target=describe(target, False), token=token)

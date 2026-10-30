@@ -2,6 +2,7 @@
 Shared FastAPI route dependencies for database, cache, and authentication.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -16,11 +17,7 @@ from app.api.errors import (
     unauthorized,
 )
 from app.core.config import settings
-from app.core.rate_limit import (
-    FixedWindowRateLimiter,
-    RateDecision,
-    RateLimit,
-)
+from app.core.rate_limit import FixedWindowRateLimiter, RateLimit
 from app.core.security import API_KEY_HEADER, SESSION_COOKIE, hash_api_key
 from app.db.session import get_db
 from app.events.bus import EventBus
@@ -39,6 +36,8 @@ UNKNOWN_CLIENT = "unknown"
 SECONDS_PER_HOUR = 3600
 SECONDS_PER_MINUTE = 60
 SIGN_IN_LIMIT = "sign-in"
+PAIRING_START_LIMIT = "pairing-start"
+CODE_LOOKUP_LIMIT = "pairing-code"
 ORIGIN_HEADER = "Origin"
 # Requests that only read, which a browser may make from any page.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -464,44 +463,54 @@ def client_address(request: Request) -> str:
     return request.client.host if request.client else UNKNOWN_CLIENT
 
 
-async def check_address(
-    request: Request, redis: Redis, limit: RateLimit
-) -> RateDecision:
+@dataclass(frozen=True, slots=True)
+class AddressLimit:
     """
-    Count this request against a limit kept per client address.
+    A dependency telling whether this request's address is still within
+    a per-minute limit. The limit is read at each request, so tests can
+    lower it.
 
-    :param request: Incoming request.
-    :type request: Request
-    :param redis: Shared Redis client holding the counters.
-    :type redis: Redis
-    :param limit: The limit.
-    :type limit: RateLimit
-    :return: Whether it is within the limit, and when to retry if not.
-    :rtype: RateDecision
+    :param name: What is limited, part of the counter's key.
+    :type name: str
+    :param per_minute: Reads the limit from the settings.
+    :type per_minute: Callable[[], int]
     """
-    limiter = FixedWindowRateLimiter(redis, limit)
-    return await limiter.check(client_address(request))
+
+    name: str
+    per_minute: Callable[[], int]
+
+    async def __call__(
+        self, request: Request, redis: Redis = Depends(get_redis)
+    ) -> bool:
+        """
+        Count this request, and say whether it is within the limit.
+
+        :param request: Incoming request.
+        :type request: Request
+        :param redis: Shared Redis client holding the counters.
+        :type redis: Redis
+        :return: True while within the limit.
+        :rtype: bool
+        """
+        limit = RateLimit(
+            name=self.name,
+            max_requests=self.per_minute(),
+            window_seconds=SECONDS_PER_MINUTE,
+        )
+        limiter = FixedWindowRateLimiter(redis, limit)
+        decision = await limiter.check(client_address(request))
+        return decision.allowed
 
 
-async def sign_in_allowed(
-    request: Request,
-    redis: Redis = Depends(get_redis),
-) -> bool:
-    """
-    Whether this address may start another sign-in. Each start keeps
-    its secrets in Redis for minutes, so a flood of starts is turned
-    back.
-
-    :param request: Incoming request.
-    :type request: Request
-    :param redis: Shared Redis client holding the counters.
-    :type redis: Redis
-    :return: True while within ``SIGN_IN_LIMIT_PER_MINUTE``.
-    :rtype: bool
-    """
-    limit = RateLimit(
-        name=SIGN_IN_LIMIT,
-        max_requests=settings.SIGN_IN_LIMIT_PER_MINUTE,
-        window_seconds=SECONDS_PER_MINUTE,
-    )
-    return (await check_address(request, redis, limit)).allowed
+# Each one started keeps its secrets in Redis for minutes, so a flood
+# of starts is turned back.
+sign_in_allowed = AddressLimit(
+    SIGN_IN_LIMIT, lambda: settings.SIGN_IN_LIMIT_PER_MINUTE
+)
+pairing_start_allowed = AddressLimit(
+    PAIRING_START_LIMIT, lambda: settings.PAIRING_LIMIT_PER_MINUTE
+)
+# Codes are short; few guesses a minute keep them unguessable.
+code_lookup_allowed = AddressLimit(
+    CODE_LOOKUP_LIMIT, lambda: settings.PAIRING_LIMIT_PER_MINUTE
+)

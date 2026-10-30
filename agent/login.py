@@ -1,13 +1,13 @@
 """
 ``python -m agent login``: gather the settings an agent needs (from
-flags, or by asking), check the token with the API, and save them in
+flags, or by asking), pair this machine with a short code (or take a
+token given as a flag), check the token with the API, and save them in
 the settings file, readable only by you since it holds the token.
 
 Settings already in the file are offered as the defaults, so running
 ``login`` again only changes what you change.
 """
 
-import getpass
 import os
 import shlex
 import shutil
@@ -25,6 +25,7 @@ from agent.config import (
     read_settings,
     write_settings,
 )
+from agent.pairing import pair
 
 CHECK_SECONDS = 10.0
 # Setting -> question, in the order they are asked.
@@ -39,6 +40,7 @@ QUESTIONS = {
     ),
 }
 Ask = Callable[[str], str]
+Pair = Callable[[str, str], str]
 
 
 def suggested_settings(existing: dict[str, Any]) -> dict[str, Any]:
@@ -119,13 +121,11 @@ def from_flags(options) -> dict[str, Any]:
 
 
 def ask_missing(
-    settings: dict[str, Any],
-    given: dict[str, Any],
-    ask: Ask,
-    ask_secret: Ask,
+    settings: dict[str, Any], given: dict[str, Any], ask: Ask
 ) -> None:
     """
     Ask for each setting not given as a flag; Enter keeps the default.
+    The token is not asked for: pairing fetches it.
 
     :param settings: Settings so far; updated in place.
     :type settings: dict[str, Any]
@@ -133,16 +133,11 @@ def ask_missing(
     :type given: dict[str, Any]
     :param ask: Asks a question and returns the answer.
     :type ask: Ask
-    :param ask_secret: Asks without showing what is typed.
-    :type ask_secret: Ask
     """
     for key, question in QUESTIONS.items():
         if key not in given:
             answer = ask(f"{question} [{settings.get(key, '')}]: ").strip()
             settings[key] = answer or settings.get(key, "")
-    if "token" not in given:
-        answer = ask_secret("Agent token (from the web app, hidden): ")
-        settings["token"] = answer.strip() or settings.get("token", "")
     if settings["runner"] == RunnerKind.SLURM:
         ask_slurm(settings, given, ask)
 
@@ -173,15 +168,58 @@ def ask_slurm(
             settings["slurm_setup"] = lines
 
 
+def gathered_settings(options, path: Path, ask: Ask) -> dict[str, Any]:
+    """
+    This machine's settings: flags first, then the settings file, then
+    good guesses; whatever was not given as a flag is asked for, unless
+    ``--yes``.
+
+    :param options: Parsed ``login`` arguments.
+    :type options: argparse.Namespace
+    :param path: Settings file.
+    :type path: Path
+    :param ask: Asks a question and returns the answer.
+    :type ask: Ask
+    :return: The settings.
+    :rtype: dict[str, Any]
+    :raises ValueError: If the API address is missing.
+    """
+    given = from_flags(options)
+    settings = {**suggested_settings(read_settings(path)), **given}
+    if not options.yes:
+        ask_missing(settings, given, ask)
+    if not settings.get("api_url"):
+        raise ValueError("The API address is needed")
+    return settings
+
+
+def needs_pairing(options, settings: dict[str, Any]) -> bool:
+    """
+    Whether to pair with a code: no token was given as a flag, and
+    either none is saved or ``--pair`` asks for a fresh one.
+
+    :param options: Parsed ``login`` arguments.
+    :type options: argparse.Namespace
+    :param settings: Settings so far.
+    :type settings: dict[str, Any]
+    :return: True to pair.
+    :rtype: bool
+    """
+    if options.token:
+        return False
+    return options.pair or not settings.get("token")
+
+
 def login(
     options,
     path: Path,
     ask: Ask = input,
-    ask_secret: Ask = getpass.getpass,
     check: Callable[[str, str], str | None] = check_token,
+    pairing: Pair = pair,
 ) -> list[str]:
     """
-    Gather, check and save this machine's settings.
+    Gather, pair (unless a token is given), check and save this
+    machine's settings.
 
     :param options: Parsed ``login`` arguments.
     :type options: argparse.Namespace
@@ -189,22 +227,20 @@ def login(
     :type path: Path
     :param ask: Asks a question (``input`` by default).
     :type ask: Ask
-    :param ask_secret: Asks without echo (``getpass`` by default).
-    :type ask_secret: Ask
     :param check: Checks the token with the API.
     :type check: Callable[[str, str], str | None]
+    :param pairing: Pairs with a code; returns the token.
+    :type pairing: Pair
     :return: Lines to print.
     :rtype: list[str]
     :raises TokenRefusedError: If the API refused the token (nothing is
         saved).
-    :raises ValueError: If the API address or token is missing.
+    :raises PairingFailedError: If pairing did not finish.
+    :raises ValueError: If the API address is missing.
     """
-    given = from_flags(options)
-    settings = {**suggested_settings(read_settings(path)), **given}
-    if not options.yes:
-        ask_missing(settings, given, ask, ask_secret)
-    if not settings.get("api_url") or not settings.get("token"):
-        raise ValueError("Both the API address and the token are needed")
+    settings = gathered_settings(options, path, ask)
+    if needs_pairing(options, settings):
+        settings["token"] = pairing(settings["api_url"], settings["runner"])
     warning = check(settings["api_url"], settings["token"])
     write_settings(path, settings)
     first = f"Warning: {warning}" if warning else "The API accepted the token."
