@@ -19,12 +19,13 @@ import RemovableEdge from './RemovableEdge';
 import StructureNode from './StructureNode';
 import CalculationNode from './CalculationNode';
 import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
-import type { TaskDefinition } from '../../types/api';
+import type { PipelineTemplate, TaskDefinition } from '../../types/api';
 import {
   defaultParameterValues,
   inputPortForFile,
 } from '../../utils/taskCatalog';
 import BranchExpanderNode from './BranchExpanderNode';
+import StartScreen from './StartScreen';
 import BranchCircleNode from './BranchCircleNode';
 import BranchDotsNode from './BranchDotsNode';
 import { parseStructureFile } from '../../utils/structureParser';
@@ -34,6 +35,10 @@ import {
   restoreEdge,
 } from '../../utils/graphEdges';
 
+// A pipeline fills the canvas, but small ones stay at actual size.
+const FIT_VIEW = { maxZoom: 1, padding: 0.08 };
+// Input boxes for several chosen files stack this far apart.
+const FILE_SPACING = 70;
 // How many copies a sweep makes, typed in its toolbar.
 const COUNT_INPUT = [
   'w-12 px-1 py-0.5 text-xs font-bold text-center bg-stone-50 border',
@@ -66,6 +71,8 @@ interface GraphCanvasProps {
   onRegisterReplicateHandler?: (handler: (nodeId: string, count: number) => void) => void;
   onNodesDelete?: (deleted: Node[]) => void;
   onGraphChange?: (graph: { nodes: Node[]; edges: Edge[] }) => void;
+  // Loads a template onto an empty canvas (its start screen).
+  onLoadTemplate?: (template: PipelineTemplate) => void;
 }
 
 function isGroupMemberNode(node?: Node | null, targetGroupId?: string, parentId?: string): boolean {
@@ -95,6 +102,7 @@ export default function GraphCanvas({
   onRegisterReplicateHandler,
   onNodesDelete,
   onGraphChange,
+  onLoadTemplate,
 }: GraphCanvasProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
@@ -1020,7 +1028,7 @@ export default function GraphCanvas({
       setNodes(initialNodes);
       if (initialNodes.length > 0) {
         setTimeout(() => {
-          rfFitView({ maxZoom: 1.23, padding: 0.18 });
+          rfFitView(FIT_VIEW);
         }, 50);
       }
     }
@@ -1221,6 +1229,22 @@ export default function GraphCanvas({
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
   }, []);
+
+  // Files chosen on the start screen: one input box each, mid-canvas.
+  const addFiles = useCallback(
+    (files: File[]) => {
+      const bounds = reactFlowWrapper.current?.getBoundingClientRect();
+      if (!bounds) return;
+      files.forEach((file, index) => {
+        const position = screenToFlowPosition({
+          x: bounds.left + bounds.width / 3,
+          y: bounds.top + bounds.height / 2 + index * FILE_SPACING,
+        });
+        void processStructureFile(file, undefined, position);
+      });
+    },
+    [screenToFlowPosition, processStructureFile]
+  );
 
   const onDrop = useCallback(
     (event: React.DragEvent) => {
@@ -1443,7 +1467,7 @@ export default function GraphCanvas({
       : 1);
 
   return (
-    <div className="w-full h-full bg-stone-50" ref={reactFlowWrapper}>
+    <div className="relative w-full h-full bg-stone-50" ref={reactFlowWrapper}>
       <ReactFlow 
         nodes={nodes} 
         edges={edges} 
@@ -1462,10 +1486,10 @@ export default function GraphCanvas({
         onDrop={onDrop}
         onDragOver={onDragOver}
         fitView
-        fitViewOptions={{ maxZoom: 1.23, padding: 0.18 }}
+        fitViewOptions={FIT_VIEW}
         minZoom={0.15}
         maxZoom={2.0}
-        defaultViewport={{ x: 50, y: 50, zoom: 1.23 }}
+        defaultViewport={{ x: 50, y: 50, zoom: 1 }}
       >
         <Background color="#E7E5E4" gap={24} size={1.3} />
         <Controls showInteractive={false} />
@@ -1547,6 +1571,9 @@ export default function GraphCanvas({
           </NodeToolbar>
         )}
       </ReactFlow>
+      {isEditable && nodes.length === 0 && onLoadTemplate && (
+        <StartScreen onLoadTemplate={onLoadTemplate} onFiles={addFiles} />
+      )}
     </div>
   );
 }

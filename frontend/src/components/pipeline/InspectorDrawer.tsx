@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Trash2, Download, RotateCcw, FileText, Upload } from 'lucide-react';
 import { triggerFileDownload } from '../../utils/downloadHelper';
+import { INPUT_FILE_TYPES } from '../../utils/structureParser';
 import RunFilesButton from './RunFilesButton';
 import YamlParamEditor from './YamlParamEditor';
 import CH4Icon from '../icons/CH4Icon';
@@ -391,7 +392,7 @@ export default function InspectorDrawer({
                   type="file"
                   id="modal-replace-file"
                   className="hidden"
-                  accept=".xyz,.cif,.sdf,.mol,.pdb,.in"
+                  accept={INPUT_FILE_TYPES}
                   onChange={(e) => {
                     if (e.target.files && e.target.files.length > 0) {
                       const file = e.target.files[0];

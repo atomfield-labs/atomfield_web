@@ -3,6 +3,9 @@
  * Fast in-browser parser for chemical structure files (.xyz, .cif, .sdf, .mol, .pdb).
  */
 
+// The files an input box takes, in every place one can be chosen.
+export const INPUT_FILE_TYPES = '.xyz,.cif,.sdf,.mol,.pdb,.in';
+
 export interface ParsedStructure {
   filename: string;
   format: string;

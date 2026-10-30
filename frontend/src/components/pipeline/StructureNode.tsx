@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { FileText } from 'lucide-react';
 import { HANDLE_CLASS, nodeBox } from './nodeStyle';
+import { INPUT_FILE_TYPES } from '../../utils/structureParser';
 
 export interface StructureNodeData {
   filename?: string;
@@ -81,7 +82,7 @@ export default function StructureNode({ id, data, selected }: any) {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".xyz,.cif,.sdf,.mol,.pdb,.in"
+        accept={INPUT_FILE_TYPES}
         className="hidden"
         onChange={handleFileChange}
       />

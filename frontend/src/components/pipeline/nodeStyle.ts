@@ -9,7 +9,7 @@ export const HANDLE_CLASS = [
 ].join(' ');
 
 const BOX = [
-  'relative w-[220px] h-11 flex items-center gap-2.5 px-3',
+  'relative w-[180px] h-[52px] flex items-center gap-2.5 px-3',
   'rounded-[10px] bg-white select-none transition-shadow',
 ].join(' ');
 const SELECTED = [

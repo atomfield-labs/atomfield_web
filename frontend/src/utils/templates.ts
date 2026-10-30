@@ -17,7 +17,7 @@ interface Position {
 
 // Nodes go left to right in running order, one column per step.
 const ORIGIN: Position = { x: 80, y: 220 };
-const COLUMN_WIDTH = 260;
+const COLUMN_WIDTH = 224;
 const ROW_HEIGHT = 180;
 
 /**

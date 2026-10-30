@@ -1,98 +1,28 @@
 import React, { useState } from 'react';
 import {
-  ChevronDown,
-  ChevronRight,
   Info,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
+  X,
 } from 'lucide-react';
-import { usePipelineTemplates } from '../../hooks/usePipelineTemplates';
 import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
-import type { PipelineTemplate, TaskDefinition } from '../../types/api';
+import type { TaskDefinition } from '../../types/api';
 import { groupByCategory } from '../../utils/taskCatalog';
-
-interface LeftSidebarProps {
-  onLoadTemplate?: (template: PipelineTemplate) => void;
-}
 
 interface SidebarItem {
   id: string;
   title: string;
-  filename?: string;
   description: string;
-  isStructure?: boolean;
-  // A ready-made pipeline: clicking it replaces the canvas.
-  template?: PipelineTemplate;
+  // The input-file box, rather than a task.
+  isInput?: boolean;
   task?: TaskDefinition;
 }
 
-interface PaletteCategory {
+interface TaskGroup {
   id: string;
   label: string;
   items: SidebarItem[];
-}
-
-const BUILDERS: PaletteCategory = {
-  id: 'builders',
-  label: 'Builders',
-  items: [
-    {
-      id: 'structure_input',
-      title: 'Structure Input (.xyz)',
-      description:
-        'Structure file input: molecules (.xyz, .mol, .sdf, .pdb) or ' +
-        'crystals (.cif, or a pw.x .in that keeps the cell orientation). ' +
-        'Drag onto canvas or upload file.',
-      isStructure: true,
-    },
-  ],
-};
-
-/**
- * Palette entry for one catalog task; its id shows in the tooltip.
- */
-function taskItem(task: TaskDefinition): SidebarItem {
-  return {
-    id: task.id,
-    title: task.title,
-    filename: task.id,
-    description: task.description,
-    task,
-  };
-}
-
-/**
- * Palette entry for one ready-made pipeline of the catalog.
- */
-function templateItem(template: PipelineTemplate): SidebarItem {
-  return {
-    id: `template:${template.id}`,
-    title: template.title,
-    filename: template.id,
-    description: `${template.description} Click to switch pipeline.`,
-    template,
-  };
-}
-
-/**
- * Fixed builders first, then one category per catalog category, then
- * the catalog's ready-made pipelines.
- */
-function buildCategories(
-  tasks: TaskDefinition[],
-  templates: PipelineTemplate[]
-): PaletteCategory[] {
-  const catalogCategories = groupByCategory(tasks).map(([label, group]) => ({
-    id: `catalog:${label}`,
-    label,
-    items: group.map(taskItem),
-  }));
-  const prebuilt: PaletteCategory = {
-    id: 'prebuilt_pipelines',
-    label: 'Prebuilt Pipelines',
-    items: templates.map(templateItem),
-  };
-  return [BUILDERS, ...catalogCategories, prebuilt];
 }
 
 interface TooltipState {
@@ -101,222 +31,220 @@ interface TooltipState {
   left: number;
 }
 
-export default function LeftSidebar({
-  onLoadTemplate,
-}: LeftSidebarProps = {}) {
+// What a pipeline starts from: a file, dropped on its box.
+const INPUTS: TaskGroup = {
+  id: 'inputs',
+  label: 'Inputs',
+  items: [
+    {
+      id: 'input_files',
+      title: 'Input files',
+      description:
+        'A file the pipeline starts from. Drag it onto the canvas, then ' +
+        'drop a file on it.',
+      isInput: true,
+    },
+  ],
+};
+const TOOLTIP_HEIGHT = 110;
+const TOOLTIP_GAP = 10;
+const PANEL = [
+  'relative bg-white border-r border-stone-200 flex flex-col shrink-0',
+  'select-none z-20 transition-all duration-300 ease-in-out',
+].join(' ');
+const ITEM = [
+  'group flex items-center justify-between gap-2 min-h-9 px-2.5 rounded-lg',
+  'text-sm text-stone-900 hover:bg-stone-100 cursor-grab',
+  'active:cursor-grabbing',
+].join(' ');
+const OPEN_BUTTON = [
+  'absolute top-3 left-3 z-30 h-9 px-3 flex items-center gap-2 rounded-lg',
+  'bg-white border border-stone-200 text-sm text-stone-700',
+  'hover:bg-stone-50 cursor-pointer',
+].join(' ');
+const ICON_BUTTON = [
+  'p-1.5 rounded-md text-stone-400 hover:text-stone-700 hover:bg-stone-100',
+  'cursor-pointer',
+].join(' ');
+const SEARCH_BOX = [
+  'flex-1 flex items-center gap-2 h-10 px-3 rounded-[10px]',
+  'bg-stone-100',
+].join(' ');
+const SEARCH_INPUT = [
+  'flex-1 min-w-0 bg-transparent text-sm text-stone-900',
+  'outline-none',
+].join(' ');
+const GROUP_HEADING = 'px-2.5 pt-1.5 pb-1 text-xs font-medium text-stone-500';
+const INFO_BUTTON = 'shrink-0 text-stone-400 opacity-0 group-hover:opacity-100';
+const TOOLTIP = [
+  'fixed z-50 pointer-events-none w-64 p-3 rounded-lg bg-stone-900/95',
+  'text-white text-xs shadow-xl',
+].join(' ');
+
+function taskItem(task: TaskDefinition): SidebarItem {
+  return {
+    id: task.id,
+    title: task.title,
+    description: task.description,
+    task,
+  };
+}
+
+/**
+ * Inputs first, then one group per catalog category.
+ */
+function taskGroups(tasks: TaskDefinition[]): TaskGroup[] {
+  const catalog = groupByCategory(tasks).map(([label, group]) => ({
+    id: `catalog:${label}`,
+    label,
+    items: group.map(taskItem),
+  }));
+  return [INPUTS, ...catalog];
+}
+
+/**
+ * The groups with only the items matching a search; empty groups go.
+ */
+function matching(groups: TaskGroup[], query: string): TaskGroup[] {
+  if (!query) return groups;
+  const fits = (item: SidebarItem) =>
+    `${item.title} ${item.description}`.toLowerCase().includes(query);
+  return groups
+    .map((group) => ({ ...group, items: group.items.filter(fits) }))
+    .filter((group) => group.items.length > 0);
+}
+
+/**
+ * What a drag onto the canvas carries: the input-file box, or a task.
+ */
+function startDrag(event: React.DragEvent, item: SidebarItem): void {
+  const payload = item.isInput
+    ? { type: 'structure', title: 'Structure Input' }
+    : item.task;
+  if (!payload) return;
+  event.dataTransfer.setData('application/reactflow', JSON.stringify(payload));
+  event.dataTransfer.setData('scriptName', payload.title);
+  event.dataTransfer.effectAllowed = 'move';
+}
+
+/**
+ * The tasks a pipeline is built from, searchable and grouped by
+ * category; drag one onto the canvas to add it.
+ */
+export default function LeftSidebar() {
   const { tasks, isLoading } = useTaskDefinitions();
-  const templates = usePipelineTemplates();
+  const [query, setQuery] = useState('');
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [isCollapsed, setIsCollapsed] = useState(
     () => typeof window !== 'undefined' && window.innerWidth < 768
   );
-  // Categories start open; only the ones a user closes are recorded.
-  const [openCategories, setOpenCategories] = useState<
-    Record<string, boolean>
-  >({});
-  const categories = buildCategories(tasks, templates);
+  const groups = matching(taskGroups(tasks), query.trim().toLowerCase());
 
-  const toggleCategory = (catId: string) => {
-    setOpenCategories((prev) => ({
-      ...prev,
-      [catId]: !(prev[catId] ?? true),
-    }));
-  };
-
-  const onDragStart = (event: React.DragEvent, item: SidebarItem) => {
-    if (item.isStructure) {
-      event.dataTransfer.setData(
-        'application/reactflow',
-        JSON.stringify({ type: 'structure', title: 'Structure Input' })
-      );
-      event.dataTransfer.setData('scriptName', 'Structure Input');
-      event.dataTransfer.effectAllowed = 'move';
-      return;
-    }
-
-    if (item.task) {
-      event.dataTransfer.setData(
-        'application/reactflow',
-        JSON.stringify(item.task)
-      );
-      event.dataTransfer.setData('scriptName', item.task.title);
-      event.dataTransfer.effectAllowed = 'move';
-    }
-  };
-
-  const handleInfoEnter = (event: React.MouseEvent, item: SidebarItem) => {
+  const showTooltip = (event: React.MouseEvent, item: SidebarItem) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    const tooltipEstimatedHeight = 110;
-    const top = Math.min(rect.top, window.innerHeight - tooltipEstimatedHeight - 16);
-    const left = rect.right + 10;
-    setTooltip({ item, top, left });
-  };
-
-  const handleInfoLeave = () => {
-    setTooltip(null);
+    const lowest = window.innerHeight - TOOLTIP_HEIGHT - 16;
+    const top = Math.min(rect.top, lowest);
+    setTooltip({ item, top, left: rect.right + TOOLTIP_GAP });
   };
 
   return (
     <>
-      {/* Slide back / Toggle Open Button (when collapsed) */}
       {isCollapsed && (
         <button
           type="button"
           onClick={() => setIsCollapsed(false)}
-          className="absolute top-3 left-3 z-30 px-3 py-1.5 bg-white/95 hover:bg-white text-slate-700 hover:text-orange-600 border border-slate-200 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer text-xs font-semibold backdrop-blur-xs group"
-          title="Open Node Palette"
-          aria-label="Open Node Palette"
+          className={OPEN_BUTTON}
+          aria-label="Show tasks"
         >
-          <PanelLeftOpen className="w-4 h-4 text-orange-500 group-hover:scale-110 transition-transform" />
-          <span>Node Palette</span>
+          <PanelLeftOpen size={16} className="text-stone-500" />
+          Tasks
         </button>
       )}
 
       <aside
-        className={`relative bg-white border-r border-slate-200 flex flex-col justify-between shrink-0 select-none z-20 shadow-xs transition-all duration-300 ease-in-out ${
-          isCollapsed ? 'w-0 border-r-0 overflow-hidden' : 'w-[260px]'
+        className={`${PANEL} ${
+          isCollapsed ? 'w-0 border-r-0 overflow-hidden' : 'w-[248px]'
         }`}
       >
-        <div className="w-[260px] h-full flex flex-col justify-between overflow-hidden">
-          {/* Header and Scrollable Category List */}
-          <div className="flex-1 overflow-y-auto p-3">
-            <div className="flex items-center justify-between mb-3 px-1">
-              <div className="flex items-center gap-1.5">
-                <h2 className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">
-                  Node Palette
-                </h2>
-                <span className="text-[10px] font-mono text-slate-400">
-                  ({tasks.length})
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsCollapsed(true)}
-                className="p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
-                title="Slide back sidebar"
-                aria-label="Slide back sidebar"
-              >
-                <PanelLeftClose className="w-4 h-4" />
-              </button>
-            </div>
-
-          {isLoading ? (
-            <div className="py-8 text-center text-xs font-medium text-slate-400 animate-pulse">
-              Loading library...
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {categories.map((cat) => {
-                const items = cat.items;
-                const isOpen = openCategories[cat.id] ?? true;
-
-                return (
-                  <div key={cat.id} className="mb-2">
-                    {/* Collapsible Header in Soft Theme-Matched Light Orange */}
-                    <button
-                      type="button"
-                      onClick={() => toggleCategory(cat.id)}
-                      className="w-full flex items-center justify-between py-1.5 px-2.5 text-xs font-semibold bg-orange-50/90 hover:bg-orange-100 text-orange-600 border border-orange-200/80 rounded-md transition-colors select-none group"
-                    >
-                      <span className="text-[11px] font-bold tracking-wide uppercase text-orange-600 group-hover:text-orange-700">
-                        {cat.label}
-                      </span>
-                      <div className="flex items-center gap-1.5 text-orange-600">
-                        {items.length > 0 && (
-                          <span className="text-[10px] font-mono font-bold bg-orange-200/60 text-orange-700 px-1.5 py-0.5 rounded">
-                            {items.length}
-                          </span>
-                        )}
-                        {isOpen ? (
-                          <ChevronDown className="w-3.5 h-3.5 text-orange-600 group-hover:text-orange-700" />
-                        ) : (
-                          <ChevronRight className="w-3.5 h-3.5 text-orange-600 group-hover:text-orange-700" />
-                        )}
-                      </div>
-                    </button>
-
-                    {/* Collapsible Content with Light Orange Hover Strips */}
-                    {isOpen && (
-                      <div className="mt-1 space-y-0.5 pl-0.5 pr-0.5">
-                        {items.length === 0 ? (
-                          <div className="py-1 px-2.5 text-[11px] text-slate-400 italic">
-                            Coming soon
-                          </div>
-                        ) : (
-                          items.map((item) => (
-                            <div
-                              key={item.id}
-                              draggable={!item.template}
-                              onDragStart={(e) => {
-                                if (!item.template) {
-                                  onDragStart(e, item);
-                                }
-                              }}
-                              onClick={() => {
-                                if (item.template && onLoadTemplate) {
-                                  onLoadTemplate(item.template);
-                                }
-                              }}
-                              className={`group flex items-center justify-between px-2.5 py-1.5 rounded text-xs text-slate-700 hover:text-blue-950 hover:bg-blue-50/80 border border-transparent hover:border-blue-200/80 transition-colors select-none ${
-                                item.template
-                                  ? 'cursor-pointer active:bg-blue-100/70 font-medium'
-                                  : 'cursor-grab active:cursor-grabbing font-medium'
-                              }`}
-                            >
-                              <div className="flex items-center gap-1.5 truncate">
-                                {item.template && (
-                                  <span className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" />
-                                )}
-                                <span className="truncate text-[11.5px] leading-snug">
-                                  {item.title}
-                                </span>
-                              </div>
-
-                              <button
-                                type="button"
-                                onMouseEnter={(e) => handleInfoEnter(e, item)}
-                                onMouseLeave={handleInfoLeave}
-                                className="text-slate-400 hover:text-blue-600 p-0.5 rounded opacity-40 group-hover:opacity-100 transition-opacity ml-1.5 shrink-0"
-                                aria-label="Details"
-                              >
-                                <Info className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Minimal Bottom Status Hint */}
-        <div className="p-3 border-t border-slate-100">
-          <div className="text-[11px] text-slate-400 leading-normal">
-            Drag node to canvas to insert into pipeline.
+        <div className="w-[248px] h-full flex flex-col p-3 gap-3">
+          <div className="flex items-center gap-1.5">
+            <label className={SEARCH_BOX}>
+              <Search size={16} className="shrink-0 text-stone-500" />
+              <span className="sr-only">Search tasks</span>
+              <input
+                type="text"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search tasks"
+                className={SEARCH_INPUT}
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  className="text-stone-400 hover:text-stone-600 cursor-pointer"
+                  aria-label="Clear search"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </label>
+            <button
+              type="button"
+              onClick={() => setIsCollapsed(true)}
+              className={ICON_BUTTON}
+              aria-label="Hide tasks"
+            >
+              <PanelLeftClose size={16} />
+            </button>
           </div>
-        </div>
+
+          <div className="flex-1 overflow-y-auto -mx-1 px-1">
+            {isLoading ? (
+              <p className="py-8 text-center text-sm text-stone-400">
+                Loading tasks…
+              </p>
+            ) : groups.length === 0 ? (
+              <p className="py-8 text-center text-sm text-stone-400">
+                No task matches.
+              </p>
+            ) : (
+              groups.map((group) => (
+                <section key={group.id} className="mb-3">
+                  <h2 className={GROUP_HEADING}>{group.label}</h2>
+                  {group.items.map((item) => (
+                    <div
+                      key={item.id}
+                      draggable
+                      onDragStart={(event) => startDrag(event, item)}
+                      className={ITEM}
+                    >
+                      <span className="truncate">{item.title}</span>
+                      <button
+                        type="button"
+                        onMouseEnter={(event) => showTooltip(event, item)}
+                        onMouseLeave={() => setTooltip(null)}
+                        className={INFO_BUTTON}
+                        aria-label={`About ${item.title}`}
+                      >
+                        <Info size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </section>
+              ))
+            )}
+          </div>
         </div>
       </aside>
 
-      {/* Floating Hover Tooltip (Portaled / Fixed to prevent sidebar clipping) */}
       {tooltip && (
         <div
-          className="fixed z-50 pointer-events-none w-64 p-3 bg-slate-900/95 text-white rounded-lg shadow-xl border border-slate-700/80 backdrop-blur-xs text-xs"
+          className={TOOLTIP}
           style={{ top: tooltip.top, left: tooltip.left }}
         >
-          <div className="font-semibold text-white mb-0.5 text-xs">
-            {tooltip.item.title}
-          </div>
-          {tooltip.item.filename && (
-            <div className="font-mono text-[10px] text-slate-400 mb-1.5">
-              {tooltip.item.filename}
-            </div>
-          )}
-          <div className="text-slate-300 text-[11px] leading-relaxed">
+          <div className="mb-1 font-semibold">{tooltip.item.title}</div>
+          <div className="leading-relaxed text-stone-300">
             {tooltip.item.description}
           </div>
         </div>

@@ -336,7 +336,7 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
 
       <div className="flex flex-1 overflow-hidden relative">
         <ReactFlowProvider>
-          <LeftSidebar onLoadTemplate={handleLoadTemplate} />
+          <LeftSidebar />
 
           <div className="flex-1 h-full relative">
             <GraphCanvas
@@ -350,6 +350,7 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
               onRegisterUpdateExecutionHandler={(handler) => { updateNodeExecutionRef.current = handler; }}
               onRegisterReplicateHandler={(handler) => { replicateNodeRef.current = handler; }}
               onGraphChange={handleGraphChange}
+              onLoadTemplate={handleLoadTemplate}
               onNodesDelete={(deleted) => {
                 if (selectedNode && deleted.some((d) => d.id === selectedNode.id || d.id === selectedNode.ui_id)) {
                   setSelectedNode(null);

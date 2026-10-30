@@ -4,6 +4,9 @@ import StatusIcon from '../StatusIcon';
 import { statusLook } from '../../utils/jobStatus';
 import { HANDLE_CLASS, STEP_HANDLES, nodeBox } from './nodeStyle';
 
+// Task names run long: they wrap to two lines rather than cut off.
+const NAME = 'line-clamp-2 text-sm leading-[1.2] font-medium';
+
 export interface CalculationNodeData {
   label?: string;
   filename?: string;
@@ -42,7 +45,7 @@ function CalculationNode({
         />
       ))}
       <StatusIcon status={data.status} />
-      <span className={`truncate text-sm font-medium ${text}`}>{label}</span>
+      <span className={`${NAME} ${text}`}>{label}</span>
     </div>
   );
 }
