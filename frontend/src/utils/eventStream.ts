@@ -12,7 +12,7 @@ export interface StreamFrame {
 
 /**
  * The server refused the stream. Worth retrying only for server-side
- * trouble; a missing key or an unknown run will not fix itself.
+ * trouble; a sign-in that ended or an unknown run will not fix itself.
  */
 export class StreamError extends Error {
   readonly status: number;
@@ -46,17 +46,17 @@ export function parseFrame(text: string): StreamFrame {
 /**
  * Read one connection's frames until it ends or is aborted.
  *
- * fetch rather than EventSource: EventSource cannot send headers, and
- * the API key must not travel in the URL, where logs keep it.
+ * fetch rather than EventSource: it shows why the server refused (the
+ * HTTP status), which decides whether to retry. The browser sends the
+ * sign-in cookie with it, as with any request to this site.
  */
 export async function readEventStream(
   url: string,
-  headers: Record<string, string>,
   onFrame: (frame: StreamFrame) => void,
   signal: AbortSignal
 ): Promise<void> {
   const response = await fetch(url, {
-    headers: { Accept: 'text/event-stream', ...headers },
+    headers: { Accept: 'text/event-stream' },
     signal,
   });
   if (!response.ok || !response.body) {
@@ -101,7 +101,6 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
  */
 export async function followEventStream(
   url: string,
-  headers: Record<string, string>,
   onFrame: (frame: StreamFrame) => void,
   signal: AbortSignal
 ): Promise<void> {
@@ -112,7 +111,7 @@ export async function followEventStream(
   };
   while (!signal.aborted) {
     try {
-      await readEventStream(url, headers, onAnyFrame, signal);
+      await readEventStream(url, onAnyFrame, signal);
     } catch (error) {
       const fatal = error instanceof StreamError && !error.retryable;
       if (signal.aborted || fatal) return;

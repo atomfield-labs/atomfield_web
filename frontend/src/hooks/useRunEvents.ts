@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { API_BASE, authHeaders } from '../api/client';
 import { jobsService } from '../api/services';
 import type { JobEvent, JobStatus, RunSnapshot } from '../types/api';
 import { followEventStream } from '../utils/eventStream';
@@ -144,8 +143,8 @@ export function useRunEvents({
       onAllFinished?.();
     };
 
-    const url = `${API_BASE}/api/runs/${runId}/events`;
-    void followEventStream(url, authHeaders(), onFrame, controller.signal);
+    const url = `/api/runs/${runId}/events`;
+    void followEventStream(url, onFrame, controller.signal);
     return () => {
       disposed = true;
       controller.abort();

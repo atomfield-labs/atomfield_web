@@ -12,6 +12,7 @@ import {
   X,
   AlertTriangle,
 } from 'lucide-react';
+import { describeError } from '../../api/client';
 import { adminService } from '../../api/services';
 import type {
   AdminStatsResponse,
@@ -42,10 +43,7 @@ export default function AdminDashboard() {
       setStats(statsData);
       setUsers(usersData.users);
     } catch (err: any) {
-      const detail =
-        err?.response?.data?.detail ||
-        'Unable to load administrator data. Please check your credentials.';
-      setError(detail);
+      setError(describeError(err, 'Unable to load administrator data.'));
     } finally {
       setIsLoading(false);
     }
@@ -77,9 +75,7 @@ export default function AdminDashboard() {
       );
       setSelectedUser(null);
     } catch (err: any) {
-      alert(
-        err?.response?.data?.detail || 'Failed to update user calculation quota.'
-      );
+      alert(describeError(err, 'Failed to update user calculation quota.'));
     } finally {
       setIsUpdatingQuota(false);
     }
@@ -88,9 +84,8 @@ export default function AdminDashboard() {
   const filteredUsers = users.filter((u) => {
     const query = searchQuery.toLowerCase().trim();
     if (!query) return true;
-    const labelMatch = (u.label || '').toLowerCase().includes(query);
-    const prefixMatch = u.key_prefix.toLowerCase().includes(query);
-    return labelMatch || prefixMatch;
+    const shown = [u.label, u.email, u.key_prefix];
+    return shown.some((text) => (text || '').toLowerCase().includes(query));
   });
 
   const formatRuntime = (totalSeconds: number) => {
@@ -329,8 +324,7 @@ export default function AdminDashboard() {
                           )
                         : 0;
 
-                    const isClusterAdmin =
-                      user.label === 'Cluster Administrator';
+                    const isClusterAdmin = Boolean(user.is_admin);
 
                     return (
                       <tr
@@ -356,7 +350,7 @@ export default function AdminDashboard() {
                         {/* Key Prefix */}
                         <td className="py-3.5 px-4 font-mono text-[11px] text-slate-600">
                           <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-                            {user.key_prefix}
+                            {user.email || user.key_prefix || '-'}
                           </span>
                         </td>
 
@@ -472,7 +466,7 @@ export default function AdminDashboard() {
                 {selectedUser.label || 'Anonymous User'}
               </div>
               <div className="font-mono text-[11px] text-slate-500 mt-0.5">
-                Key prefix: {selectedUser.key_prefix}
+                {selectedUser.email || `Key prefix: ${selectedUser.key_prefix}`}
               </div>
             </div>
 

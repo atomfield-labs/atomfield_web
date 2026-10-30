@@ -1,39 +1,31 @@
 import axios from 'axios';
-import { v4 as uuidv4 } from 'uuid';
 
-export const API_BASE = import.meta.env.VITE_API_URL || '';
-
+/**
+ * The API client. The web app is served from the API's own address (in
+ * development through Vite's proxy), so the browser sends the sign-in
+ * cookie with every request by itself: no keys are kept in the page.
+ */
 const client = axios.create({
-  baseURL: API_BASE,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
 /**
- * Headers that identify this browser (device fingerprint) and its
- * user (API key). Shared by axios and the live event stream, which
- * uses fetch.
+ * What to tell the person about a failed request: the server's own
+ * explanation when it gave one (a sentence, or the list of problems
+ * FastAPI sends for a malformed request), otherwise `fallback`.
  */
-export function authHeaders(): Record<string, string> {
-  let deviceId = localStorage.getItem('atomfield_device_id');
-  if (!deviceId) {
-    deviceId = uuidv4();
-    localStorage.setItem('atomfield_device_id', deviceId);
+export function describeError(error: unknown, fallback: string): string {
+  const detail = axios.isAxiosError(error)
+    ? error.response?.data?.detail
+    : undefined;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    const problems = detail.map((problem) => problem?.msg).filter(Boolean);
+    return problems.join('; ') || fallback;
   }
-  const headers: Record<string, string> = { 'X-Anonymous-Id': deviceId };
-  const apiKey = localStorage.getItem('atomfield_api_key');
-  if (apiKey) {
-    headers['X-API-Key'] = apiKey;
-  }
-  return headers;
+  return fallback;
 }
-
-client.interceptors.request.use((config) => {
-  for (const [name, value] of Object.entries(authHeaders())) {
-    config.headers[name] = value;
-  }
-  return config;
-});
 
 export default client;

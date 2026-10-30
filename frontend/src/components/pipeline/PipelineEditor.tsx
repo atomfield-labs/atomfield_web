@@ -4,6 +4,7 @@ import LeftSidebar from './LeftSidebar';
 import GraphCanvas from './GraphCanvas';
 import InspectorDrawer from './InspectorDrawer';
 import EditorHeader from './EditorHeader';
+import { describeError } from '../../api/client';
 import { jobsService } from '../../api/services';
 import { useBlueprint } from '../../hooks/useBlueprint';
 import { useSessionDraft, serializeGraphToBlueprint } from '../../hooks/useSessionDraft';
@@ -266,7 +267,8 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
       );
     } catch (err: any) {
       console.error('Pipeline deploy failed', err);
-      alert(`Pipeline deployment failed: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
+      const reason = describeError(err, err?.message || 'Unknown error');
+      alert(`Pipeline deployment failed: ${reason}`);
       setSaveStatus('saved');
     } finally {
       setIsDeploying(false);

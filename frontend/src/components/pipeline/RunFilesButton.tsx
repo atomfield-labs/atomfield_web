@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { Check, Copy, Download } from 'lucide-react';
-import { API_BASE } from '../../api/client';
 import { jobsService } from '../../api/services';
 import type { BundleInfo } from '../../types/api';
 
@@ -28,14 +27,6 @@ const PANEL = [
 ].join(' ');
 
 /**
- * Turn a link from the API into one the browser can open: the server's
- * own store gives paths, a cloud store full URLs.
- */
-function absolute(url: string): string {
-  return url.startsWith('http') ? url : `${API_BASE}${url}`;
-}
-
-/**
  * Wait the given time.
  */
 function pause(ms: number): Promise<void> {
@@ -57,7 +48,9 @@ export default function RunFilesButton({ runId }: { runId: string | null }) {
   // opens it, no API key involved, and saves what it serves.
   const download = (current: BundleInfo) => {
     if (current.download_url) {
-      window.location.assign(absolute(current.download_url));
+      // The server's own store gives a path on this site, a cloud
+      // store a full URL; the browser opens either.
+      window.location.assign(current.download_url);
     }
   };
 

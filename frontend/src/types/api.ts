@@ -220,39 +220,42 @@ export interface JobListResponse {
   total: number;
 }
 
-export interface ApiKeyCreateRequest {
-  label?: string;
-}
-
-export interface ApiKeyCreateResponse {
-  api_key: string;
-  key_prefix: string;
+// A person as the API shows them: who they are and their job quota.
+// key_prefix is set only when a script's key made the request.
+export interface AccountQuota {
+  key_prefix?: string | null;
   label?: string | null;
-  quota_limit: number;
-  quota_used: number;
-}
-
-export interface ApiKeyInfo {
-  key_prefix: string;
-  label?: string | null;
+  email?: string | null;
   quota_limit: number;
   quota_used: number;
   quota_remaining: number;
+}
+
+export interface Account extends AccountQuota {
   is_active: boolean;
   is_admin?: boolean;
 }
 
-export interface UserStatsResponse {
-  key_prefix: string;
-  label?: string | null;
-  quota_limit: number;
-  quota_used: number;
-  quota_remaining: number;
+export interface UserStatsResponse extends AccountQuota {
   total_jobs: number;
   success_jobs: number;
   failed_jobs: number;
   running_jobs: number;
   pending_jobs: number;
+}
+
+// One of a person's keys for scripts; never the secret itself.
+export interface ScriptKey {
+  id: string;
+  key_prefix: string;
+  label?: string | null;
+  created_at?: string | null;
+  last_used_at?: string | null;
+}
+
+// A key just made, with its secret, which is shown this once.
+export interface NewScriptKey extends ScriptKey {
+  api_key: string;
 }
 
 export interface AdminStatsResponse {
@@ -264,19 +267,15 @@ export interface AdminStatsResponse {
   total_compute_seconds: number;
 }
 
-export interface AdminUserSummary {
+export interface AdminUserSummary extends AccountQuota {
   id: string;
-  key_prefix: string;
-  label?: string | null;
-  quota_limit: number;
-  quota_used: number;
-  quota_remaining: number;
   total_jobs: number;
   success_jobs: number;
   failed_jobs: number;
   running_jobs: number;
   total_compute_seconds: number;
   is_active: boolean;
+  is_admin?: boolean;
   created_at?: string | null;
   last_used_at?: string | null;
 }

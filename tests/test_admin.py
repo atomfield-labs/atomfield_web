@@ -81,6 +81,7 @@ def test_admin_stats_and_user_tracking(
         user for user in users_data["users"] if user["label"] == ADMIN_LABEL
     )
     assert admin_user["quota_limit"] == ADMIN_QUOTA_LIMIT
+    assert admin_user["is_admin"] is True
 
 
 def test_admin_update_user_quota(

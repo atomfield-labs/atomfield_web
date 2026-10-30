@@ -108,6 +108,7 @@ class AdminUserSummary(KeyQuota, JobCounts):
 
     id: UUID
     is_active: bool
+    is_admin: bool = False
     created_at: datetime | None = None
     last_used_at: datetime | None = Field(
         default=None,
