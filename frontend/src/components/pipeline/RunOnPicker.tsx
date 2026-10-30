@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ChevronDown, Server } from 'lucide-react';
 import { targetsService } from '../../api/services';
 import type { ComputeTarget } from '../../types/api';
 import AddClusterModal from './AddClusterModal';
@@ -8,9 +9,11 @@ const REFRESH_MS = 30000;
 const ADD_CLUSTER = '__add_cluster__';
 
 const SELECT = [
-  'px-2 py-2 border border-slate-200 rounded-lg text-xs font-semibold',
-  'text-slate-700 bg-white max-w-[14rem]',
+  'h-10 pl-9 pr-8 rounded-[10px] border border-stone-200 bg-white',
+  'text-sm text-stone-900 max-w-[16rem] appearance-none cursor-pointer',
+  'hover:bg-stone-50 focus:outline-none focus:border-stone-400',
 ].join(' ');
+const ICON = 'pointer-events-none absolute text-stone-500';
 
 interface RunOnPickerProps {
   // The chosen target's id; null means the shared AtomField server.
@@ -63,21 +66,29 @@ export default function RunOnPicker({ value, onChange }: RunOnPickerProps) {
     value ?? targets.find((target) => target.shared)?.id ?? '';
 
   return (
-    <label className="flex items-center gap-2 text-xs text-slate-500">
-      Run on
-      <select
-        value={selected}
-        onChange={(event) => choose(event.target.value)}
-        title="Where this pipeline runs (● online, ○ offline)"
-        className={SELECT}
-      >
-        {targets.map((target) => (
-          <option key={target.id} value={target.id}>
-            {label(target)}
-          </option>
-        ))}
-        <option value={ADD_CLUSTER}>+ Add a cluster…</option>
-      </select>
+    <>
+      <label className="relative flex items-center">
+        <span className="sr-only">Run on</span>
+        <Server size={16} aria-hidden="true" className={`${ICON} left-3`} />
+        <select
+          value={selected}
+          onChange={(event) => choose(event.target.value)}
+          title="Where this pipeline runs (● online, ○ offline)"
+          className={SELECT}
+        >
+          {targets.map((target) => (
+            <option key={target.id} value={target.id}>
+              {label(target)}
+            </option>
+          ))}
+          <option value={ADD_CLUSTER}>+ Add a cluster…</option>
+        </select>
+        <ChevronDown
+          size={14}
+          aria-hidden="true"
+          className={`${ICON} right-3`}
+        />
+      </label>
       <AddClusterModal
         isOpen={isAdding}
         onClose={() => setIsAdding(false)}
@@ -86,6 +97,6 @@ export default function RunOnPicker({ value, onChange }: RunOnPickerProps) {
           onChange(target.id);
         }}
       />
-    </label>
+    </>
   );
 }

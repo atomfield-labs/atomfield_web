@@ -3,6 +3,10 @@ import type { Node, Edge } from '@xyflow/react';
 import type { SaveStatus, SessionMetadata, BlueprintNode, BlueprintEdge } from '../types/api';
 import { saveEdge } from '../utils/graphEdges';
 
+// This browser's list of pipelines, shown on the sessions page.
+const SESSIONS_KEY = 'atomfield_sessions';
+export const UNTITLED = 'Untitled pipeline';
+
 export function serializeGraphToBlueprint(nodes: Node[], edges: Edge[]): { nodes: BlueprintNode[]; edges: BlueprintEdge[] } {
   return {
     nodes: nodes
@@ -49,81 +53,93 @@ export function serializeGraphToBlueprint(nodes: Node[], edges: Edge[]): { nodes
   };
 }
 
-export function useSessionDraft(activeSessionId: string) {
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+/**
+ * This browser's pipelines. Old entries may be bare ids.
+ */
+function readSessions(): (SessionMetadata | string)[] {
+  try {
+    const raw = localStorage.getItem(SESSIONS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
 
-  // Register session entry in atomfield_sessions list if not present
-  useEffect(() => {
-    if (!activeSessionId || activeSessionId === 'nanoreactor') return;
+function writeSessions(list: (SessionMetadata | string)[]): void {
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(list));
+}
 
-    try {
-      const raw = localStorage.getItem('atomfield_sessions');
-      const list: any[] = raw ? JSON.parse(raw) : [];
-      const exists = list.some((item: any) =>
-        typeof item === 'string' ? item === activeSessionId : item.id === activeSessionId
-      );
+function indexOf(list: (SessionMetadata | string)[], id: string): number {
+  return list.findIndex((item) =>
+    typeof item === 'string' ? item === id : item.id === id
+  );
+}
 
-      if (!exists) {
-        const newSessionMeta: SessionMetadata = {
-          id: activeSessionId,
-          title: 'Untitled Pipeline',
+/**
+ * A pipeline's name as this browser saved it.
+ */
+function storedTitle(id: string): string {
+  const list = readSessions();
+  const found = list[indexOf(list, id)];
+  return found && typeof found !== 'string' ? found.title : UNTITLED;
+}
+
+/**
+ * Change one pipeline's entry, adding it first if it is new.
+ */
+function updateSession(id: string, change: Partial<SessionMetadata>): void {
+  const list = readSessions();
+  const index = indexOf(list, id);
+  const existing = index >= 0 ? list[index] : null;
+  const base: SessionMetadata =
+    existing && typeof existing !== 'string'
+      ? existing
+      : {
+          id,
+          title: UNTITLED,
           status: 'Draft',
           nodeCount: 0,
           updatedAt: new Date().toISOString(),
         };
-        list.unshift(newSessionMeta);
-        localStorage.setItem('atomfield_sessions', JSON.stringify(list));
-      }
+  const updated = { ...base, ...change };
+  if (index >= 0) list[index] = updated;
+  else list.unshift(updated);
+  writeSessions(list);
+}
+
+export function useSessionDraft(activeSessionId: string) {
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  // A name given in this view; otherwise the name this browser saved.
+  const [named, setNamed] = useState<{ id: string; title: string } | null>(
+    null
+  );
+  const title =
+    named?.id === activeSessionId ? named.title : storedTitle(activeSessionId);
+
+  // List a new pipeline on the sessions page.
+  useEffect(() => {
+    if (!activeSessionId) return;
+    try {
+      updateSession(activeSessionId, {});
     } catch (err) {
       console.error('Failed to register session draft', err);
     }
   }, [activeSessionId]);
 
-  // Autosave graph to localStorage
+  // Save the canvas in this browser as it changes.
   const autosaveGraph = useCallback(
     (graph: { nodes: Node[]; edges: Edge[] }) => {
-      if (activeSessionId === 'nanoreactor') return;
-
       setSaveStatus('saving');
       const serializedBlueprint = serializeGraphToBlueprint(graph.nodes, graph.edges);
-
       try {
         localStorage.setItem(
           `atomfield_blueprint_${activeSessionId}`,
           JSON.stringify(serializedBlueprint)
         );
-
-        const raw = localStorage.getItem('atomfield_sessions');
-        const list: any[] = raw ? JSON.parse(raw) : [];
-
-        const firstScript = graph.nodes[0]?.data?.label || 'Custom Script';
-        const title =
-          graph.nodes.length === 0
-            ? 'Untitled Pipeline'
-            : graph.nodes.length > 1
-            ? `${firstScript} + ${graph.nodes.length - 1} more`
-            : String(firstScript);
-
-        const sessionIndex = list.findIndex((item: any) =>
-          typeof item === 'string' ? item === activeSessionId : item.id === activeSessionId
-        );
-
-        const existingStatus = (sessionIndex >= 0 && list[sessionIndex].status) ? list[sessionIndex].status : 'Draft';
-        const sessionMeta: SessionMetadata = {
-          id: activeSessionId,
-          title,
-          status: existingStatus,
+        updateSession(activeSessionId, {
           nodeCount: graph.nodes.length,
           updatedAt: new Date().toISOString(),
-        };
-
-        if (sessionIndex >= 0) {
-          list[sessionIndex] = { ...list[sessionIndex], ...sessionMeta };
-        } else {
-          list.unshift(sessionMeta);
-        }
-
-        localStorage.setItem('atomfield_sessions', JSON.stringify(list));
+        });
         setSaveStatus('saved');
       } catch (err) {
         console.error('Autosave failed', err);
@@ -132,22 +148,37 @@ export function useSessionDraft(activeSessionId: string) {
     [activeSessionId]
   );
 
+  // Name the pipeline: after its template, or as the person types.
+  const nameSession = useCallback(
+    (newTitle: string) => {
+      const clean = newTitle.trim() || UNTITLED;
+      setNamed({ id: activeSessionId, title: clean });
+      try {
+        updateSession(activeSessionId, { title: clean, named: true });
+      } catch (err) {
+        console.error('Failed to name the session', err);
+      }
+    },
+    [activeSessionId]
+  );
+
   const markSessionRunning = useCallback(() => {
     try {
-      const raw = localStorage.getItem('atomfield_sessions');
-      const list: any[] = raw ? JSON.parse(raw) : [];
-      const sessionIndex = list.findIndex((item: any) =>
-        typeof item === 'string' ? item === activeSessionId : item.id === activeSessionId
-      );
-      if (sessionIndex >= 0) {
-        list[sessionIndex].status = 'Running';
-        list[sessionIndex].updatedAt = new Date().toISOString();
-        localStorage.setItem('atomfield_sessions', JSON.stringify(list));
-      }
+      updateSession(activeSessionId, {
+        status: 'Running',
+        updatedAt: new Date().toISOString(),
+      });
     } catch (err) {
       console.error('Failed to mark session as running', err);
     }
   }, [activeSessionId]);
 
-  return { saveStatus, setSaveStatus, autosaveGraph, markSessionRunning };
+  return {
+    saveStatus,
+    setSaveStatus,
+    autosaveGraph,
+    markSessionRunning,
+    title,
+    nameSession,
+  };
 }

@@ -74,3 +74,30 @@ export const STATUS_TEXT: Record<StatusLook, string> = {
 export function statusLook(status?: string | null): StatusLook {
   return LOOKS[(status ?? 'draft').toLowerCase()] ?? 'none';
 }
+
+export type RunPhase = 'idle' | 'running' | 'done' | 'failed' | 'cancelled';
+
+// Where a pipeline's run stands, for the editor's header.
+export interface RunProgress {
+  phase: RunPhase;
+  done: number;
+  total: number;
+}
+
+/**
+ * Where a run stands, from its steps' statuses: running while any step
+ * runs or waits; afterwards, how it ended.
+ */
+export function runProgress(statuses: (string | undefined)[]): RunProgress {
+  const looks = statuses.map(statusLook);
+  const count = (look: StatusLook) =>
+    looks.filter((item) => item === look).length;
+  const done = count('done');
+  const total = looks.length;
+  let phase: RunPhase = 'idle';
+  if (count('running') + count('waiting') > 0) phase = 'running';
+  else if (count('failed') > 0) phase = 'failed';
+  else if (count('stopped') > 0) phase = 'cancelled';
+  else if (total > 0 && done === total) phase = 'done';
+  return { phase, done, total };
+}

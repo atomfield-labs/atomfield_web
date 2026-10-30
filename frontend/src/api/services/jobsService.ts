@@ -15,6 +15,11 @@ export const jobsService = {
     return response.data;
   },
 
+  // Stop every unfinished job of a run.
+  async cancelRun(runId: string): Promise<void> {
+    await apiClient.post(`/api/runs/${runId}/cancel`);
+  },
+
   async getJobLogs(jobId: string): Promise<JobLogsResponse> {
     const response = await apiClient.get<JobLogsResponse>(`/api/jobs/${jobId}/logs`);
     return response.data;

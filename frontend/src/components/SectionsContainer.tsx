@@ -22,7 +22,7 @@ export default function SectionsContainer() {
       <div className="flex flex-wrap justify-center gap-12 sm:gap-16 md:gap-20 lg:gap-24 max-w-[980px] mx-auto">
         {/* Card 1: Nanoreactor */}
         <div 
-          onClick={() => window.location.hash = '#pipeline/nanoreactor'}
+          onClick={() => window.location.hash = '#pipeline/new/nanoreactor'}
           className="group relative bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-[0_20px_45px_-12px_rgba(249,115,22,0.18),0_4px_16px_rgba(0,0,0,0.04)] hover:border-orange-500 hover:ring-2 hover:ring-orange-500/20 transition-all duration-300 ease-out flex flex-col overflow-hidden cursor-pointer hover:-translate-y-1.5 w-full sm:w-[390px] max-w-[400px]"
         >
           {/* Dominant 3D Animation Header (Slightly Reduced Length) */}
@@ -62,7 +62,7 @@ export default function SectionsContainer() {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                window.location.hash = '#pipeline/nanoreactor';
+                window.location.hash = '#pipeline/new/nanoreactor';
               }}
               className="w-full mt-5 py-2.5 px-4 bg-slate-900 group-hover:bg-orange-600 text-white text-xs font-semibold tracking-wide rounded-xl transition-all duration-200 shadow-sm flex items-center justify-center gap-2 cursor-pointer"
             >

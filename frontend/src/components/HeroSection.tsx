@@ -33,7 +33,7 @@ export default function HeroSection() {
           {/* CTA Buttons */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-start gap-4 w-full sm:w-auto">
             <button 
-              onClick={() => window.location.hash = '#pipeline/nanoreactor'}
+              onClick={() => window.location.hash = '#pipeline/new/nanoreactor'}
               className="px-7 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-base font-semibold transition-colors shadow-sm cursor-pointer flex items-center justify-center gap-2"
             >
               <span>Launch Nanoreactor Demo</span>

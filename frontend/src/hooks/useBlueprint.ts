@@ -1,30 +1,7 @@
-import { useState, useEffect } from 'react';
-import type {
-  PipelineBlueprint,
-  PipelineTemplate,
-  TaskDefinition,
-} from '../types/api';
-import { templateToBlueprint } from '../utils/templates';
-import { loadPipelineTemplates } from './usePipelineTemplates';
-import { loadTaskDefinitions } from './useTaskDefinitions';
+import { useCallback, useMemo, useState } from 'react';
+import type { PipelineBlueprint } from '../types/api';
 
-// The landing page's demo session shows this template of the catalog.
-const DEMO_SESSION_ID = 'nanoreactor';
-const DEMO_TEMPLATE_ID = 'nanoreactor';
 const EMPTY_BLUEPRINT: PipelineBlueprint = { nodes: [], edges: [] };
-
-/**
- * The demo pipeline, built from the current release's template; an
- * empty canvas if the release has none.
- */
-function demoBlueprint(
-  templates: PipelineTemplate[],
-  tasks: TaskDefinition[]
-): PipelineBlueprint {
-  const demo = templates.find((item) => item.id === DEMO_TEMPLATE_ID);
-  if (!demo) return EMPTY_BLUEPRINT;
-  return templateToBlueprint(demo, new Map(tasks.map((t) => [t.id, t])));
-}
 
 /**
  * The draft of a session saved in this browser, if any.
@@ -41,41 +18,27 @@ function savedDraft(sessionId: string): PipelineBlueprint | null {
 }
 
 /**
- * What a session opens with: the demo template for the demo session,
- * else the draft saved in this browser, else an empty canvas.
+ * What a session opens with: the draft saved in this browser, else an
+ * empty canvas; until a template replaces it (``setBlueprint``).
  */
 export function useBlueprint(activeSessionId: string) {
-  const [blueprint, setBlueprint] = useState<PipelineBlueprint>(
-    EMPTY_BLUEPRINT
+  // Read once per session: the canvas reloads whenever this changes.
+  const draft = useMemo(
+    () => savedDraft(activeSessionId) ?? EMPTY_BLUEPRINT,
+    [activeSessionId]
   );
-  const [isLoading, setIsLoading] = useState(true);
+  const [replaced, setReplaced] = useState<{
+    id: string;
+    blueprint: PipelineBlueprint;
+  } | null>(null);
+  const blueprint =
+    replaced?.id === activeSessionId ? replaced.blueprint : draft;
 
-  useEffect(() => {
-    let isMounted = true;
+  const setBlueprint = useCallback(
+    (next: PipelineBlueprint) =>
+      setReplaced({ id: activeSessionId, blueprint: next }),
+    [activeSessionId]
+  );
 
-    if (activeSessionId === DEMO_SESSION_ID) {
-      setIsLoading(true);
-      Promise.all([loadPipelineTemplates(), loadTaskDefinitions()])
-        .then(([templates, tasks]) => {
-          if (!isMounted) return;
-          setBlueprint(demoBlueprint(templates, tasks));
-          setIsLoading(false);
-        })
-        .catch((err) => {
-          console.error('Failed to load the demo pipeline', err);
-          if (isMounted) setIsLoading(false);
-        });
-      return () => {
-        isMounted = false;
-      };
-    }
-
-    setBlueprint(savedDraft(activeSessionId) ?? EMPTY_BLUEPRINT);
-    setIsLoading(false);
-    return () => {
-      isMounted = false;
-    };
-  }, [activeSessionId]);
-
-  return { blueprint, isLoading, setBlueprint };
+  return { blueprint, setBlueprint };
 }

@@ -198,6 +198,8 @@ export interface JobLogsResponse {
 export interface SessionMetadata {
   id: string;
   title: string;
+  // Named by its template or by the person, so saving keeps the name.
+  named?: boolean;
   status: JobStatus;
   nodeCount: number;
   updatedAt: string;

@@ -94,9 +94,7 @@ function View({ hash }: { hash: string }) {
     const code = hash.replace(PAIR_VIEW, '')
     return <div className={PAGE}><PairPage code={code} /></div>
   }
-  if (hash.startsWith('#pipeline/new')) {
-    return <div className={EDITOR}><PipelineEditor /></div>
-  }
+  // #pipeline/new, #pipeline/new/<template id> or #pipeline/<session>.
   if (hash.startsWith('#pipeline/')) {
     const sessionId = hash.replace('#pipeline/', '')
     return (
