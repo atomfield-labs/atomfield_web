@@ -83,16 +83,15 @@ class SignInRules:
         Whether the account is one an allowed institute runs. The
         provider's word on who runs it (``hd``) decides, not the
         email's ending: a personal account can carry almost any
-        address.
+        address, and an institute's own accounts may carry any of its
+        domains.
 
         :param identity: Who signed in.
         :type identity: Identity
         :return: True if they may enter.
         :rtype: bool
         """
-        domain = identity.domain
-        own_address = identity.email.endswith(f"@{domain}")
-        return domain in self.domains and own_address
+        return identity.domain in self.domains
 
     def is_admin(self, identity: Identity) -> bool:
         """

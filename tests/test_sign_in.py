@@ -122,6 +122,25 @@ def test_only_the_institutes_own_accounts_get_in(
     assert SESSION_COOKIE not in client.cookies
 
 
+def test_an_account_on_another_institute_domain_gets_in(
+    client: TestClient, google: FakeGoogle
+):
+    """
+    One Google organization can hold several email domains (students
+    and staff, say). Google's tag names the organization, so an
+    account with any of its addresses gets in.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param google: The fake Google.
+    :type google: FakeGoogle
+    """
+    teacher = Account(f"grace@staff-{INSTITUTE}", INSTITUTE)
+    finished = sign_in(client, google, teacher)
+    assert problem_in(finished) is None
+    assert client.get(MY_ACCOUNT).json()["email"] == teacher.email
+
+
 def test_a_sign_in_finishes_only_in_the_browser_that_started_it(
     client: TestClient, google: FakeGoogle
 ):
