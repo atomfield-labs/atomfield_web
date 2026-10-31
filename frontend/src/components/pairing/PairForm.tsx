@@ -8,7 +8,7 @@ const NOT_WAITING =
   'No computer is waiting with this code. Codes last 10 minutes.';
 
 const BUTTON = [
-  'h-9 px-4 rounded-lg bg-orange-700 hover:bg-orange-800 text-white',
+  'h-9 px-4 rounded-lg bg-orange-600 hover:bg-orange-500 text-white',
   'text-sm font-semibold disabled:opacity-50 cursor-pointer',
 ].join(' ');
 const QUIET_BUTTON = [

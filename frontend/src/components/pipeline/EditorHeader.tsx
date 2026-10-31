@@ -23,12 +23,12 @@ const HEADER = [
   'relative flex flex-wrap items-center justify-between gap-x-4 gap-y-2',
   'px-3 py-2 bg-white border-b border-stone-200 shrink-0 z-10',
 ].join(' ');
-const ICON_LINK = [
-  'flex items-center justify-center w-10 h-10 rounded-[10px]',
-  'text-stone-600 hover:bg-stone-100',
+const BACK_LINK = [
+  'flex items-center gap-1.5 h-10 px-2.5 rounded-[10px] shrink-0',
+  'text-[13px] font-medium text-stone-600 hover:bg-stone-100',
 ].join(' ');
 const PRIMARY = [
-  'h-10 px-5 rounded-[10px] bg-orange-700 hover:bg-orange-800 text-white',
+  'h-10 px-5 rounded-[10px] bg-orange-600 hover:bg-orange-500 text-white',
   'text-sm font-semibold cursor-pointer disabled:cursor-not-allowed',
   'disabled:bg-stone-100 disabled:text-stone-400',
 ].join(' ');
@@ -39,7 +39,7 @@ const SECONDARY = [
 const TITLE = 'truncate text-[15px] font-semibold text-stone-900 cursor-text';
 const TITLE_INPUT = [
   'h-8 w-64 px-2 rounded-md border border-stone-300 text-[15px]',
-  'font-semibold focus:outline-none focus:border-orange-700',
+  'font-semibold focus:outline-none focus:border-orange-600',
 ].join(' ');
 const INITIALS = [
   'flex items-center justify-center w-10 h-10 rounded-full',
@@ -61,7 +61,7 @@ function RunStatus({ progress }: { progress: RunProgress }) {
       <span className={STATUS_LINE}>
         <span
           aria-hidden="true"
-          className="w-[7px] h-[7px] rounded-full bg-blue-600"
+          className="w-[7px] h-[7px] rounded-full bg-orange-500"
         />
         Running · {progress.done} of {progress.total}
       </span>
@@ -84,7 +84,7 @@ function ProgressLine({ progress }: { progress: RunProgress }) {
       className="absolute left-0 right-0 -bottom-px h-0.5 bg-stone-100"
     >
       <div
-        className="h-full bg-blue-600 transition-[width] duration-500"
+        className="h-full bg-orange-500 transition-[width] duration-500"
         style={{ width: `${Math.round(share * 100)}%` }}
       />
     </div>
@@ -175,13 +175,11 @@ export default function EditorHeader({
   return (
     <header className={HEADER}>
       <div className="flex items-center gap-1.5 min-w-0">
-        <a
-          href="#dashboard"
-          aria-label="Back to sessions"
-          className={ICON_LINK}
-        >
-          <ArrowLeft size={18} />
+        <a href="#dashboard" className={BACK_LINK}>
+          <ArrowLeft size={16} />
+          Sessions
         </a>
+        <span aria-hidden="true" className="w-px h-5 mr-1.5 bg-stone-200" />
         <Title title={title} onRename={onRename} />
         <RunStatus progress={progress} />
         {saveStatus === 'saving' && (

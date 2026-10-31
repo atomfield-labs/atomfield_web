@@ -20,12 +20,13 @@ const GRID = [
   'grid-cols-[repeat(auto-fit,minmax(170px,1fr))]',
 ].join(' ');
 const BROWSE = [
-  'pointer-events-auto text-orange-800 underline-offset-2 hover:underline',
+  'pointer-events-auto text-orange-600 underline-offset-2 hover:underline',
   'cursor-pointer',
 ].join(' ');
 const CARD = [
   'flex flex-col items-start gap-4 p-4 rounded-xl bg-white text-left',
-  'border border-stone-200 hover:border-stone-300 cursor-pointer',
+  'border border-stone-200 hover:border-orange-400 hover:bg-orange-50',
+  'cursor-pointer transition-colors',
   'shadow-[0_1px_2px_rgba(28,25,23,0.04)]',
 ].join(' ');
 const DROP_ZONE = [
