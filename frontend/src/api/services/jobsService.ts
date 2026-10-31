@@ -15,11 +15,6 @@ export const jobsService = {
     return response.data;
   },
 
-  // Stop one job; the steps after it will not start.
-  async cancelJob(jobId: string): Promise<void> {
-    await apiClient.post(`/api/jobs/${jobId}/cancel`);
-  },
-
   // Stop every unfinished job of a run.
   async cancelRun(runId: string): Promise<void> {
     await apiClient.post(`/api/runs/${runId}/cancel`);

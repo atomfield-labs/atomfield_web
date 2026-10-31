@@ -8,19 +8,21 @@ const WAITING = new Set(['requested', 'packing']);
 const POLL_MS = 2000;
 const MAX_POLLS = 60;
 const GIGABYTE = 1024 ** 3;
-const COMMAND = 'flex-1 p-2 bg-stone-50 rounded font-mono break-all';
+const COMMAND = 'flex-1 p-2 bg-slate-50 rounded font-mono break-all';
 const SPINNER = [
-  'w-3.5 h-3.5 border-2 border-stone-400 border-t-transparent',
+  'w-3.5 h-3.5 border-2 border-orange-500 border-t-transparent',
   'rounded-full animate-spin',
 ].join(' ');
 
 const BUTTON = [
-  'h-9 px-3 flex items-center gap-2 rounded-[10px] border border-stone-200',
-  'bg-white hover:bg-stone-50 text-sm text-stone-800 cursor-pointer',
-  'disabled:opacity-50',
+  'py-1.5 px-3 border border-slate-200 bg-white hover:bg-orange-50',
+  'hover:border-orange-200 text-slate-700 hover:text-orange-600 text-xs',
+  'font-semibold rounded-lg transition-colors shadow-2xs flex',
+  'items-center gap-1.5 cursor-pointer disabled:opacity-50',
 ].join(' ');
-const NOTE = [
-  'p-3 rounded-[10px] border border-stone-200 text-xs text-stone-700',
+const PANEL = [
+  'absolute bottom-full right-0 mb-2 w-96 max-w-[90vw] p-3 bg-white',
+  'border border-slate-200 rounded-lg shadow-lg text-xs text-slate-700',
   'space-y-2',
 ].join(' ');
 
@@ -114,9 +116,9 @@ export default function RunFilesButton({ runId }: { runId: string | null }) {
     folder && ['none', 'failed', 'expired'].includes(info?.status ?? '');
 
   return (
-    <div className="flex flex-col items-start gap-2">
+    <div className="relative">
       {(message || folder) && (
-        <div className={NOTE}>
+        <div className={PANEL}>
           {message && <p>{message}</p>}
           {folder && (
             <>
@@ -125,7 +127,7 @@ export default function RunFilesButton({ runId }: { runId: string | null }) {
                 <code className="font-mono break-all">{folder.path}</code>
               </p>
               {info?.made_with && (
-                <p className="text-stone-500">
+                <p className="text-slate-500">
                   Made with{' '}
                   <code className="font-mono">
                     {[info.made_with, ...(info.data_packs ?? [])].join(' · ')}
@@ -141,12 +143,12 @@ export default function RunFilesButton({ runId }: { runId: string | null }) {
                     type="button"
                     title="Copy command"
                     onClick={() => copyCommand(folder.copy_command ?? '')}
-                    className="p-1.5 rounded hover:bg-stone-100 cursor-pointer"
+                    className="p-1.5 rounded hover:bg-slate-100 cursor-pointer"
                   >
                     {copied ? (
-                      <Check className="w-3.5 h-3.5 text-green-600" />
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
                     ) : (
-                      <Copy className="w-3.5 h-3.5 text-stone-500" />
+                      <Copy className="w-3.5 h-3.5 text-slate-500" />
                     )}
                   </button>
                 </div>
@@ -175,7 +177,7 @@ export default function RunFilesButton({ runId }: { runId: string | null }) {
         {busy ? (
           <span className={SPINNER} />
         ) : (
-          <Download className="w-3.5 h-3.5 text-stone-500" />
+          <Download className="w-3.5 h-3.5 text-orange-500" />
         )}
         <span>Get files</span>
       </button>

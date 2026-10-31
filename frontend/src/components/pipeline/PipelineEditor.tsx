@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { ReactFlowProvider, type Node, type Edge } from '@xyflow/react';
 import LeftSidebar from './LeftSidebar';
 import GraphCanvas from './GraphCanvas';
-import StepPanel from './StepPanel';
+import InspectorDrawer from './InspectorDrawer';
 import EditorHeader from './EditorHeader';
 import { describeError } from '../../api/client';
 import { jobsService } from '../../api/services';
@@ -204,8 +204,6 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
     [autosaveGraph]
   );
 
-  const closePanel = useCallback(() => setSelectedNode(null), []);
-
   const handleDeleteNode = useCallback(() => {
     if (selectedNode && deleteNodeRef.current) {
       const nodeId = selectedNode.id || selectedNode.ui_id;
@@ -213,15 +211,6 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
       setSelectedNode(null);
     }
   }, [selectedNode]);
-
-  const handleSetCopies = useCallback(
-    (count: number) => {
-      if (!selectedNode) return;
-      replicateNodeRef.current?.(selectedNode.id || selectedNode.ui_id, count);
-      setSelectedNode((prev: any) => (prev ? { ...prev, copies: count } : null));
-    },
-    [selectedNode]
-  );
 
   const handleUpdateParameters = useCallback(
     (newParams: Record<string, any>) => {
@@ -352,8 +341,7 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
           <div className="flex-1 h-full relative">
             <GraphCanvas
               blueprint={blueprint}
-              onNodeClick={setSelectedNode}
-              onDeselect={closePanel}
+              onNodeDoubleClick={(node) => setSelectedNode(node)}
               selectedNodeId={selectedNode?.id}
               isEditable={true}
               sessionId={activeSessionId}
@@ -371,12 +359,11 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
             />
           </div>
 
-          <StepPanel
+          <InspectorDrawer
             node={selectedNode}
-            onClose={closePanel}
+            onClose={() => setSelectedNode(null)}
             onDelete={handleDeleteNode}
             onUpdateParameters={handleUpdateParameters}
-            onSetCopies={handleSetCopies}
             runId={activeRunId}
           />
         </ReactFlowProvider>
