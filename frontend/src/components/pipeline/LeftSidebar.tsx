@@ -55,8 +55,8 @@ const PANEL = [
   'select-none z-20 transition-all duration-300 ease-in-out',
 ].join(' ');
 const ITEM = [
-  'group flex items-center justify-between gap-2 min-h-9 px-2.5 rounded-lg',
-  'text-sm text-stone-900 hover:bg-orange-50 cursor-grab',
+  'flex items-center justify-between gap-2 min-h-9 px-2.5 rounded-lg',
+  'text-sm text-stone-900 hover:text-orange-600 cursor-grab',
   'active:cursor-grabbing',
 ].join(' ');
 const OPEN_BUTTON = [
@@ -78,12 +78,11 @@ const SEARCH_INPUT = [
 ].join(' ');
 const GROUP_BUTTON = [
   'w-full flex items-center justify-between py-1.5 px-2.5 rounded-md',
-  'bg-orange-50/90 hover:bg-orange-100 border border-orange-200/80',
+  'bg-white border border-stone-200 text-stone-600 text-xs font-medium',
+  'enabled:hover:border-orange-400 enabled:hover:text-orange-600',
   'transition-colors cursor-pointer disabled:cursor-default select-none',
 ].join(' ');
-const GROUP_LABEL =
-  'text-[11px] font-bold tracking-wide uppercase text-orange-600';
-const INFO_BUTTON = 'shrink-0 text-stone-400 opacity-0 group-hover:opacity-100';
+const INFO_BUTTON = 'shrink-0 text-stone-300 hover:text-stone-500';
 const TOOLTIP = [
   'fixed z-50 pointer-events-none w-64 p-3 rounded-lg bg-stone-900/95',
   'text-white text-xs shadow-xl',
@@ -240,8 +239,8 @@ export default function LeftSidebar() {
                       aria-expanded={isOpen}
                       className={GROUP_BUTTON}
                     >
-                      <span className={GROUP_LABEL}>{group.label}</span>
-                      <Chevron className="w-3.5 h-3.5 text-orange-600" />
+                      <span>{group.label}</span>
+                      <Chevron className="w-3.5 h-3.5" />
                     </button>
                     {isOpen && (
                       <div className="mt-1 space-y-0.5">
