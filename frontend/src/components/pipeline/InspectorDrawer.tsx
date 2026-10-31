@@ -4,7 +4,6 @@ import { triggerFileDownload } from '../../utils/downloadHelper';
 import { INPUT_FILE_TYPES } from '../../utils/structureParser';
 import RunFilesButton from './RunFilesButton';
 import YamlParamEditor from './YamlParamEditor';
-import CH4Icon from '../icons/CH4Icon';
 import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
 import type { InputFiles } from '../../types/api';
 
@@ -13,9 +12,19 @@ const WIRED_ROW_CLASS = [
   'justify-between text-xs font-mono shrink-0',
 ].join(' ');
 
-const WIRED_BADGE_CLASS = [
-  'px-2 py-0.5 bg-orange-100 text-orange-700 border border-orange-200',
-  'text-[10px] font-bold rounded shrink-0',
+const TILE_CLASS = [
+  'w-9 h-9 rounded-lg border flex items-center justify-center',
+  'shrink-0',
+].join(' ');
+
+const FILE_TILE_CLASS = 'bg-orange-50 text-orange-600 border-orange-200';
+
+const STEP_TILE_CLASS = 'bg-slate-100 text-slate-600 border-slate-200';
+
+const FOOTER_BUTTON = [
+  'py-1.5 px-3 border border-slate-200 bg-white hover:bg-slate-100',
+  'text-slate-600 text-xs font-medium rounded-lg transition-colors',
+  'flex items-center gap-1.5 cursor-pointer shadow-2xs',
 ].join(' ');
 
 interface InspectorDrawerProps {
@@ -114,7 +123,7 @@ export default function InspectorDrawer({
     !!node.workspace_path;
 
   // Script node attributes
-  const scriptName = node.script_name || node.data?.label || 'Unknown Script';
+  const scriptName = node.data?.label || node.script_name || 'Step';
   const parameters = node.parameters || node.data?.parameters || {};
   const task = taskById.get(node.data?.task_id ?? node.task_id);
   const wiredInputs = Object.entries(
@@ -131,12 +140,7 @@ export default function InspectorDrawer({
 
   // Structure node attributes
   const structData = node.data || node;
-  const filename = structData.filename || 'Structure Input';
-  const format = (
-    structData.format ||
-    (filename.includes('.') ? filename.split('.').pop()?.toUpperCase() : 'XYZ') ||
-    'XYZ'
-  ).toUpperCase();
+  const filename = structData.filename || 'Input file';
   const rawContent = structData.raw_content || '';
   const lineCount =
     structData.line_count || (rawContent ? rawContent.split(/\r?\n/).filter(Boolean).length : 0);
@@ -170,24 +174,22 @@ export default function InspectorDrawer({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            {isStructureNode ? (
-              <div className="w-9 h-9 rounded-lg bg-orange-50 text-orange-600 border border-orange-200 flex items-center justify-center shrink-0">
-                <CH4Icon size={18} className="w-4.5 h-4.5" />
-              </div>
-            ) : (
-              <div className="w-9 h-9 rounded-lg bg-slate-100 text-slate-700 border border-slate-200 flex items-center justify-center shrink-0">
-                <FileText className="w-4.5 h-4.5 text-slate-600" />
-              </div>
-            )}
+            <div
+              className={`${TILE_CLASS} ${
+                isStructureNode ? FILE_TILE_CLASS : STEP_TILE_CLASS
+              }`}
+            >
+              <FileText className="w-4.5 h-4.5" />
+            </div>
             <div className="flex flex-col min-w-0">
               <h3 className="font-bold text-slate-900 text-base truncate">
                 {isStructureNode ? filename : scriptName}
               </h3>
-              <span className="text-xs font-mono text-slate-500 mt-0.5 truncate">
-                {isStructureNode
-                  ? `.${format} Asset • ${lineCount} lines • ${sizeKb} KB`
-                  : `ID: ${node.id?.substring(0, 14)}`}
-              </span>
+              {isStructureNode && rawContent && (
+                <span className="text-xs text-slate-500 mt-0.5 truncate">
+                  {lineCount} lines · {sizeKb} KB
+                </span>
+              )}
             </div>
           </div>
 
@@ -224,7 +226,7 @@ export default function InspectorDrawer({
               }`}
               onClick={() => setScriptTab('logs')}
             >
-              Live Logs
+              Logs
             </button>
             <button
               type="button"
@@ -245,37 +247,10 @@ export default function InspectorDrawer({
           {/* Structure Node Body */}
           {isStructureNode && (
             <div className="h-full flex flex-col gap-3">
-              <div className="flex justify-between items-center text-xs shrink-0">
-                <div className="flex items-center gap-2">
-                  <span className="px-2 py-0.5 bg-slate-100 text-slate-700 border border-slate-200 rounded font-mono text-[10px] font-bold">
-                    .{format}
-                  </span>
-                  <span className="text-slate-500 font-mono text-xs">
-                    {lineCount} lines • {sizeKb} KB
-                  </span>
-                </div>
-                {rawContent && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      triggerFileDownload(
-                        rawContent,
-                        filename || `structure.${format.toLowerCase()}`,
-                        'text/plain'
-                      );
-                    }}
-                    className="px-3 py-1 bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700 rounded text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                  >
-                    <Download className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Download file</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Light background for coordinates: never black */}
+              {/* Light background: never black */}
               <div className="flex-1 min-h-0 bg-slate-50 border border-slate-200 rounded-lg p-4 overflow-auto">
                 <pre className="font-mono text-xs text-slate-800 whitespace-pre leading-relaxed select-text font-normal">
-                  {rawContent || '# No structure content available'}
+                  {rawContent || 'No file yet.'}
                 </pre>
               </div>
             </div>
@@ -292,7 +267,6 @@ export default function InspectorDrawer({
                       <span className="text-slate-800 font-medium truncate">
                         {port}: {files.join(', ')}
                       </span>
-                      <span className={WIRED_BADGE_CLASS}>WIRED</span>
                     </div>
                   ))}
 
@@ -315,9 +289,7 @@ export default function InspectorDrawer({
                 <div className="h-full flex flex-col">
                   <div className="flex-1 min-h-0 bg-slate-50 border border-slate-200 rounded-lg p-4 font-mono text-xs text-slate-800 overflow-auto leading-relaxed whitespace-pre-wrap select-text">
                     {logs || (
-                      <span className="text-slate-400 italic">
-                        No log output recorded yet. Output will stream here during execution.
-                      </span>
+                      <span className="text-slate-400">No output yet.</span>
                     )}
                   </div>
                 </div>
@@ -343,13 +315,7 @@ export default function InspectorDrawer({
                       ))}
                     </div>
                   ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-xs text-slate-400 bg-slate-50/50 border border-dashed border-slate-200 rounded-lg p-6 text-center">
-                      <FileText className="w-8 h-8 text-slate-300 mb-2" />
-                      <span className="font-semibold text-slate-600">No artifacts generated yet</span>
-                      <span className="text-slate-400 text-[11px] mt-0.5">
-                        Generated files and results will appear here after task completion.
-                      </span>
-                    </div>
+                    <p className="text-xs text-slate-400">No artifacts yet.</p>
                   )}
                 </div>
               )}
@@ -370,7 +336,7 @@ export default function InspectorDrawer({
                 className="py-1.5 px-3 border border-red-200 bg-white hover:bg-red-50 text-red-600 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Delete Node</span>
+                <span>Delete</span>
               </button>
             )}
 
@@ -379,10 +345,10 @@ export default function InspectorDrawer({
                 type="button"
                 onClick={handleResetDefaults}
                 title="Reset parameters to defaults"
-                className="py-1.5 px-3 border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                className={FOOTER_BUTTON}
               >
                 <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-                <span>Reset Defaults</span>
+                <span>Reset</span>
               </button>
             )}
 
@@ -404,27 +370,29 @@ export default function InspectorDrawer({
                 />
                 <label
                   htmlFor="modal-replace-file"
-                  title="Replace structure file"
-                  className="cursor-pointer py-1.5 px-3 border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 shadow-2xs"
+                  title="Replace the file"
+                  className={FOOTER_BUTTON}
                 >
                   <Upload className="w-3.5 h-3.5 text-slate-500" />
-                  <span>Replace File</span>
+                  <span>Replace</span>
                 </label>
+                {rawContent && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      triggerFileDownload(rawContent, filename, 'text/plain')
+                    }
+                    className={FOOTER_BUTTON}
+                  >
+                    <Download className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Download</span>
+                  </button>
+                )}
               </>
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            <RunFilesButton runId={runId ?? null} />
-
-            <button
-              type="button"
-              onClick={handleClose}
-              className="py-1.5 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer shadow-2xs"
-            >
-              Close
-            </button>
-          </div>
+          <RunFilesButton runId={runId ?? null} />
         </div>
       </div>
     </div>

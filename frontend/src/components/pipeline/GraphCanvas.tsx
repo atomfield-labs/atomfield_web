@@ -40,10 +40,11 @@ const FIT_VIEW = { maxZoom: 1, padding: 0.08 };
 // Input boxes for several chosen files stack this far apart.
 const FILE_SPACING = 70;
 // How many copies a sweep makes, typed in its toolbar.
+const COUNT_IDLE = 'text-stone-700 hover:text-orange-600 hover:bg-orange-50';
 const COUNT_INPUT = [
   'w-12 px-1 py-0.5 text-xs font-bold text-center bg-stone-50 border',
   'border-stone-300 rounded text-stone-800 focus:outline-none',
-  'focus:ring-1 focus:ring-stone-400',
+  'focus:ring-1 focus:ring-orange-400',
 ].join(' ');
 
 const edgeTypes = {
@@ -1497,13 +1498,13 @@ export default function GraphCanvas({
         {canShowToolbar && (
           <NodeToolbar
             nodeId={activeToolbarNodeId}
-            position={Position.Right}
-            offset={16}
+            position={Position.Top}
+            offset={12}
             isVisible={true}
           >
             <div data-toolbar="true" className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg shadow-lg px-2.5 py-1 text-xs select-none">
               <span className="font-bold text-slate-700 flex items-center gap-1 text-[11px] pr-1.5 border-r border-slate-200">
-                <GitBranch className="w-3.5 h-3.5 text-stone-500" />
+                <GitBranch className="w-3.5 h-3.5 text-orange-500" />
                 Parallel:
               </span>
               {[2, 3, 5, 10].map((cnt) => (
@@ -1515,8 +1516,8 @@ export default function GraphCanvas({
                   }}
                   className={`px-1.5 py-0.5 font-bold rounded text-xs transition-colors cursor-pointer ${
                     activeGroupCount === cnt
-                      ? 'bg-stone-900 text-white'
-                      : 'text-stone-700 hover:bg-stone-100'
+                      ? 'bg-orange-500 text-white shadow-2xs'
+                      : COUNT_IDLE
                   }`}
                   title={`Set to ${cnt} parallel jobs`}
                 >
