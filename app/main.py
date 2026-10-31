@@ -27,12 +27,12 @@ from app.core.security import display_prefix, hash_api_key
 from app.db.session import AsyncSessionLocal, engine
 from app.events.redis_bus import RedisEventBus
 from app.models.api_key import ApiKey
-from app.models.user import User
+from app.models.user import Role, User
 from app.queue.job_queue import RedisJobQueue
 from app.releases.catalogs import ReleaseCatalogs
 from app.runs.lifecycle import SilenceLimits
 from app.scheduler.sweeper import Sweeper
-from app.sign_in.flow import PendingSignIns, SignInFlow, SignInRules
+from app.sign_in.flow import PendingSignIns, SignInFlow
 from app.sign_in.provider import IdentityProvider, Registration
 from app.storage.links import LinkSigner
 from app.storage.store import LocalDiskStore
@@ -46,7 +46,7 @@ HEALTHY = "AtomField Core Online"
 SIGN_IN_SETTINGS = (
     "OIDC_CLIENT_SECRET",
     "OIDC_REDIRECT_URI",
-    "SIGN_IN_DOMAINS",
+    "OWNER_EMAILS",
 )
 # How long to wait for the sign-in provider to answer.
 PROVIDER_TIMEOUT_SECONDS = 10.0
@@ -91,6 +91,7 @@ async def set_up(app: FastAPI) -> None:
     app.state.store = create_store()
     async with AsyncSessionLocal() as session:
         await provision_admin(session)
+        await provision_owners(session)
         await provision_house_target(session)
     app.state.redis = create_redis()
     app.state.job_queue = RedisJobQueue(app.state.redis)
@@ -164,10 +165,7 @@ def create_sign_in(http: httpx.AsyncClient, redis: Redis) -> SignInFlow | None:
     if missing:
         raise RuntimeError(f"Sign-in also needs {', '.join(missing)}")
     provider = IdentityProvider(http, sign_in_registration())
-    rules = SignInRules(
-        domains=settings.sign_in_domains, admins=settings.admin_emails
-    )
-    return SignInFlow(provider, PendingSignIns(redis), rules)
+    return SignInFlow(provider, PendingSignIns(redis), settings.owner_emails)
 
 
 def admin_person(admin_id: uuid.UUID) -> Insert:
@@ -180,7 +178,7 @@ def admin_person(admin_id: uuid.UUID) -> Insert:
     :rtype: Insert
     """
     person = insert(User).values(
-        id=admin_id, name=ADMIN_LABEL, is_admin=True, quota_limit=ADMIN_QUOTA
+        id=admin_id, name=ADMIN_LABEL, role=Role.OWNER, quota_limit=ADMIN_QUOTA
     )
     return person.on_conflict_do_nothing(index_elements=[User.id])
 
@@ -223,9 +221,9 @@ async def create_admin(session: AsyncSession, key_hash: str) -> None:
 
 async def provision_admin(session: AsyncSession) -> None:
     """
-    Make sure the administrator from ``ADMIN_API_KEY`` exists: a person
-    marked admin who owns that key. A key from before people existed
-    keeps its person, who is made admin.
+    Make sure the administrator from ``ADMIN_API_KEY`` exists: an owner
+    holding that key, for publishing releases. A key from before people
+    existed keeps its person, who is made an owner.
 
     :param session: Open database session; committed here.
     :type session: AsyncSession
@@ -238,7 +236,29 @@ async def provision_admin(session: AsyncSession) -> None:
         await create_admin(session, key_hash)
     owner = select(ApiKey.user_id).where(ApiKey.key_hash == key_hash)
     promote = update(User).where(User.id == owner.scalar_subquery())
-    await session.execute(promote.values(is_admin=True))
+    await session.execute(promote.values(role=Role.OWNER))
+    await session.commit()
+
+
+async def provision_owners(session: AsyncSession) -> None:
+    """
+    Make the people in ``OWNER_EMAILS`` owners, and nobody else with an
+    email, so a change to the list counts from this start rather than
+    from each person's next sign-in. The administrator's key has no
+    email, and stays an owner.
+
+    :param session: Open database session; committed here.
+    :type session: AsyncSession
+    """
+    owners = settings.owner_emails
+    listed = update(User).where(User.email.in_(owners))
+    await session.execute(listed.values(role=Role.OWNER, lab_id=None))
+    former = update(User).where(
+        User.role == Role.OWNER,
+        User.email.is_not(None),
+        User.email.not_in(owners),
+    )
+    await session.execute(former.values(role=Role.USER))
     await session.commit()
 
 

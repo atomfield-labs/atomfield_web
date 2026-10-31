@@ -6,6 +6,9 @@ from collections.abc import Callable
 
 from fastapi.testclient import TestClient
 
+from app.api.dependencies import NOT_OWNER_MESSAGE
+from app.models.user import Role
+
 UserHeadersFactory = Callable[..., dict[str, str]]
 ADMIN_LABEL = "Cluster Administrator"
 ADMIN_QUOTA_LIMIT = 999999
@@ -37,12 +40,12 @@ def test_regular_user_forbidden_on_admin_endpoints(
     headers = make_user_headers("pytest_non_admin_researcher")
     me_response = client.get("/api/auth/me", headers=headers)
     assert me_response.status_code == 200
-    assert me_response.json()["is_admin"] is False
+    assert me_response.json()["role"] == Role.USER
 
     stats_response = client.get("/api/admin/stats", headers=headers)
     assert stats_response.status_code == 403
     detail = stats_response.json()["detail"]
-    assert detail == "Administrator privileges required."
+    assert detail == NOT_OWNER_MESSAGE
 
     users_response = client.get("/api/admin/users", headers=headers)
     assert users_response.status_code == 403
@@ -61,7 +64,7 @@ def test_admin_stats_and_user_tracking(
     :type admin_headers: dict[str, str]
     """
     me_response = client.get("/api/auth/me", headers=admin_headers)
-    assert me_response.json()["is_admin"] is True
+    assert me_response.json()["role"] == Role.OWNER
 
     stats = client.get("/api/admin/stats", headers=admin_headers).json()
     expected_fields = {
@@ -81,7 +84,7 @@ def test_admin_stats_and_user_tracking(
         user for user in users_data["users"] if user["label"] == ADMIN_LABEL
     )
     assert admin_user["quota_limit"] == ADMIN_QUOTA_LIMIT
-    assert admin_user["is_admin"] is True
+    assert admin_user["role"] == Role.OWNER
 
 
 def test_admin_update_user_quota(

@@ -324,7 +324,7 @@ export default function AdminDashboard() {
                           )
                         : 0;
 
-                    const isClusterAdmin = Boolean(user.is_admin);
+                    const isOwner = user.role === 'owner';
 
                     return (
                       <tr
@@ -339,9 +339,9 @@ export default function AdminDashboard() {
                                 Anonymous User
                               </span>
                             )}
-                            {isClusterAdmin && (
+                            {isOwner && (
                               <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-700 border border-orange-200">
-                                ADMIN
+                                OWNER
                               </span>
                             )}
                           </div>

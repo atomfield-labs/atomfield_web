@@ -94,10 +94,9 @@ class Settings(BaseSettings):
     # Where Google sends people back, this server as browsers see it:
     # https://atomfield.<dept>.<institute>.ac.in/api/auth/callback
     OIDC_REDIRECT_URI: str | None = None
-    # Comma-separated: whose accounts may sign in, and who of them
-    # are administrators.
-    SIGN_IN_DOMAINS: str = ""
-    ADMIN_EMAILS: str = ""
+    # Comma-separated: the platform's owners. Anyone else signs in only
+    # once a lab has added them.
+    OWNER_EMAILS: str = ""
     SESSION_DAYS: int = 14
 
     # --- Agents ---
@@ -151,24 +150,14 @@ class Settings(BaseSettings):
         return url.render_as_string(hide_password=False)
 
     @property
-    def sign_in_domains(self) -> frozenset[str]:
+    def owner_emails(self) -> frozenset[str]:
         """
-        The institute domains whose accounts may sign in.
-
-        :return: Domains, lower case.
-        :rtype: frozenset[str]
-        """
-        return comma_list(self.SIGN_IN_DOMAINS)
-
-    @property
-    def admin_emails(self) -> frozenset[str]:
-        """
-        The people who are administrators when they sign in.
+        The people who own the platform when they sign in.
 
         :return: Emails, lower case.
         :rtype: frozenset[str]
         """
-        return comma_list(self.ADMIN_EMAILS)
+        return comma_list(self.OWNER_EMAILS)
 
     @property
     def public_origin(self) -> str | None:

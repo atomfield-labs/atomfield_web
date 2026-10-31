@@ -39,6 +39,7 @@ SAME_SITE = "lax"
 # Where the web app lives; told why, if a sign-in is refused.
 WEB_APP = "/"
 SIGN_IN_ERROR = "sign_in_error"
+SIGN_IN_EMAIL = "sign_in_email"
 
 
 def cookie_rules() -> dict[str, bool | str]:
@@ -69,17 +70,23 @@ def back_to_web_app(link: str) -> RedirectResponse:
     return response
 
 
-def refused(problem: SignInProblem) -> RedirectResponse:
+def refused(
+    problem: SignInProblem, email: str | None = None
+) -> RedirectResponse:
     """
     Back to the web app, told why the sign-in was refused.
 
     :param problem: Why.
     :type problem: SignInProblem
+    :param email: The address to show, if it matters.
+    :type email: str | None
     :return: The redirect.
     :rtype: RedirectResponse
     """
-    query = urlencode({SIGN_IN_ERROR: problem.value})
-    return back_to_web_app(f"{WEB_APP}?{query}")
+    told = {SIGN_IN_ERROR: problem.value}
+    if email:
+        told[SIGN_IN_EMAIL] = email
+    return back_to_web_app(f"{WEB_APP}?{urlencode(told)}")
 
 
 def signed_in(token: str, lifetime: timedelta) -> RedirectResponse:
@@ -164,7 +171,7 @@ async def finish_sign_in(
     try:
         user = await flow.finish(db, state, code, browser_state)
     except SignInRefused as refusal:
-        return refused(refusal.problem)
+        return refused(refusal.problem, refusal.email)
     lifetime = timedelta(days=settings.SESSION_DAYS)
     token = await sign_in_browser(db, user.id, lifetime)
     return signed_in(token, lifetime)

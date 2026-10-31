@@ -13,7 +13,12 @@ export type SignInProblem =
 
 export type AccountState =
   | { status: 'loading' }
-  | { status: 'signed-out'; problem: SignInProblem | null }
+  | {
+      status: 'signed-out';
+      problem: SignInProblem | null;
+      // The address refused, so the person can give it to their admin.
+      refusedEmail?: string | null;
+    }
   | { status: 'signed-in'; account: Account };
 
 export interface AccountContextValue {

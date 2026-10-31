@@ -14,30 +14,38 @@ import {
   type SignInProblem,
 } from '../../hooks/useAccount';
 
-// The query parameter the server adds when it refused a sign-in.
+// The query parameters the server adds when it refused a sign-in.
 const SIGN_IN_ERROR = 'sign_in_error';
+const SIGN_IN_EMAIL = 'sign_in_email';
 // Where the person was when they set off to sign in.
 const RETURN_TO_KEY = 'atomfield_return_to';
 // Where a refused sign-in is shown if nothing was remembered.
 const FIRST_VIEW = '#dashboard';
 const UNAUTHORIZED = 401;
 
+interface Refusal {
+  problem: SignInProblem | null;
+  refusedEmail?: string | null;
+}
+
 /**
  * Take the server's reason for a refused sign-in out of the address,
  * so a reload does not show it again.
  */
-function takeSignInProblem(): SignInProblem | null {
+function takeSignInProblem(): Refusal {
   const url = new URL(window.location.href);
   const problem = url.searchParams.get(SIGN_IN_ERROR);
-  if (problem === null) return null;
+  if (problem === null) return { problem: null };
+  const refusedEmail = url.searchParams.get(SIGN_IN_EMAIL);
   url.searchParams.delete(SIGN_IN_ERROR);
+  url.searchParams.delete(SIGN_IN_EMAIL);
   window.history.replaceState(null, '', url);
-  return problem as SignInProblem;
+  return { problem: problem as SignInProblem, refusedEmail };
 }
 
 // Read once, when the page loads: the server put it there on its way
 // back from Google.
-const PROBLEM_AT_LOAD = takeSignInProblem();
+const REFUSAL_AT_LOAD = takeSignInProblem();
 
 /**
  * Back to the view the person left to sign in. After a refusal they
@@ -48,7 +56,7 @@ function returnToSavedView(signedIn: boolean): void {
   if (signedIn) {
     sessionStorage.removeItem(RETURN_TO_KEY);
     if (saved) window.location.hash = saved;
-  } else if (PROBLEM_AT_LOAD) {
+  } else if (REFUSAL_AT_LOAD.problem) {
     window.location.hash = saved || FIRST_VIEW;
   }
 }
@@ -56,13 +64,11 @@ function returnToSavedView(signedIn: boolean): void {
 /**
  * Ask the server who is signed in on this browser.
  */
-async function readAccount(
-  problem: SignInProblem | null
-): Promise<AccountState> {
+async function readAccount(refusal: Refusal): Promise<AccountState> {
   try {
     return { status: 'signed-in', account: await authService.getMe() };
   } catch {
-    return { status: 'signed-out', problem };
+    return { status: 'signed-out', ...refusal };
   }
 }
 
@@ -74,7 +80,7 @@ export default function AccountProvider({
   const [state, setState] = useState<AccountState>({ status: 'loading' });
 
   useEffect(() => {
-    void readAccount(PROBLEM_AT_LOAD).then((found) => {
+    void readAccount(REFUSAL_AT_LOAD).then((found) => {
       setState(found);
       returnToSavedView(found.status === 'signed-in');
     });
@@ -108,7 +114,7 @@ export default function AccountProvider({
   }, []);
 
   const refresh = useCallback(async () => {
-    setState(await readAccount(null));
+    setState(await readAccount({ problem: null }));
   }, []);
 
   const value = useMemo(

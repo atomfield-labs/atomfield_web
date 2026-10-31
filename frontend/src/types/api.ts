@@ -233,9 +233,12 @@ export interface AccountQuota {
   quota_remaining: number;
 }
 
+export type Role = 'owner' | 'admin' | 'user';
+
 export interface Account extends AccountQuota {
   is_active: boolean;
-  is_admin?: boolean;
+  role: Role;
+  lab_id: string | null;
 }
 
 export interface UserStatsResponse extends AccountQuota {
@@ -273,7 +276,7 @@ export interface AdminUserSummary extends AccountQuota {
   running_jobs: number;
   total_compute_seconds: number;
   is_active: boolean;
-  is_admin?: boolean;
+  role: Role;
   created_at?: string | null;
   last_used_at?: string | null;
 }

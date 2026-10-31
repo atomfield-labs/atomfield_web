@@ -26,8 +26,9 @@ from app.models.run import Run
 from app.models.script_release import ScriptRelease
 from app.models.user import User
 from app.services.accounts import new_key
-from tests.browser import SIGN_IN_SETTINGS
+from tests.browser import SIGN_IN_SETTINGS, STUDENT
 from tests.fake_google import FakeGoogle
+from tests.labs import add_to_lab, give_every_workflow, shared_lab_id
 from tests.stores import make_redis, reset_test_stores
 
 UserHeadersFactory = Callable[..., dict[str, str]]
@@ -64,8 +65,9 @@ def admin_headers() -> dict[str, str]:
 
 async def add_key_holder(make_session: async_sessionmaker, label: str) -> str:
     """
-    Make a person holding one API key, straight in the database: people
-    sign in with Google, which most tests have no need to go through.
+    Make a person holding one API key, in the shared lab with every
+    workflow, straight in the database: people sign in with Google,
+    which most tests have no need to go through.
 
     :param make_session: Session factory on the test database.
     :type make_session: async_sessionmaker
@@ -75,9 +77,10 @@ async def add_key_holder(make_session: async_sessionmaker, label: str) -> str:
     :rtype: str
     """
     async with make_session() as session:
-        user = User(name=label)
+        user = User(name=label, lab_id=await shared_lab_id(session))
         session.add(user)
         await session.flush()
+        await give_every_workflow(session, user.id)
         secret, key = new_key(user.id, label)
         session.add(key)
         await session.commit()
@@ -175,20 +178,26 @@ def releases(client: TestClient, make_session: async_sessionmaker) -> Iterator:
 
 @pytest.fixture
 def google(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    make_session: async_sessionmaker,
 ) -> Iterator[FakeGoogle]:
     """
-    Sign-in set up as the settings say, against a fake Google; the
-    browser (the test client) forgets its cookies afterwards.
+    Sign-in set up as the settings say, against a fake Google, with the
+    student on a lab's list; the browser (the test client) forgets its
+    cookies afterwards.
 
     :param client: In-process API client.
     :type client: TestClient
     :param monkeypatch: Sets the sign-in settings for this test.
     :type monkeypatch: pytest.MonkeyPatch
+    :param make_session: Session factory on the test database.
+    :type make_session: async_sessionmaker
     :return: The fake Google.
     :rtype: Iterator[FakeGoogle]
     """
     fake = FakeGoogle()
+    asyncio.run(add_to_lab(make_session, STUDENT.email))
     for name, value in SIGN_IN_SETTINGS.items():
         monkeypatch.setattr(settings, name, value)
     http = httpx.AsyncClient(transport=fake.transport())

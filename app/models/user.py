@@ -4,15 +4,36 @@ API keys, and how many jobs they may run.
 """
 
 import uuid
+from enum import StrEnum
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, func
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.base import Base
 
-# Jobs a new person may submit, until the administrator changes it.
+# Jobs a new person may submit, until the owner changes it.
 DEFAULT_QUOTA_LIMIT = 100
 NAME_LENGTH = 100
+
+
+class Role(StrEnum):
+    """
+    What a person may do. The owner runs the platform and gives labs
+    their workflows; a lab's admin gives its people theirs; a user
+    runs what they are given.
+    """
+
+    OWNER = "owner"
+    ADMIN = "admin"
+    USER = "user"
 
 
 class User(Base):
@@ -26,12 +47,29 @@ class User(Base):
     # Set by signing in; empty for people from before sign-in existed.
     email = Column(String(320), nullable=True, unique=True)
     name = Column(String(NAME_LENGTH), nullable=True)
-    is_admin = Column(Boolean, nullable=False, default=False)
+    role = Column(String(20), nullable=False, default=Role.USER)
+    # Whose lab they are in; none for an owner, or someone removed.
+    lab_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("labs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     quota_limit = Column(Integer, nullable=False, default=DEFAULT_QUOTA_LIMIT)
     quota_used = Column(Integer, nullable=False, default=0)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_seen_at = Column(DateTime(timezone=True), nullable=True)
+
+    @property
+    def is_owner(self) -> bool:
+        """
+        Whether this person owns the platform.
+
+        :return: True for an owner.
+        :rtype: bool
+        """
+        return self.role == Role.OWNER
 
     @property
     def quota_remaining(self) -> int:

@@ -25,17 +25,14 @@ LOGOUT = "/api/auth/logout"
 MY_ACCOUNT = "/api/auth/me"
 # What the browser says on requests from AtomField's own pages.
 OWN_PAGE = {"Origin": "http://testserver"}
-STUDENT = Account(email=f"ada@{INSTITUTE}", domain=INSTITUTE)
-PRINCIPAL = Account(
-    email=f"grace@{INSTITUTE}", domain=INSTITUTE, name="Grace Hopper"
-)
+STUDENT = Account(email=f"ada@{INSTITUTE}")
+OWNER = Account(email=f"grace@{INSTITUTE}", name="Grace Hopper")
 SIGN_IN_SETTINGS = {
     "OIDC_ISSUER": ISSUER,
     "OIDC_CLIENT_ID": CLIENT_ID,
     "OIDC_CLIENT_SECRET": CLIENT_SECRET,
     "OIDC_REDIRECT_URI": REDIRECT_URI,
-    "SIGN_IN_DOMAINS": INSTITUTE,
-    "ADMIN_EMAILS": PRINCIPAL.email,
+    "OWNER_EMAILS": OWNER.email,
 }
 
 

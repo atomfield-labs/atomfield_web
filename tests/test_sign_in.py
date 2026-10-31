@@ -1,7 +1,7 @@
 """
-Signing in with an institute Google account, against a fake Google:
-who gets in, how a signed-in browser is known afterwards, and what
-another site cannot make it do.
+Signing in with a Google account, against a fake Google: who gets in,
+how a signed-in browser is known afterwards, and what another site
+cannot make it do.
 """
 
 import asyncio
@@ -10,14 +10,15 @@ import uuid
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import update
+from sqlalchemy import exists, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.api.routes.auth import SIGN_IN_COOKIE
+from app.api.dependencies import get_sign_in
+from app.api.routes.auth import SIGN_IN_COOKIE, SIGN_IN_EMAIL
 from app.core.config import settings
 from app.core.security import SESSION_COOKIE
 from app.main import app, create_sign_in
-from app.models.user import User
+from app.models.user import Role, User
 from app.sign_in.provider import SignInStart
 from app.sign_in.refusals import SignInProblem
 from tests.browser import (
@@ -27,13 +28,14 @@ from tests.browser import (
     LOGOUT,
     MY_ACCOUNT,
     OWN_PAGE,
-    PRINCIPAL,
+    OWNER,
     SIGN_IN_SETTINGS,
     STUDENT,
     problem_in,
     sign_in,
 )
 from tests.fake_google import Account, FakeGoogle, new_key, query_of
+from tests.labs import add_to_lab
 
 CLEAR_JOBS = "/api/jobs/clear"
 # Another page on the institute's domain: the same site, as browsers
@@ -63,10 +65,26 @@ async def set_active(
         await session.commit()
 
 
-def test_an_institute_account_signs_in(client: TestClient, google: FakeGoogle):
+async def person_exists(make_session: async_sessionmaker, email: str) -> bool:
     """
-    A verified account the institute runs signs in. The browser is
-    then known by its cookie, which page scripts cannot read and other
+    Whether anyone has this email.
+
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
+    :param email: The email.
+    :type email: str
+    :return: True if a person has it.
+    :rtype: bool
+    """
+    query = select(exists().where(User.email == email))
+    async with make_session() as session:
+        return await session.scalar(query)
+
+
+def test_a_listed_account_signs_in(client: TestClient, google: FakeGoogle):
+    """
+    A verified account on a lab's list signs in. The browser is then
+    known by its cookie, which page scripts cannot read and other
     sites' requests do not carry.
 
     :param client: In-process API client.
@@ -80,7 +98,7 @@ def test_an_institute_account_signs_in(client: TestClient, google: FakeGoogle):
     session = next(line for line in cookies if line.startswith(SESSION_COOKIE))
     assert finished.headers["location"] == "/"
     assert (shown["email"], shown["label"]) == (STUDENT.email, STUDENT.name)
-    assert not shown["is_admin"]
+    assert shown["role"] == Role.USER
     assert "httponly" in session.lower()
     assert "samesite=lax" in session.lower()
 
@@ -88,25 +106,21 @@ def test_an_institute_account_signs_in(client: TestClient, google: FakeGoogle):
 @pytest.mark.parametrize(
     ("account", "problem"),
     [
-        (Account("ada@gmail.com", None), SignInProblem.OUTSIDE),
-        (Account(f"ada@{INSTITUTE}", None), SignInProblem.OUTSIDE),
-        (Account("ada@other.ac.in", "other.ac.in"), SignInProblem.OUTSIDE),
-        (
-            Account(f"ada@{INSTITUTE}", INSTITUTE, verified=False),
-            SignInProblem.FAILED,
-        ),
+        (Account("ada@gmail.com"), SignInProblem.OUTSIDE),
+        (Account(f"ben@{INSTITUTE}"), SignInProblem.OUTSIDE),
+        (Account(STUDENT.email, verified=False), SignInProblem.FAILED),
     ],
-    ids=["personal", "personal-with-our-address", "other", "unverified"],
+    ids=["personal", "same-institute", "unverified"],
 )
-def test_only_the_institutes_own_accounts_get_in(
+def test_only_listed_accounts_get_in(
     client: TestClient,
     google: FakeGoogle,
     account: Account,
     problem: SignInProblem,
 ):
     """
-    Personal accounts, even one made with an institute address, other
-    institutes' accounts and unverified addresses are turned away.
+    Accounts on no lab's list, even from the same institute, and
+    unverified addresses are turned away.
 
     :param client: In-process API client.
     :type client: TestClient
@@ -122,23 +136,52 @@ def test_only_the_institutes_own_accounts_get_in(
     assert SESSION_COOKIE not in client.cookies
 
 
-def test_an_account_on_another_institute_domain_gets_in(
-    client: TestClient, google: FakeGoogle
+def test_a_lab_can_list_any_address(
+    client: TestClient,
+    google: FakeGoogle,
+    make_session: async_sessionmaker,
 ):
     """
-    One Google organization can hold several email domains (students
-    and staff, say). Google's tag names the organization, so an
-    account with any of its addresses gets in.
+    What counts is the address Google has verified, whichever domain
+    it is on: a lab can add a collaborator from elsewhere.
 
     :param client: In-process API client.
     :type client: TestClient
     :param google: The fake Google.
     :type google: FakeGoogle
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
     """
-    teacher = Account(f"grace@staff-{INSTITUTE}", INSTITUTE)
-    finished = sign_in(client, google, teacher)
+    visitor = Account("grace@elsewhere.ac.in")
+    asyncio.run(add_to_lab(make_session, visitor.email))
+    finished = sign_in(client, google, visitor)
     assert problem_in(finished) is None
-    assert client.get(MY_ACCOUNT).json()["email"] == teacher.email
+    assert client.get(MY_ACCOUNT).json()["email"] == visitor.email
+
+
+def test_a_refused_sign_in_leaves_no_trace(
+    client: TestClient,
+    google: FakeGoogle,
+    make_session: async_sessionmaker,
+):
+    """
+    Someone turned away is not made a person, so strangers never
+    appear in anyone's lists. They are told the address Google gave:
+    the one their lab's admin must add.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param google: The fake Google.
+    :type google: FakeGoogle
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
+    """
+    stranger = Account(f"stranger@{INSTITUTE}")
+    finished = sign_in(client, google, stranger)
+    assert problem_in(finished) == SignInProblem.OUTSIDE
+    assert not asyncio.run(person_exists(make_session, stranger.email))
+    told = query_of(finished.headers["location"])
+    assert told[SIGN_IN_EMAIL] == stranger.email
 
 
 def test_a_sign_in_finishes_only_in_the_browser_that_started_it(
@@ -263,19 +306,29 @@ def test_a_token_meant_for_another_app_is_refused(
     assert problem_in(finished) == SignInProblem.FAILED
 
 
-def test_listed_people_sign_in_as_administrators(
-    client: TestClient, google: FakeGoogle
+def test_listed_owners_sign_in_as_owners(
+    client: TestClient,
+    google: FakeGoogle,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     """
-    A person in ``ADMIN_EMAILS`` is an administrator once signed in.
+    A person in ``OWNER_EMAILS`` needs no lab and is an owner once
+    signed in. Off the list, and in no lab, they are turned away like
+    anyone else.
 
     :param client: In-process API client.
     :type client: TestClient
     :param google: The fake Google.
     :type google: FakeGoogle
+    :param monkeypatch: Changes the list of owners.
+    :type monkeypatch: pytest.MonkeyPatch
     """
-    sign_in(client, google, PRINCIPAL)
-    assert client.get(MY_ACCOUNT).json()["is_admin"]
+    sign_in(client, google, OWNER)
+    assert client.get(MY_ACCOUNT).json()["role"] == Role.OWNER
+    assert client.get(MY_ACCOUNT).json()["lab_id"] is None
+    flow = app.dependency_overrides[get_sign_in]()
+    monkeypatch.setattr(flow, "owners", frozenset())
+    assert problem_in(sign_in(client, google, OWNER)) == SignInProblem.OUTSIDE
 
 
 def test_a_turned_off_account_is_shut_out(
@@ -388,8 +441,8 @@ def test_half_set_up_sign_in_stops_the_server(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ):
     """
-    With a client id but no institute domain, the server refuses to
-    start rather than fail at someone's first sign-in.
+    With a client id but no owner, nobody could ever get in: the server
+    refuses to start rather than fail at someone's first sign-in.
 
     :param client: In-process API client.
     :type client: TestClient
@@ -398,8 +451,8 @@ def test_half_set_up_sign_in_stops_the_server(
     """
     for name, value in SIGN_IN_SETTINGS.items():
         monkeypatch.setattr(settings, name, value)
-    monkeypatch.setattr(settings, "SIGN_IN_DOMAINS", "")
-    with pytest.raises(RuntimeError, match="SIGN_IN_DOMAINS"):
+    monkeypatch.setattr(settings, "OWNER_EMAILS", "")
+    with pytest.raises(RuntimeError, match="OWNER_EMAILS"):
         create_sign_in(httpx.AsyncClient(), app.state.redis)
 
 

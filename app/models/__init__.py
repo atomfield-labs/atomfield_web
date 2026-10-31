@@ -7,6 +7,7 @@ from app.models.browser_session import BrowserSession
 from app.models.compute_target import ComputeTarget
 from app.models.data_pack import DataPack
 from app.models.job import Job, JobDependency
+from app.models.lab import Lab, LabWorkflow, UserWorkflow
 from app.models.run import Run
 from app.models.script_release import ScriptRelease
 from app.models.user import User
@@ -18,7 +19,10 @@ __all__ = [
     "DataPack",
     "Job",
     "JobDependency",
+    "Lab",
+    "LabWorkflow",
     "Run",
     "ScriptRelease",
     "User",
+    "UserWorkflow",
 ]

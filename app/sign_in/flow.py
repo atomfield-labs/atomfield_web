@@ -4,8 +4,8 @@ The sign-in flow, from the button to the signed-in person.
 Starting: make the sign-in's secrets, keep them in Redis for a few
 minutes, and send the browser to the provider. Finishing: the answer
 must come back to the browser that started, and only once; the
-provider must vouch for the account; the account must be one of the
-institute's. Then the person is found, or made on their first sign-in.
+provider must vouch for the account; and the person must be an owner
+or on a lab's list. Nobody else gets in, so strangers leave no trace.
 """
 
 import json
@@ -15,8 +15,11 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
-from app.services.accounts import person_signing_in
-from app.sign_in.provider import Identity, IdentityProvider, SignInStart
+from app.services.accounts import (
+    listed_person_signing_in,
+    owner_signing_in,
+)
+from app.sign_in.provider import IdentityProvider, SignInStart
 from app.sign_in.refusals import SignInProblem, SignInRefused
 
 PENDING_KEY = "sign-in:{state}"
@@ -65,61 +68,6 @@ class PendingSignIns:
 
 
 @dataclass(frozen=True, slots=True)
-class SignInRules:
-    """
-    Who may sign in, and who of them are administrators.
-
-    :param domains: Institute domains whose accounts may sign in.
-    :type domains: frozenset[str]
-    :param admins: Emails of the administrators.
-    :type admins: frozenset[str]
-    """
-
-    domains: frozenset[str]
-    admins: frozenset[str]
-
-    def may_enter(self, identity: Identity) -> bool:
-        """
-        Whether the account is one an allowed institute runs. The
-        provider's word on who runs it (``hd``) decides, not the
-        email's ending: a personal account can carry almost any
-        address, and an institute's own accounts may carry any of its
-        domains.
-
-        :param identity: Who signed in.
-        :type identity: Identity
-        :return: True if they may enter.
-        :rtype: bool
-        """
-        return identity.domain in self.domains
-
-    def is_admin(self, identity: Identity) -> bool:
-        """
-        Whether this person is an administrator.
-
-        :param identity: Who signed in.
-        :type identity: Identity
-        :return: True if their email is listed as an administrator's.
-        :rtype: bool
-        """
-        return identity.email in self.admins
-
-    @property
-    def domain_hint(self) -> str | None:
-        """
-        The institute's domain when there is just one: the provider
-        then offers only that institute's accounts to choose from.
-
-        :return: The domain, or None if there are several.
-        :rtype: str | None
-        """
-        if len(self.domains) != 1:
-            return None
-        (domain,) = self.domains
-        return domain
-
-
-@dataclass(frozen=True, slots=True)
 class LoginRedirect:
     """
     Where to send the browser to sign in, and the state its cookie
@@ -137,15 +85,15 @@ class LoginRedirect:
 
 class SignInFlow:
     """
-    Signs people in: the provider says who they are, the rules say
-    whether they may enter, and as what.
+    Signs people in: the provider says who they are; the list of owners
+    and the labs' lists say whether they may enter.
     """
 
     def __init__(
         self,
         provider: IdentityProvider,
         pending: PendingSignIns,
-        rules: SignInRules,
+        owners: frozenset[str],
     ) -> None:
         """
         Wire the flow.
@@ -154,12 +102,12 @@ class SignInFlow:
         :type provider: IdentityProvider
         :param pending: Sign-ins in progress.
         :type pending: PendingSignIns
-        :param rules: Who may enter.
-        :type rules: SignInRules
+        :param owners: Emails of the platform's owners.
+        :type owners: frozenset[str]
         """
         self.provider = provider
         self.pending = pending
-        self.rules = rules
+        self.owners = owners
 
     async def begin(self) -> LoginRedirect:
         """
@@ -171,7 +119,7 @@ class SignInFlow:
         """
         start = SignInStart.new()
         await self.pending.remember(start)
-        link = await self.provider.login_link(start, self.rules.domain_hint)
+        link = await self.provider.login_link(start)
         return LoginRedirect(link=link, state=start.state)
 
     async def started_here(self, state: str, browser_state: str) -> SignInStart:
@@ -220,10 +168,12 @@ class SignInFlow:
         if not code:
             raise SignInRefused(SignInProblem.DENIED)
         identity = await self.provider.identity(code, start)
-        if not self.rules.may_enter(identity):
-            raise SignInRefused(SignInProblem.OUTSIDE)
-        admin = self.rules.is_admin(identity)
-        user = await person_signing_in(db, identity, admin)
+        if identity.email in self.owners:
+            user = await owner_signing_in(db, identity)
+        else:
+            user = await listed_person_signing_in(db, identity)
+        if user is None:
+            raise SignInRefused(SignInProblem.OUTSIDE, identity.email)
         if not user.is_active:
             raise SignInRefused(SignInProblem.DISABLED)
         return user

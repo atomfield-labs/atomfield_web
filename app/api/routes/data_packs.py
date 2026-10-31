@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import get_store, require_admin
+from app.api.dependencies import get_store, require_owner
 from app.api.errors import conflict, too_large, unprocessable
 from app.catalog.models import PACKAGE_NAME_PATTERN
 from app.db.session import get_db
@@ -51,7 +51,7 @@ async def publish(
     name: str = Query(pattern=NAME_QUERY),
     version: str = Query(pattern=NAME_QUERY),
     sha256: str = Query(pattern=SHA256_QUERY),
-    _admin: User = Depends(require_admin),
+    _owner: User = Depends(require_owner),
     db: AsyncSession = Depends(get_db),
     store: ArtifactStore = Depends(get_store),
 ) -> DataPackInfo:
@@ -68,8 +68,8 @@ async def publish(
     :type version: str
     :param sha256: The zip's fingerprint, computed by the publisher.
     :type sha256: str
-    :param _admin: The administrator.
-    :type _admin: User
+    :param _owner: The owner.
+    :type _owner: User
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :param store: Where the zip is kept.

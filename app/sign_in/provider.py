@@ -144,14 +144,10 @@ class Identity:
     :type email: str
     :param name: Their name, if they share it.
     :type name: str | None
-    :param domain: The organisation that runs the account (Google's
-        ``hd``); None for a personal account.
-    :type domain: str | None
     """
 
     email: str
     name: str | None
-    domain: str | None
 
     @classmethod
     def from_claims(cls, claims: dict[str, Any]) -> "Identity":
@@ -170,7 +166,6 @@ class Identity:
         return cls(
             email=claims["email"].lower(),
             name=claims.get("name"),
-            domain=claims.get("hd"),
         )
 
 
@@ -242,17 +237,12 @@ class IdentityProvider:
             keys=document["jwks_uri"],
         )
 
-    async def login_link(
-        self, start: SignInStart, domain_hint: str | None
-    ) -> str:
+    async def login_link(self, start: SignInStart) -> str:
         """
         The provider's sign-in page for one sign-in.
 
         :param start: The sign-in's secrets.
         :type start: SignInStart
-        :param domain_hint: An institute domain, so the provider offers
-            only that institute's accounts; None to offer all.
-        :type domain_hint: str | None
         :return: The link to send the browser to.
         :rtype: str
         """
@@ -267,8 +257,6 @@ class IdentityProvider:
             "code_challenge": start.challenge,
             "code_challenge_method": CHALLENGE_METHOD,
         }
-        if domain_hint:
-            query["hd"] = domain_hint
         return f"{endpoints.authorization}?{urlencode(query)}"
 
     async def id_token(

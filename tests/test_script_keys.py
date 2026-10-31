@@ -10,7 +10,7 @@ from tests.browser import (
     LOGOUT,
     MY_ACCOUNT,
     OWN_PAGE,
-    PRINCIPAL,
+    OWNER,
     STUDENT,
     sign_in,
 )
@@ -104,7 +104,7 @@ def test_nobody_revokes_someone_elses_key(
     sign_in(client, google, STUDENT)
     theirs = make_key(client)
     client.post(LOGOUT, headers=OWN_PAGE)
-    sign_in(client, google, PRINCIPAL)
+    sign_in(client, google, OWNER)
     refused = client.delete(f"{KEYS}/{theirs['id']}", headers=OWN_PAGE)
     still_works = {"X-API-Key": theirs["api_key"]}
     assert refused.status_code == 404

@@ -13,9 +13,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.config import settings
 from app.core.security import hash_api_key
-from app.main import provision_admin
+from app.main import provision_admin, provision_owners
 from app.models.api_key import ApiKey
-from app.models.user import User
+from app.models.user import Role, User
 
 UserHeadersFactory = Callable[..., dict[str, str]]
 
@@ -35,7 +35,8 @@ async def owners_of_key(
     make_session: async_sessionmaker, key_hash: str
 ) -> list[bool]:
     """
-    Whether the person owning each key with this fingerprint is admin.
+    Whether the person holding each key with this fingerprint is an
+    owner.
 
     :param make_session: Session factory.
     :type make_session: async_sessionmaker
@@ -46,7 +47,7 @@ async def owners_of_key(
     """
     async with make_session() as session:
         query = (
-            select(User.is_admin)
+            select(User.role == Role.OWNER)
             .join(ApiKey, ApiKey.user_id == User.id)
             .where(ApiKey.key_hash == key_hash)
         )
@@ -72,7 +73,7 @@ async def change_owner(
     statement = (
         delete(User).where(is_owner)
         if remove
-        else update(User).where(is_owner).values(is_admin=False)
+        else update(User).where(is_owner).values(role=Role.USER)
     )
     async with make_session() as session:
         await session.execute(statement)
@@ -144,3 +145,71 @@ def test_an_existing_admin_key_makes_its_owner_the_administrator(
     owners = asyncio.run(provision_and_look(make_session, key_hash, 1))
     asyncio.run(change_owner(make_session, key_hash, remove=False))
     assert owners == [True]
+
+
+async def add_person(
+    make_session: async_sessionmaker, email: str, role: Role
+) -> None:
+    """
+    Make a person.
+
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
+    :param email: Their email.
+    :type email: str
+    :param role: Their role.
+    :type role: Role
+    """
+    async with make_session() as session:
+        session.add(User(email=email, role=role))
+        await session.commit()
+
+
+async def role_of(make_session: async_sessionmaker, email: str) -> str:
+    """
+    A person's role.
+
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
+    :param email: Their email.
+    :type email: str
+    :return: Their role.
+    :rtype: str
+    """
+    query = select(User.role).where(User.email == email)
+    async with make_session() as session:
+        return await session.scalar(query)
+
+
+async def start_with_owners(make_session: async_sessionmaker) -> None:
+    """
+    What a server start does about the list of owners.
+
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
+    """
+    async with make_session() as session:
+        await provision_owners(session)
+
+
+def test_the_list_of_owners_counts_from_the_next_start(
+    make_session: async_sessionmaker,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """
+    A start makes those on the list owners and those off it users, so
+    nobody keeps or waits for ownership until their next sign-in.
+
+    :param make_session: Session factory.
+    :type make_session: async_sessionmaker
+    :param monkeypatch: Sets the list of owners.
+    :type monkeypatch: pytest.MonkeyPatch
+    """
+    tag = uuid.uuid4().hex
+    joining, leaving = f"joining{tag}@lab.ac.in", f"leaving{tag}@lab.ac.in"
+    asyncio.run(add_person(make_session, joining, Role.USER))
+    asyncio.run(add_person(make_session, leaving, Role.OWNER))
+    monkeypatch.setattr(settings, "OWNER_EMAILS", joining)
+    asyncio.run(start_with_owners(make_session))
+    assert asyncio.run(role_of(make_session, joining)) == Role.OWNER
+    assert asyncio.run(role_of(make_session, leaving)) == Role.USER

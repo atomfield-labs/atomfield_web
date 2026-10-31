@@ -80,9 +80,6 @@ class Account:
 
     :param email: Their address.
     :type email: str
-    :param domain: The organisation that runs the account (``hd``);
-        None for a personal account.
-    :type domain: str | None
     :param verified: Whether Google has verified the address.
     :type verified: bool
     :param name: Their name.
@@ -90,7 +87,6 @@ class Account:
     """
 
     email: str
-    domain: str | None
     verified: bool = True
     name: str = "Ada Lovelace"
 
@@ -235,7 +231,7 @@ class FakeGoogle:
         :rtype: dict[str, Any]
         """
         now = int(time.time())
-        claims = {
+        return {
             "iss": ISSUER,
             "aud": self.audience,
             "sub": uuid.uuid5(uuid.NAMESPACE_DNS, account.email).hex,
@@ -246,7 +242,6 @@ class FakeGoogle:
             "email_verified": account.verified,
             "name": account.name,
         }
-        return claims | ({"hd": account.domain} if account.domain else {})
 
     def consent(self, login_link: str, account: Account) -> dict[str, str]:
         """

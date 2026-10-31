@@ -4,12 +4,14 @@ import { useAccount, type SignInProblem } from '../../hooks/useAccount';
 const PROBLEM_TEXT: Record<SignInProblem, string> = {
   expired: 'That sign-in took too long. Please try again.',
   denied: 'Sign-in was cancelled.',
-  outside: 'Use your institute Google account.',
-  disabled: 'Your account is turned off. Ask the administrator.',
+  outside: "This account isn't on AtomField. Ask your lab admin to add it.",
+  disabled: 'Your account is turned off. Ask your lab admin.',
   failed: 'Sign-in failed. Please try again.',
   unavailable: "Sign-in isn't set up on this server yet.",
   busy: 'Too many attempts. Wait a minute, then try again.',
 };
+
+const NOT_LISTED = "isn't on AtomField. Ask your lab admin to add it.";
 
 // Google's "G" in its own colours, as Google's sign-in guidelines ask.
 const GOOGLE_G = [
@@ -188,6 +190,8 @@ export default function SignInPage() {
   const { state, signIn } = useAccount();
   const [leaving, setLeaving] = useState(false);
   const problem = state.status === 'signed-out' ? state.problem : null;
+  const refusedEmail =
+    state.status === 'signed-out' ? state.refusedEmail : null;
 
   const continueWithGoogle = () => {
     setLeaving(true);
@@ -211,7 +215,9 @@ export default function SignInPage() {
           </button>
           {problem ? (
             <p role="alert" className="text-[13px] text-red-700">
-              {PROBLEM_TEXT[problem] ?? PROBLEM_TEXT.failed}
+              {problem === 'outside' && refusedEmail
+                ? `${refusedEmail} ${NOT_LISTED}`
+                : (PROBLEM_TEXT[problem] ?? PROBLEM_TEXT.failed)}
             </p>
           ) : (
             <p className="text-[13px] text-stone-500">

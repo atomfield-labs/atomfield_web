@@ -18,7 +18,7 @@ from app.core.security import (
 )
 from app.models.api_key import ApiKey
 from app.models.browser_session import BrowserSession
-from app.models.user import NAME_LENGTH, User
+from app.models.user import NAME_LENGTH, Role, User
 from app.sign_in.provider import Identity
 
 
@@ -86,26 +86,37 @@ async def revoke_key(
     return result.rowcount == 1
 
 
-async def person_signing_in(
-    db: AsyncSession, identity: Identity, is_admin: bool
-) -> User:
+def shown_name(identity: Identity) -> str | None:
     """
-    The person with this email, made on their first sign-in. Their
-    name, and whether they are an administrator, follow each sign-in.
-    One statement (an upsert), so two first sign-ins at once still
-    make one person.
+    The name to keep for someone signing in.
+
+    :param identity: Who the provider says signed in.
+    :type identity: Identity
+    :return: Their name, cut to fit; None if they share none.
+    :rtype: str | None
+    """
+    return identity.name[:NAME_LENGTH] if identity.name else None
+
+
+async def owner_signing_in(db: AsyncSession, identity: Identity) -> User:
+    """
+    The owner with this email, made on their first sign-in. One
+    statement (an upsert), so two first sign-ins at once still make one
+    person.
 
     :param db: Asynchronous database session; the caller commits.
     :type db: AsyncSession
     :param identity: Who the provider says signed in.
     :type identity: Identity
-    :param is_admin: Whether the rules make them an administrator.
-    :type is_admin: bool
-    :return: The person.
+    :return: The owner.
     :rtype: User
     """
-    name = identity.name[:NAME_LENGTH] if identity.name else None
-    changes = {"name": name, "is_admin": is_admin, "last_seen_at": func.now()}
+    changes = {
+        "name": shown_name(identity),
+        "role": Role.OWNER,
+        "lab_id": None,
+        "last_seen_at": func.now(),
+    }
     upsert = (
         insert(User)
         .values(email=identity.email, **changes)
@@ -114,6 +125,30 @@ async def person_signing_in(
     )
     fresh = {"populate_existing": True}
     return (await db.scalars(upsert, execution_options=fresh)).one()
+
+
+async def listed_person_signing_in(
+    db: AsyncSession, identity: Identity
+) -> User | None:
+    """
+    The person with this email, if a lab has them.
+
+    :param db: Asynchronous database session; the caller commits.
+    :type db: AsyncSession
+    :param identity: Who the provider says signed in.
+    :type identity: Identity
+    :return: The person, or None if no lab has them.
+    :rtype: User | None
+    """
+    seen = (
+        update(User)
+        .where(User.email == identity.email)
+        .values(name=shown_name(identity), last_seen_at=func.now())
+        .returning(User)
+    )
+    fresh = {"populate_existing": True, "synchronize_session": False}
+    person = (await db.scalars(seen, execution_options=fresh)).one_or_none()
+    return person if person is not None and person.lab_id else None
 
 
 async def sign_in_browser(

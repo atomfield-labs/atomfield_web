@@ -14,9 +14,9 @@ class SignInProblem(StrEnum):
     EXPIRED = "expired"
     # The person said no at the provider.
     DENIED = "denied"
-    # Not an account of an allowed institute.
+    # Not an owner, and on no lab's list.
     OUTSIDE = "outside"
-    # The administrator has turned the account off.
+    # The owner has turned the account off.
     DISABLED = "disabled"
     # The provider's answer did not check out.
     FAILED = "failed"
@@ -31,12 +31,19 @@ class SignInRefused(Exception):
     A sign-in that must not go ahead.
     """
 
-    def __init__(self, problem: SignInProblem) -> None:
+    def __init__(
+        self, problem: SignInProblem, email: str | None = None
+    ) -> None:
         """
         Say why.
 
         :param problem: What went wrong.
         :type problem: SignInProblem
+        :param email: The address Google gave, for someone on no list:
+            one institute's accounts can carry several, and this is the
+            one their lab's admin must add.
+        :type email: str | None
         """
         super().__init__(problem.value)
         self.problem = problem
+        self.email = email

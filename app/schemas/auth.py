@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
-from app.models.user import DEFAULT_QUOTA_LIMIT, User
+from app.models.user import DEFAULT_QUOTA_LIMIT, Role, User
 
 
 class ApiKeyCreateRequest(BaseModel):
@@ -70,7 +70,8 @@ class ApiKeyInfoResponse(KeyQuota):
     """
 
     is_active: bool
-    is_admin: bool = False
+    role: Role = Role.USER
+    lab_id: UUID | None = None
 
 
 class UserStatsResponse(KeyQuota, JobCounts):
@@ -94,7 +95,8 @@ class AdminUserSummary(KeyQuota, JobCounts):
 
     id: UUID
     is_active: bool
-    is_admin: bool = False
+    role: Role = Role.USER
+    lab_id: UUID | None = None
     created_at: datetime | None = None
     last_used_at: datetime | None = Field(
         default=None,

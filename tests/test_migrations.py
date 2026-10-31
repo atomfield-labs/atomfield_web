@@ -193,6 +193,7 @@ def test_backup_only_when_existing_data_would_change():
 
 
 KEY = "11111111-1111-1111-1111-111111111111"
+OTHER_KEY = "22222222-2222-2222-2222-222222222222"
 JOB_A, JOB_B, JOB_C, JOB_D, JOB_E = (
     f"00000000-0000-0000-0000-00000000000{n}" for n in range(1, 6)
 )
@@ -307,3 +308,42 @@ def test_0013_makes_each_key_a_person(
     command.downgrade(config, "0012")
     (keys,) = asyncio.run(run_sql("SELECT id::text, quota_limit FROM api_keys"))
     assert keys == [(KEY, 10)]
+
+
+def test_0015_turns_the_administrator_into_the_owner(
+    scratch_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """
+    Whoever was the administrator becomes the owner, everyone else a
+    user with no lab; going back, only owners are administrators.
+
+    :param scratch_database: Name of the scratch database.
+    :type scratch_database: str
+    :param monkeypatch: Sets ALLOW_DOWNGRADE for the reverse check.
+    :type monkeypatch: pytest.MonkeyPatch
+    """
+    config = build_alembic_config()
+    command.upgrade(config, "0014")
+    columns = "(id, name, is_admin, quota_limit, quota_used, is_active)"
+    asyncio.run(
+        run_sql(
+            f"INSERT INTO users {columns} VALUES "
+            f"('{KEY}', 'them', true, 1, 0, true), "
+            f"('{OTHER_KEY}', 'me', false, 1, 0, true)"
+        )
+    )
+
+    command.upgrade(config, "0015")
+
+    (people,) = asyncio.run(
+        run_sql("SELECT name, role, lab_id FROM users ORDER BY name")
+    )
+    assert people == [("me", "user", None), ("them", "owner", None)]
+
+    monkeypatch.setenv("ALLOW_DOWNGRADE", "1")
+    command.downgrade(config, "0014")
+    (admins,) = asyncio.run(
+        run_sql("SELECT name, is_admin FROM users ORDER BY name")
+    )
+    assert admins == [("me", False), ("them", True)]

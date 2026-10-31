@@ -51,7 +51,7 @@ SESSION_ENDED_MESSAGE = "Your sign-in has ended. Please sign in again."
 CROSS_SITE_MESSAGE = (
     "A signed-in browser may change things only from AtomField's pages."
 )
-NOT_ADMIN_MESSAGE = "Administrator privileges required."
+NOT_OWNER_MESSAGE = "Only the platform's owner may do this."
 BROWSER_ONLY_MESSAGE = "Keys are made and revoked in the web app."
 
 
@@ -365,25 +365,25 @@ async def get_browser_user(caller: Caller = Depends(get_caller)) -> User:
     return caller.user
 
 
-async def require_admin(user: User = Depends(get_current_user)) -> User:
+async def require_owner(user: User = Depends(get_current_user)) -> User:
     """
-    Let only the administrator through.
+    Let only the platform's owner through. A lab's admin is not one.
 
     :param user: The person making the request.
     :type user: User
-    :return: The administrator.
+    :return: The owner.
     :rtype: User
     :raises HTTPException: 403 for anyone else.
     """
-    if not user.is_admin:
-        raise forbidden(NOT_ADMIN_MESSAGE)
+    if not user.is_owner:
+        raise forbidden(NOT_OWNER_MESSAGE)
     return user
 
 
 def may_act_on(user: User, owner_id: UUID | None) -> bool:
     """
-    The access rule for jobs and runs: their owner, or the
-    administrator.
+    The access rule for jobs and runs: whoever submitted them, or the
+    platform's owner.
 
     :param user: The person making the request.
     :type user: User
@@ -392,7 +392,7 @@ def may_act_on(user: User, owner_id: UUID | None) -> bool:
     :return: True if the person may see and change it.
     :rtype: bool
     """
-    return owner_id == user.id or user.is_admin
+    return owner_id == user.id or user.is_owner
 
 
 async def get_owned_job(

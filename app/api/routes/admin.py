@@ -10,7 +10,7 @@ from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_admin
+from app.api.dependencies import require_owner
 from app.api.errors import not_found
 from app.db.session import get_db
 from app.models.api_key import ApiKey
@@ -74,15 +74,15 @@ def user_summary(
 
 @router.get("/stats", response_model=AdminStatsResponse)
 async def get_admin_platform_stats(
-    _admin: User = Depends(require_admin),
+    _owner: User = Depends(require_owner),
     db: AsyncSession = Depends(get_db),
 ) -> AdminStatsResponse:
     """
     Job counts and compute time across every person, and how many
     people there are.
 
-    :param _admin: The administrator.
-    :type _admin: User
+    :param _owner: The owner.
+    :type _owner: User
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :return: Platform-wide summary of users, jobs, and execution runtime.
@@ -95,14 +95,14 @@ async def get_admin_platform_stats(
 
 @router.get("/users", response_model=AdminUserListResponse)
 async def list_admin_users(
-    _admin: User = Depends(require_admin),
+    _owner: User = Depends(require_owner),
     db: AsyncSession = Depends(get_db),
 ) -> AdminUserListResponse:
     """
     Every person's account, quota and job counts, newest first.
 
-    :param _admin: The administrator.
-    :type _admin: User
+    :param _owner: The owner.
+    :type _owner: User
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :return: The people and how many there are.
@@ -125,7 +125,7 @@ async def list_admin_users(
 async def update_user_quota(
     user_id: UUID,
     payload: AdminQuotaUpdateRequest,
-    _admin: User = Depends(require_admin),
+    _owner: User = Depends(require_owner),
     db: AsyncSession = Depends(get_db),
 ) -> AdminUserSummary:
     """
@@ -135,8 +135,8 @@ async def update_user_quota(
     :type user_id: UUID
     :param payload: Desired quota adjustments.
     :type payload: AdminQuotaUpdateRequest
-    :param _admin: The administrator.
-    :type _admin: User
+    :param _owner: The owner.
+    :type _owner: User
     :param db: Asynchronous database session.
     :type db: AsyncSession
     :return: Updated user summary representation.
