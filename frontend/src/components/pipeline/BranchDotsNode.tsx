@@ -17,11 +17,11 @@ export interface BranchDotsData {
 // The dots at a sweep's end: show or fold its hidden copies.
 const DOTS = [
   'nodrag w-9 h-9 rounded-full bg-white border border-dashed',
-  'border-stone-300 hover:border-stone-400 hover:bg-stone-50',
+  'border-stone-300 hover:border-orange-400 hover:bg-orange-50',
   'flex flex-col items-center justify-center transition-all',
   'cursor-pointer select-none group',
 ].join(' ');
-const ICON = 'w-3.5 h-3.5 group-hover:text-stone-600 transition-colors';
+const ICON = 'w-3.5 h-3.5 group-hover:text-orange-600 transition-colors';
 const COUNT = 'text-[8px] font-mono font-bold text-stone-600 leading-none';
 
 export default function BranchDotsNode({ data }: { data: BranchDotsData }) {

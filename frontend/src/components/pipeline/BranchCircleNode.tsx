@@ -17,9 +17,9 @@ export interface BranchCircleData {
 
 const CIRCLE = [
   'nodrag relative w-9 h-9 rounded-full bg-white border border-stone-200',
-  'shadow-[0_1px_2px_rgba(28,25,23,0.05)] hover:border-stone-300',
-  'flex items-center justify-center text-xs font-medium text-stone-600',
-  'cursor-pointer select-none',
+  'shadow-[0_1px_2px_rgba(28,25,23,0.05)] hover:border-orange-400',
+  'hover:bg-orange-50 flex items-center justify-center text-xs font-medium',
+  'text-stone-600 cursor-pointer select-none transition-colors',
 ].join(' ');
 
 /**

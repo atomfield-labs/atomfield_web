@@ -11,7 +11,7 @@ import { STATUS_TEXT, statusLook } from '../utils/jobStatus';
 const ICONS = {
   none: { Icon: Circle, className: 'text-stone-300' },
   waiting: { Icon: Clock, className: 'text-stone-400' },
-  running: { Icon: LoaderCircle, className: 'text-blue-600 animate-spin' },
+  running: { Icon: LoaderCircle, className: 'text-orange-600 animate-spin' },
   done: { Icon: CircleCheck, className: 'text-green-600' },
   failed: { Icon: CircleX, className: 'text-red-600' },
   stopped: { Icon: CircleSlash, className: 'text-stone-400' },
@@ -19,7 +19,7 @@ const ICONS = {
 
 /**
  * A step's status as one small icon; the colour carries the meaning
- * (green done, blue running, grey waiting, red failed).
+ * (green done, orange running, grey waiting, red failed).
  */
 export default function StatusIcon({
   status,
