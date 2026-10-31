@@ -26,13 +26,13 @@ from app.core.fingerprints import file_sha256
 from app.core.names import version_label
 from app.releases.publish import (
     DEFAULT_API_URL,
-    PublishError,
     accepted,
     admin_headers,
     call_api,
     run_with_admin_key,
 )
 from app.releases.published import already_published
+from app.releases.tools import PublishError
 
 DATA_PACKS_PATH = "/api/data-packs"
 CHUNK_BYTES = 1024 * 1024

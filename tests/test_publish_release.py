@@ -1,25 +1,20 @@
 """
 The publish commands. A release is built from exactly one git commit:
-never unfinished files from the working folder, with the commit's
-catalog inside the package and the commit in the version. A data pack
-folder zips to the same bytes every time.
+never unfinished files from the working folder, with the commit's own
+catalog and the commit in the version. A data pack folder zips to the
+same bytes every time.
 """
 
 import subprocess
-import tomllib
 import zipfile
 from pathlib import Path
 
 import pytest
 
-from app.releases.publish import (
-    PublishError,
-    export_commit,
-    label_version,
-    place_catalog,
-    resolve_commit,
-)
+from app.releases.compiling import labelled_version, project_name, read_catalog
+from app.releases.publish import export_commit, resolve_commit
 from app.releases.publish_data import check_zip, prepare_zip
+from app.releases.tools import PublishError
 
 PYPROJECT = '[project]\nname = "toy"\nversion = "1.0.0"\n'
 COMMITTED_DRIVER = "print('committed')\n"
@@ -70,10 +65,10 @@ def scripts_repo(root: Path, with_catalog: bool = True) -> Path:
     return repo
 
 
-def test_only_the_commit_ships_with_its_catalog_inside(tmp_path: Path):
+def test_only_the_commit_is_built_and_named_for_its_commit(tmp_path: Path):
     """
-    Unfinished work stays behind; the catalog goes inside the
-    package; the version names the commit.
+    Unfinished work stays behind; the catalog is the commit's; the
+    version names the commit.
 
     :param tmp_path: Empty directory for this test.
     :type tmp_path: Path
@@ -83,16 +78,13 @@ def test_only_the_commit_ships_with_its_catalog_inside(tmp_path: Path):
     tree = tmp_path / "build" / "source"
     tree.parent.mkdir()
     export_commit(repo, commit, tree)
-    place_catalog(tree, "toy")
-    version = label_version(tree, commit)
 
     package = tree / "src" / "toy"
     assert (package / "opt_driver.py").read_text() == COMMITTED_DRIVER
     assert not (package / "wip.py").exists()
-    assert (package / "catalog.json").is_file()
-    assert version == f"1.0.0+g{commit[:7]}"
-    pyproject = tomllib.loads((tree / "pyproject.toml").read_text())
-    assert pyproject["project"]["version"] == version
+    assert read_catalog(tree) == '{"format_version": 1}'
+    assert project_name(tree) == "toy"
+    assert labelled_version(tree, commit) == f"1.0.0+g{commit[:7]}"
 
 
 def test_a_commit_without_a_catalog_is_not_published(tmp_path: Path):
@@ -107,7 +99,7 @@ def test_a_commit_without_a_catalog_is_not_published(tmp_path: Path):
     tree.parent.mkdir()
     export_commit(repo, resolve_commit(repo, "HEAD"), tree)
     with pytest.raises(PublishError, match="no catalog.json"):
-        place_catalog(tree, "toy")
+        read_catalog(tree)
     with pytest.raises(PublishError, match="failed"):
         resolve_commit(repo, "no-such-branch")
 

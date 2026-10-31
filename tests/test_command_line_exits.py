@@ -13,8 +13,9 @@ import pytest
 import agent.ship
 from agent.config import write_settings
 from app.core.cli import EXIT_INTERRUPTED, stops_cleanly
-from app.releases.publish import PublishError, upload
+from app.releases.publish import on_server, upload
 from app.releases.publish_data import server_has
+from app.releases.tools import PublishError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 # Nothing listens there.
@@ -109,21 +110,16 @@ def test_a_stopped_ship_says_how_to_finish(
     assert "Run the same command again" in capsys.readouterr().err
 
 
-def test_publishing_to_a_server_that_is_not_there_is_one_line(
-    tmp_path: Path,
-):
+def test_publishing_to_a_server_that_is_not_there_is_one_line():
     """
     An unreachable API is a PublishError naming it, which the command
-    prints as one line, not a connection traceback.
-
-    :param tmp_path: Empty folder.
-    :type tmp_path: Path
+    prints as one line, not a connection traceback; asking whether it
+    has a release before building one is the same.
     """
-    wheel = tmp_path / "toy-1.0-py3-none-any.whl"
-    wheel.write_bytes(b"not really a wheel")
-
     with pytest.raises(PublishError, match="Could not reach"):
-        upload(UNREACHABLE_API, "admin", wheel, "abc1234")
+        upload(UNREACHABLE_API, "admin", b"not really a bundle", "abc1234")
+    with pytest.raises(PublishError, match="Could not reach"):
+        on_server(UNREACHABLE_API, "toy", "1.0")
 
 
 def test_asking_a_server_that_is_not_there_for_a_pack_is_one_line():

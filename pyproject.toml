@@ -32,9 +32,10 @@ extend-ignore = ["B008"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [".", "scripts_repo/src"]
-addopts = "-m 'not e2e'"
+addopts = "-m 'not e2e and not compiler'"
 markers = [
     "e2e: needs the full stack running (API, worker, Redis, Postgres)",
+    "compiler: needs uv, a C compiler and, once, the network (Cython)",
 ]
 # pytest-env sets these before any app module is imported, because
 # settings are read at import time. "D:" means default only: a variable

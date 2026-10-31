@@ -8,24 +8,21 @@ It builds exactly one git commit, never the working folder, so files
 you are still editing (committed or not) never ship by accident:
 
 1. copy the commit out of git into a temporary folder;
-2. put the commit's ``catalog.json`` inside the package, so the code
-   and its catalog travel as one file;
-3. add the commit to the version (``0.1.0`` becomes
-   ``0.1.0+g2e6d386``): every commit is its own release, with no
-   version to bump by hand, and the version says where it came from;
-4. build the wheel with ``uv build``;
-5. upload it with the administrator key (``ADMIN_API_KEY``).
+2. add the commit to the version (``0.1.0`` becomes ``0.1.0+g2e6d386``):
+   every commit is its own release, with no version to bump by hand,
+   and the version says where it came from;
+3. stop there if the server already has that version;
+4. compile each package for each kind of computer (``compiling``), so
+   no readable code leaves this computer;
+5. upload one bundle, the catalog and the compiled packages, with the
+   administrator key (``ADMIN_API_KEY``).
 
-Publishing the same commit again changes nothing: the build gives the
-same bytes, and the server keeps the release it already has.
+Publishing the same commit again changes nothing: the server keeps the
+release it already has.
 """
 
 import argparse
-import re
-import shutil
-import subprocess
 import tempfile
-import tomllib
 import zipfile
 from collections.abc import Callable
 from functools import partial
@@ -38,48 +35,28 @@ from app.core.cli import fail, print_outcome, stops_cleanly
 from app.core.config import settings
 from app.core.names import version_label
 from app.core.security import API_KEY_HEADER
-from app.releases.bundle import CATALOG_NAME
+from app.releases.compiling import (
+    MACHINES,
+    build_bundle,
+    labelled_version,
+    project_name,
+)
 from app.releases.published import PublishConflictError
+from app.releases.tools import PublishError, run_tool
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_REPO = REPO_ROOT / "scripts_repo"
 DEFAULT_API_URL = "http://localhost:8000"
 RELEASES_PATH = "/api/releases"
 UPLOAD_SECONDS = 120.0
-SHORT_COMMIT = 7
+ALREADY_PUBLISHED = "{label} was already published; nothing changed."
+NOT_FOUND = httpx.codes.NOT_FOUND
 # Answers that took a request: already there (or a listing), or new.
 ACCEPTED = (httpx.codes.OK, httpx.codes.CREATED)
 
 
-class PublishError(RuntimeError):
-    """
-    A step of publishing failed; the message says which and why.
-    """
-
-
 # What publishing can fail with, each saying why in its message.
 PUBLISH_ERRORS = (PublishError, PublishConflictError)
-
-
-def run_tool(argv: list[str]) -> str:
-    """
-    Run a command and return its output.
-
-    :param argv: The command.
-    :type argv: list[str]
-    :return: Its standard output.
-    :rtype: str
-    :raises PublishError: If it fails or cannot be found.
-    """
-    try:
-        done = subprocess.run(argv, capture_output=True, text=True, check=True)
-    except FileNotFoundError as error:
-        raise PublishError(f"{argv[0]} is not installed") from error
-    except subprocess.CalledProcessError as error:
-        raise PublishError(
-            f"{' '.join(argv)} failed:\n{error.stderr}"
-        ) from error
-    return done.stdout
 
 
 def resolve_commit(repo: Path, ref: str) -> str:
@@ -113,93 +90,6 @@ def export_commit(repo: Path, commit: str, tree: Path) -> None:
     run_tool([*git, f"--output={archive}", commit])
     with zipfile.ZipFile(archive) as source:
         source.extractall(tree)
-
-
-def package_name(distribution: str) -> str:
-    """
-    The package a distribution installs: ``af-scripts`` installs
-    ``af_scripts``.
-
-    :param distribution: Distribution name.
-    :type distribution: str
-    :return: Import name of its package.
-    :rtype: str
-    """
-    return re.sub(r"[-.]+", "_", distribution).lower()
-
-
-def project_name(tree: Path) -> str:
-    """
-    The distribution name in ``pyproject.toml``.
-
-    :param tree: The exported commit.
-    :type tree: Path
-    :return: e.g. ``afscripts``.
-    :rtype: str
-    """
-    with (tree / "pyproject.toml").open("rb") as stream:
-        return tomllib.load(stream)["project"]["name"]
-
-
-def place_catalog(tree: Path, package: str) -> None:
-    """
-    Put the commit's catalog inside the package, unless it already is.
-
-    :param tree: The exported commit.
-    :type tree: Path
-    :param package: The package's folder name under ``src``.
-    :type package: str
-    :raises PublishError: If the commit has no catalog.
-    """
-    inside = tree / "src" / package / CATALOG_NAME
-    beside = tree / CATALOG_NAME
-    if inside.is_file():
-        return
-    if not beside.is_file():
-        raise PublishError(f"This commit has no {CATALOG_NAME}")
-    shutil.copyfile(beside, inside)
-
-
-def label_version(tree: Path, commit: str) -> str:
-    """
-    Add the commit to the version in ``pyproject.toml``.
-
-    :param tree: The exported commit.
-    :type tree: Path
-    :param commit: The commit.
-    :type commit: str
-    :return: The new version, e.g. ``0.1.0+g2e6d386``.
-    :rtype: str
-    :raises PublishError: If the version line cannot be found.
-    """
-    pyproject = tree / "pyproject.toml"
-    text = pyproject.read_text(encoding="utf-8")
-    version = tomllib.loads(text)["project"]["version"]
-    line = f'version = "{version}"'
-    if text.count(line) != 1:
-        raise PublishError(f"Cannot find '{line}' in pyproject.toml")
-    labelled = f"{version}+g{commit[:SHORT_COMMIT]}"
-    pyproject.write_text(text.replace(line, f'version = "{labelled}"'))
-    return labelled
-
-
-def build_wheel(tree: Path, out: Path) -> Path:
-    """
-    Build the wheel with ``uv build``.
-
-    :param tree: The prepared commit.
-    :type tree: Path
-    :param out: Folder for the wheel.
-    :type out: Path
-    :return: The wheel.
-    :rtype: Path
-    :raises PublishError: Unless exactly one wheel was built.
-    """
-    run_tool(["uv", "build", "--wheel", "--out-dir", str(out), str(tree)])
-    wheels = list(out.glob("*.whl"))
-    if len(wheels) != 1:
-        raise PublishError(f"Expected one wheel, built {len(wheels)}")
-    return wheels[0]
 
 
 def call_api(
@@ -257,16 +147,43 @@ def accepted(response: httpx.Response) -> Any:
     return response.json()
 
 
-def upload(api_url: str, admin_key: str, wheel: Path, commit: str) -> str:
+def on_server(api_url: str, name: str, version: str) -> bool:
     """
-    Publish the wheel and describe what the server did.
+    Whether the server already has this release, so the build can be
+    skipped: building takes minutes.
+
+    :param api_url: The API's address.
+    :type api_url: str
+    :param name: The release's name.
+    :type name: str
+    :param version: Its version.
+    :type version: str
+    :return: True if it was published.
+    :rtype: bool
+    :raises PublishError: If the API cannot be reached or refuses.
+    """
+    response = call_api(
+        httpx.get,
+        api_url,
+        f"{RELEASES_PATH}/{name}/{version}",
+        timeout=UPLOAD_SECONDS,
+    )
+    if response.status_code == NOT_FOUND:
+        return False
+    accepted(response)
+    return True
+
+
+def upload(api_url: str, admin_key: str, bundle: bytes, commit: str) -> str:
+    """
+    Publish the bundle and describe what the server did.
 
     :param api_url: The API's address.
     :type api_url: str
     :param admin_key: The administrator's key.
     :type admin_key: str
-    :param wheel: The wheel.
-    :type wheel: Path
+    :param bundle: The bundle.
+    :type bundle: bytes
     :param commit: The commit it was built from.
     :type commit: str
     :return: One line for the person publishing.
@@ -278,18 +195,24 @@ def upload(api_url: str, admin_key: str, wheel: Path, commit: str) -> str:
         api_url,
         RELEASES_PATH,
         params={"git_commit": commit},
-        content=wheel.read_bytes(),
+        content=bundle,
         headers=admin_headers(admin_key),
         timeout=UPLOAD_SECONDS,
     )
     release = accepted(response)
     label = version_label(release["name"], release["version"])
     if response.status_code == httpx.codes.OK:
-        return f"{label} was already published; nothing changed."
+        return ALREADY_PUBLISHED.format(label=label)
     return f"Published {label} (sha256 {release['sha256'][:12]})."
 
 
-def publish(repo: Path, ref: str, api_url: str, admin_key: str) -> str:
+def publish(
+    repo: Path,
+    ref: str,
+    api_url: str,
+    admin_key: str,
+    machines: tuple[str, ...] = MACHINES,
+) -> str:
     """
     Build one commit of the scripts and publish it.
 
@@ -301,6 +224,8 @@ def publish(repo: Path, ref: str, api_url: str, admin_key: str) -> str:
     :type api_url: str
     :param admin_key: The administrator's key.
     :type admin_key: str
+    :param machines: The kinds of computer to build for.
+    :type machines: tuple[str, ...]
     :return: What happened.
     :rtype: str
     """
@@ -308,10 +233,12 @@ def publish(repo: Path, ref: str, api_url: str, admin_key: str) -> str:
     with tempfile.TemporaryDirectory() as scratch:
         tree = Path(scratch) / "source"
         export_commit(repo, commit, tree)
-        place_catalog(tree, package_name(project_name(tree)))
-        label_version(tree, commit)
-        wheel = build_wheel(tree, Path(scratch) / "dist")
-        return upload(api_url, admin_key, wheel, commit)
+        name, version = project_name(tree), labelled_version(tree, commit)
+        if on_server(api_url, name, version):
+            return ALREADY_PUBLISHED.format(label=version_label(name, version))
+        build = Path(scratch) / "build"
+        bundle = build_bundle(tree, version, build, machines)
+        return upload(api_url, admin_key, bundle, commit)
 
 
 def run_with_admin_key(publishing: Callable[[str], str]) -> int:
@@ -345,6 +272,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo", type=Path, default=DEFAULT_REPO)
     parser.add_argument("--ref", default="HEAD", help="Branch, tag or commit")
     parser.add_argument("--api-url", default=DEFAULT_API_URL)
+    parser.add_argument(
+        "--machines",
+        nargs="+",
+        choices=MACHINES,
+        default=MACHINES,
+        help="Kinds of computer to build for (default: all)",
+    )
     return parser
 
 
@@ -361,9 +295,14 @@ def main(argv: list[str] | None = None) -> int:
     :rtype: int
     """
     options = build_parser().parse_args(argv)
-    return run_with_admin_key(
-        partial(publish, options.repo, options.ref, options.api_url)
+    publishing = partial(
+        publish,
+        options.repo,
+        options.ref,
+        options.api_url,
+        machines=tuple(options.machines),
     )
+    return run_with_admin_key(publishing)
 
 
 if __name__ == "__main__":
