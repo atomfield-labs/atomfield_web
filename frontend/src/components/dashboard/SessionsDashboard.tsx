@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import type { SessionMetadata, JobStatus } from '../../types/api';
 import { jobsService } from '../../api/services';
+import { useSignedInAccount } from '../../hooks/useAccount';
 import { UNTITLED } from '../../hooks/useSessionDraft';
+import { useWorkflows } from '../../hooks/useWorkflows';
 import {
   STATUS_TEXT,
   runStatus,
@@ -10,6 +12,20 @@ import {
   toDisplayStatus,
   type StatusLook,
 } from '../../utils/jobStatus';
+import {
+  CARD,
+  CARD_FACTS,
+  CARD_GRID,
+  CARD_TITLE,
+  NEW_CARD,
+  NEW_CARD_PLUS,
+  NEW_CARD_SIGN,
+  NEW_CARD_TITLE,
+  ON_HOVER,
+  PAGE,
+  PAGE_TITLE,
+  PAGE_WIDTH,
+} from './cardStyle';
 
 export type SessionInfo = SessionMetadata;
 
@@ -22,40 +38,11 @@ const DOT_COLOUR: Record<StatusLook, string> = {
   stopped: 'bg-slate-400',
 };
 
-const NEW_CARD = [
-  'flex flex-col items-center justify-center min-h-[160px] p-6 group',
-  'border-2 border-dashed border-orange-200 rounded-xl cursor-pointer',
-  'hover:border-orange-500 hover:bg-orange-50/40 transition-colors',
-].join(' ');
-const NEW_CARD_PLUS = [
-  'w-12 h-12 mb-3 rounded-full bg-orange-50 group-hover:bg-orange-100',
-  'flex items-center justify-center transition-colors',
-].join(' ');
-const NEW_CARD_SIGN =
-  'text-2xl font-bold text-orange-400 group-hover:text-orange-600';
-const NEW_CARD_TITLE = [
-  'text-lg font-bold text-slate-700 group-hover:text-orange-600',
-  'transition-colors',
-].join(' ');
-const CARD = [
-  'flex flex-col h-full min-h-[160px] p-6 bg-white rounded-xl',
-  'border border-slate-200 group-hover:border-orange-400',
-  'transition-colors',
-].join(' ');
 const CARD_STATUS = 'flex items-center gap-1.5 mb-3 text-xs text-slate-600';
-const CARD_TITLE = [
-  'mb-4 text-lg font-bold text-slate-800 group-hover:text-orange-600',
-  'transition-colors line-clamp-1',
-].join(' ');
-const CARD_FACTS = [
-  'mt-auto pt-3 border-t border-slate-100 text-xs font-medium',
-  'text-slate-500',
-].join(' ');
 const CARD_DELETE = [
   'absolute top-4 right-4 p-1.5 rounded-md text-slate-400',
   'hover:text-red-600 hover:bg-red-50 transition-all cursor-pointer',
-  'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
-  'pointer-coarse:opacity-100',
+  ON_HOVER,
 ].join(' ');
 const DELETE_ALL =
   'text-[13px] text-slate-500 hover:text-red-600 cursor-pointer';
@@ -150,6 +137,9 @@ const markSessionDeleted = (id: string) => {
 };
 
 export default function SessionsDashboard() {
+  const account = useSignedInAccount();
+  const workflows = useWorkflows();
+  const hasNone = account.role !== 'owner' && workflows?.length === 0;
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   useEffect(() => {
     let isSubscribed = true;
@@ -320,10 +310,10 @@ export default function SessionsDashboard() {
   };
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 p-8 pt-24">
-      <div className="max-w-6xl mx-auto">
+    <div className={PAGE}>
+      <div className={PAGE_WIDTH}>
         <div className="flex items-center justify-between gap-4 mb-8">
-          <h1 className="text-3xl font-extrabold text-slate-800">Sessions</h1>
+          <h1 className={PAGE_TITLE}>Sessions</h1>
           {sessions.length > 0 && (
             <button
               type="button"
@@ -335,13 +325,20 @@ export default function SessionsDashboard() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <a href="#pipeline/new" className={NEW_CARD}>
-            <div className={NEW_CARD_PLUS}>
-              <span className={NEW_CARD_SIGN}>+</span>
-            </div>
-            <h3 className={NEW_CARD_TITLE}>New pipeline</h3>
-          </a>
+        {hasNone && (
+          <p className="mb-6 text-sm text-slate-500">
+            No workflows yet. Ask your lab admin.
+          </p>
+        )}
+        <div className={CARD_GRID}>
+          {!hasNone && (
+            <a href="#pipeline/new" className={NEW_CARD}>
+              <div className={NEW_CARD_PLUS}>
+                <span className={NEW_CARD_SIGN}>+</span>
+              </div>
+              <h3 className={NEW_CARD_TITLE}>New pipeline</h3>
+            </a>
+          )}
 
           {sessions.map((session) => (
             <SessionCard

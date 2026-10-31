@@ -11,13 +11,16 @@ import AccountProvider from './components/auth/AccountProvider'
 import AccountPage from './components/auth/AccountPage'
 import SignInPage from './components/auth/SignInPage'
 import PairPage from './components/pairing/PairPage'
-import { useAccount } from './hooks/useAccount'
+import LabsPage from './components/labs/LabsPage'
+import LabPage from './components/labs/LabPage'
+import { useAccount, useSignedInAccount } from './hooks/useAccount'
 
 // Views for a signed-in person; the landing page is open to all.
 const PRIVATE_VIEWS = [
   '#dashboard',
   '#pipeline',
   '#admin',
+  '#lab',
   '#account',
   '#pair',
 ];
@@ -28,6 +31,9 @@ const CRASH_SCREEN = [
 ].join(' ');
 // #pair, or #pair/<code> from an agent's link.
 const PAIR_VIEW = /^#pair\/?/;
+const LABS_VIEW = '#labs';
+// #lab is the person's own; #lab/<id> any lab, for the owner.
+const LAB_VIEW = /^#lab\/?/;
 const PAGE = 'absolute inset-0 z-40 overflow-y-auto bg-slate-50';
 const EDITOR = 'absolute inset-0 z-50 overflow-hidden bg-slate-50';
 const LANDING = [
@@ -80,9 +86,25 @@ function useHash(): string {
   return hash;
 }
 
+/**
+ * #lab, or #lab/<id>; someone with no lab of their own sees the list.
+ */
+function LabView({ labId }: { labId: string }) {
+  const account = useSignedInAccount();
+  const id = labId || account.lab_id;
+  return id ? <LabPage key={id} labId={id} /> : <LabsPage />
+}
+
 function View({ hash }: { hash: string }) {
   if (hash.startsWith('#admin')) {
     return <div className={PAGE}><AdminDashboard /></div>
+  }
+  if (hash.startsWith(LABS_VIEW)) {
+    return <div className={PAGE}><LabsPage /></div>
+  }
+  if (hash.startsWith('#lab')) {
+    const labId = hash.replace(LAB_VIEW, '')
+    return <div className={PAGE}><LabView labId={labId} /></div>
   }
   if (hash.startsWith('#dashboard')) {
     return <div className={PAGE}><SessionsDashboard /></div>

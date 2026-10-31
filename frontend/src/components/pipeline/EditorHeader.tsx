@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from 'react';
 import { ArrowLeft } from 'lucide-react';
+import EditableTitle from '../EditableTitle';
 import RunOnPicker from './RunOnPicker';
 import StatusIcon from '../StatusIcon';
 import { useAccount } from '../../hooks/useAccount';
@@ -92,50 +92,6 @@ function ProgressLine({ progress }: { progress: RunProgress }) {
 }
 
 /**
- * The pipeline's name; click it to rename.
- */
-function Title({
-  title,
-  onRename,
-}: {
-  title: string;
-  onRename: (title: string) => void;
-}) {
-  const [editing, setEditing] = useState<string | null>(null);
-  if (editing === null) {
-    return (
-      <button
-        type="button"
-        onClick={() => setEditing(title)}
-        title="Rename"
-        className={TITLE}
-      >
-        {title}
-      </button>
-    );
-  }
-  const save = (event?: FormEvent) => {
-    event?.preventDefault();
-    onRename(editing);
-    setEditing(null);
-  };
-  return (
-    <form onSubmit={save}>
-      <input
-        autoFocus
-        value={editing}
-        onChange={(event) => setEditing(event.target.value)}
-        onBlur={() => save()}
-        onKeyDown={(event) => event.key === 'Escape' && setEditing(null)}
-        maxLength={100}
-        aria-label="Pipeline name"
-        className={TITLE_INPUT}
-      />
-    </form>
-  );
-}
-
-/**
  * The signed-in person's initials, leading to their account.
  */
 function Initials() {
@@ -180,7 +136,13 @@ export default function EditorHeader({
           Sessions
         </a>
         <span aria-hidden="true" className="w-px h-5 mr-1.5 bg-stone-200" />
-        <Title title={title} onRename={onRename} />
+        <EditableTitle
+          title={title}
+          onRename={onRename}
+          className={TITLE}
+          inputClassName={TITLE_INPUT}
+          label="Pipeline name"
+        />
         <RunStatus progress={progress} />
         {saveStatus === 'saving' && (
           <span className="ml-2 text-xs text-stone-400">Saving…</span>

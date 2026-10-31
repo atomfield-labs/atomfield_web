@@ -235,6 +235,44 @@ export interface AccountQuota {
 
 export type Role = 'owner' | 'admin' | 'user';
 
+// A workflow, as a lab's page names it.
+export interface WorkflowName {
+  id: string;
+  title: string;
+}
+
+// What a lab can be given: a named bundle of tasks and pipelines.
+export interface Workflow extends WorkflowName {
+  description: string;
+  tasks: string[];
+  pipelines: string[];
+}
+
+export interface LabSummary {
+  id: string;
+  name: string;
+  workflows: WorkflowName[];
+  people: number;
+}
+
+export interface LabPerson {
+  id: string;
+  email: string | null;
+  name: string | null;
+  role: Role;
+  workflows: string[];
+  last_seen_at: string | null;
+}
+
+export interface LabDetail {
+  id: string;
+  name: string;
+  // What the lab has, and what the one asking could give it.
+  workflows: WorkflowName[];
+  available: WorkflowName[];
+  people: LabPerson[];
+}
+
 export interface Account extends AccountQuota {
   is_active: boolean;
   role: Role;

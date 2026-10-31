@@ -92,8 +92,7 @@ function AccountLinks() {
 export default function Navbar() {
   const isVisible = useShownOnScroll();
   const { state } = useAccount();
-  const isOwner =
-    state.status === 'signed-in' && state.account.role === 'owner';
+  const role = state.status === 'signed-in' ? state.account.role : null;
 
   return (
     <nav className={`${BAR} ${isVisible ? SHOWN : HIDDEN}`}>
@@ -106,9 +105,19 @@ export default function Navbar() {
             <a href="#dashboard" className={LINK}>
               Sessions
             </a>
-            {isOwner && (
-              <a href="#admin" className={LINK}>
-                Admin
+            {role === 'owner' && (
+              <>
+                <a href="#labs" className={LINK}>
+                  Labs
+                </a>
+                <a href="#admin" className={LINK}>
+                  Admin
+                </a>
+              </>
+            )}
+            {role === 'admin' && (
+              <a href="#lab" className={LINK}>
+                Lab
               </a>
             )}
           </div>
