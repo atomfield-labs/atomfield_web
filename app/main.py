@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.auth import provision_house_target
 from app.api.router import api_router
 from app.catalog.catalog import Catalog
+from app.catalog.models import CatalogDocument
 from app.core.broker import create_redis
 from app.core.config import settings
 from app.core.security import display_prefix, hash_api_key
@@ -73,6 +74,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await engine.dispose()
 
 
+def starting_catalog() -> Catalog:
+    """
+    The catalog for runs without a release. A server holds no scripts,
+    so normally it is empty: no tasks until the first release.
+
+    :return: The catalog.
+    :rtype: Catalog
+    """
+    if settings.CATALOG_PATH:
+        return Catalog.from_path(Path(settings.CATALOG_PATH))
+    return Catalog(CatalogDocument(format_version=1, tasks=[]))
+
+
 async def set_up(app: FastAPI) -> None:
     """
     Prepare what the routes use. The schema is owned by migrations
@@ -80,14 +94,12 @@ async def set_up(app: FastAPI) -> None:
 
     The catalog is loaded, and checked, first: a broken catalog must
     stop the server here, not fail someone's submission later.
-    Releases bring their own catalogs; this file serves runs without
-    one.
+    Releases bring their own catalogs.
 
     :param app: FastAPI application instance.
     :type app: FastAPI
     """
-    unreleased = Catalog.from_path(Path(settings.CATALOG_PATH))
-    app.state.catalogs = ReleaseCatalogs(unreleased)
+    app.state.catalogs = ReleaseCatalogs(starting_catalog())
     app.state.store = create_store()
     async with AsyncSessionLocal() as session:
         await provision_admin(session)

@@ -6,3 +6,7 @@ __pycache__
 .DS_Store
 frontend/node_modules
 frontend/dist
+scripts_repo
+artifacts
+backups
+storage

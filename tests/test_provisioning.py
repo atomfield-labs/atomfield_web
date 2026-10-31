@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.config import settings
 from app.core.security import hash_api_key
-from app.main import provision_admin, provision_owners
+from app.main import provision_admin, provision_owners, starting_catalog
 from app.models.api_key import ApiKey
 from app.models.user import Role, User
 
@@ -213,3 +213,15 @@ def test_the_list_of_owners_counts_from_the_next_start(
     asyncio.run(start_with_owners(make_session))
     assert asyncio.run(role_of(make_session, joining)) == Role.OWNER
     assert asyncio.run(role_of(make_session, leaving)) == Role.USER
+
+
+def test_a_server_needs_no_scripts_to_start(monkeypatch: pytest.MonkeyPatch):
+    """
+    A server holds no scripts: with no catalog file it starts with no
+    tasks, until the first release.
+
+    :param monkeypatch: Clears the catalog setting.
+    :type monkeypatch: pytest.MonkeyPatch
+    """
+    monkeypatch.setattr(settings, "CATALOG_PATH", None)
+    assert not starting_catalog().tasks

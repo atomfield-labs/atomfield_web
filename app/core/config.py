@@ -75,7 +75,9 @@ class Settings(BaseSettings):
     BUNDLE_KEEP_DAYS: int = 7
 
     # --- Task catalog, written by the domain pack (afscripts) ---
-    CATALOG_PATH: str = str(_BASE_DIR / "scripts_repo" / "catalog.json")
+    # Catalog for runs without a release. A server holds no scripts, so
+    # normally there is none: no tasks until the first release.
+    CATALOG_PATH: str | None = None
     # Accept releases holding readable code. Only tests turn this on: a
     # release must never put source on a server or a cluster.
     RELEASES_MAY_HOLD_SOURCE: bool = False

@@ -73,7 +73,6 @@ services:
     volumes:
       - ./app:/app/app
       - ./migrations:/app/migrations:ro
-      - ./scripts_repo:/app/scripts_repo:ro
       - ./artifacts:/app/artifacts
       - ./backups:/app/backups
     restart: unless-stopped
@@ -96,7 +95,6 @@ services:
     volumes:
       - ./app:/app/app
       - ./agent:/app/agent
-      - ./scripts_repo:/app/scripts_repo:ro
       - ./artifacts:/app/artifacts
     depends_on:
       - api
