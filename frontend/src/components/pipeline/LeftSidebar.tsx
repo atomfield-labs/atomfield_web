@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import {
+  ChevronDown,
+  ChevronRight,
   Info,
   PanelLeftClose,
   PanelLeftOpen,
@@ -54,7 +56,7 @@ const PANEL = [
 ].join(' ');
 const ITEM = [
   'group flex items-center justify-between gap-2 min-h-9 px-2.5 rounded-lg',
-  'text-sm text-stone-900 hover:bg-stone-100 cursor-grab',
+  'text-sm text-stone-900 hover:bg-orange-50 cursor-grab',
   'active:cursor-grabbing',
 ].join(' ');
 const OPEN_BUTTON = [
@@ -74,7 +76,13 @@ const SEARCH_INPUT = [
   'flex-1 min-w-0 bg-transparent text-sm text-stone-900',
   'outline-none',
 ].join(' ');
-const GROUP_HEADING = 'px-2.5 pt-1.5 pb-1 text-xs font-medium text-stone-500';
+const GROUP_BUTTON = [
+  'w-full flex items-center justify-between py-1.5 px-2.5 rounded-md',
+  'bg-orange-50/90 hover:bg-orange-100 border border-orange-200/80',
+  'transition-colors cursor-pointer disabled:cursor-default select-none',
+].join(' ');
+const GROUP_LABEL =
+  'text-[11px] font-bold tracking-wide uppercase text-orange-600';
 const INFO_BUTTON = 'shrink-0 text-stone-400 opacity-0 group-hover:opacity-100';
 const TOOLTIP = [
   'fixed z-50 pointer-events-none w-64 p-3 rounded-lg bg-stone-900/95',
@@ -138,7 +146,18 @@ export default function LeftSidebar() {
   const [isCollapsed, setIsCollapsed] = useState(
     () => typeof window !== 'undefined' && window.innerWidth < 768
   );
-  const groups = matching(taskGroups(tasks), query.trim().toLowerCase());
+  // Groups start open; only the ones a person closes are recorded.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const searchText = query.trim().toLowerCase();
+  const searching = searchText !== '';
+  const groups = matching(taskGroups(tasks), searchText);
+
+  const toggleGroup = (groupId: string) => {
+    setOpenGroups((prev) => ({
+      ...prev,
+      [groupId]: !(prev[groupId] ?? true),
+    }));
+  };
 
   const showTooltip = (event: React.MouseEvent, item: SidebarItem) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -209,30 +228,49 @@ export default function LeftSidebar() {
                 No task matches.
               </p>
             ) : (
-              groups.map((group) => (
-                <section key={group.id} className="mb-3">
-                  <h2 className={GROUP_HEADING}>{group.label}</h2>
-                  {group.items.map((item) => (
-                    <div
-                      key={item.id}
-                      draggable
-                      onDragStart={(event) => startDrag(event, item)}
-                      className={ITEM}
+              groups.map((group) => {
+                const isOpen = searching || (openGroups[group.id] ?? true);
+                const Chevron = isOpen ? ChevronDown : ChevronRight;
+                return (
+                  <section key={group.id} className="mb-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(group.id)}
+                      disabled={searching}
+                      aria-expanded={isOpen}
+                      className={GROUP_BUTTON}
                     >
-                      <span className="truncate">{item.title}</span>
-                      <button
-                        type="button"
-                        onMouseEnter={(event) => showTooltip(event, item)}
-                        onMouseLeave={() => setTooltip(null)}
-                        className={INFO_BUTTON}
-                        aria-label={`About ${item.title}`}
-                      >
-                        <Info size={14} />
-                      </button>
-                    </div>
-                  ))}
-                </section>
-              ))
+                      <span className={GROUP_LABEL}>{group.label}</span>
+                      <Chevron className="w-3.5 h-3.5 text-orange-600" />
+                    </button>
+                    {isOpen && (
+                      <div className="mt-1 space-y-0.5">
+                        {group.items.map((item) => (
+                          <div
+                            key={item.id}
+                            draggable
+                            onDragStart={(event) => startDrag(event, item)}
+                            className={ITEM}
+                          >
+                            <span className="truncate">{item.title}</span>
+                            <button
+                              type="button"
+                              onMouseEnter={(event) =>
+                                showTooltip(event, item)
+                              }
+                              onMouseLeave={() => setTooltip(null)}
+                              className={INFO_BUTTON}
+                              aria-label={`About ${item.title}`}
+                            >
+                              <Info size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                );
+              })
             )}
           </div>
         </div>
