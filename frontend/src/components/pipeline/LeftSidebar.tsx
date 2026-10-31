@@ -69,11 +69,11 @@ const ICON_BUTTON = [
   'cursor-pointer',
 ].join(' ');
 const SEARCH_BOX = [
-  'flex-1 flex items-center gap-2 h-10 px-3 rounded-[10px]',
+  'flex-1 min-w-0 flex items-center gap-2 h-10 px-3 rounded-[10px]',
   'bg-stone-100',
 ].join(' ');
 const SEARCH_INPUT = [
-  'flex-1 min-w-0 bg-transparent text-sm text-stone-900',
+  'flex-1 w-full min-w-0 bg-transparent text-sm text-stone-900',
   'outline-none',
 ].join(' ');
 const GROUP_BUTTON = [
