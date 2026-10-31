@@ -6,9 +6,9 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
-    get_current_catalog,
     get_current_user,
     get_job_queue,
+    get_my_catalog,
     get_optional_user,
     get_owned_job,
     get_store,
@@ -49,7 +49,7 @@ async def submit_job(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     queue: RedisJobQueue = Depends(get_job_queue),
-    current: CurrentCatalog = Depends(get_current_catalog),
+    current: CurrentCatalog = Depends(get_my_catalog),
 ):
     """
     Submit a standalone simulation job to the queue.
@@ -62,8 +62,8 @@ async def submit_job(
     :type db: AsyncSession
     :param queue: Job queue the job is sent to.
     :type queue: RedisJobQueue
-    :param current: The newest release, which the job is checked
-        against and pinned to.
+    :param current: The newest release as the caller sees it, which the
+        job is checked against and pinned to.
     :type current: CurrentCatalog
     :return: Created Job entity with Pending status.
     :rtype: Job
@@ -89,7 +89,7 @@ async def submit_pipeline(
     db: AsyncSession = Depends(get_db),
     queue: RedisJobQueue = Depends(get_job_queue),
     store: ArtifactStore = Depends(get_store),
-    current: CurrentCatalog = Depends(get_current_catalog),
+    current: CurrentCatalog = Depends(get_my_catalog),
 ):
     """
     Submit a DAG pipeline of simulation jobs.
@@ -104,8 +104,8 @@ async def submit_pipeline(
     :type queue: RedisJobQueue
     :param store: Where attached files are kept for agents.
     :type store: ArtifactStore
-    :param current: The newest release, which every node is checked
-        against and the run is pinned to.
+    :param current: The newest release as the caller sees it, which
+        every node is checked against and the run is pinned to.
     :type current: CurrentCatalog
     :return: Pipeline submission receipt and job ID mappings.
     :rtype: dict

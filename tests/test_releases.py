@@ -167,7 +167,7 @@ def test_a_run_keeps_its_release_when_a_newer_one_is_published(
     headers = make_user_headers()
     first, second = submit_chain(client, headers)
     publish(client, admin_headers, "2.0.0", title="Toy two")
-    tasks = client.get("/api/task-definitions").json()
+    tasks = client.get("/api/task-definitions", headers=headers).json()
     assert tasks[0]["title"] == "Toy two"
 
     parent = claim(client).json()

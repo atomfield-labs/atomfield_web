@@ -3,7 +3,7 @@ Shared FastAPI route dependencies for database, cache, and authentication.
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from uuid import UUID
 
 from fastapi import Cookie, Depends, Header, Request
@@ -21,11 +21,13 @@ from app.core.rate_limit import FixedWindowRateLimiter, RateLimit
 from app.core.security import API_KEY_HEADER, SESSION_COOKIE, hash_api_key
 from app.db.session import get_db
 from app.events.bus import EventBus
+from app.labs.access import allowed_workflows
 from app.models.api_key import ApiKey
 from app.models.browser_session import BrowserSession
 from app.models.job import Job
+from app.models.lab import Lab
 from app.models.run import Run
-from app.models.user import User
+from app.models.user import Role, User
 from app.queue.job_queue import RedisJobQueue
 from app.releases.catalogs import CurrentCatalog, ReleaseCatalogs
 from app.sign_in.flow import SignInFlow
@@ -52,7 +54,8 @@ CROSS_SITE_MESSAGE = (
     "A signed-in browser may change things only from AtomField's pages."
 )
 NOT_OWNER_MESSAGE = "Only the platform's owner may do this."
-BROWSER_ONLY_MESSAGE = "Keys are made and revoked in the web app."
+BROWSER_ONLY_MESSAGE = "This is done in the web app, signed in."
+LAB_KIND = "Lab"
 
 
 async def get_redis(request: Request) -> Redis:
@@ -378,6 +381,73 @@ async def require_owner(user: User = Depends(get_current_user)) -> User:
     if not user.is_owner:
         raise forbidden(NOT_OWNER_MESSAGE)
     return user
+
+
+async def require_browser_owner(
+    user: User = Depends(get_browser_user),
+) -> User:
+    """
+    Let only the platform's owner through, signed in on a browser.
+
+    :param user: The person, signed in.
+    :type user: User
+    :return: The owner.
+    :rtype: User
+    :raises HTTPException: 403 for anyone else.
+    """
+    if not user.is_owner:
+        raise forbidden(NOT_OWNER_MESSAGE)
+    return user
+
+
+async def get_managed_lab(
+    lab_id: UUID,
+    user: User = Depends(get_browser_user),
+    db: AsyncSession = Depends(get_db),
+) -> Lab:
+    """
+    A lab the caller runs: any for the owner, their own for its admin.
+
+    :param lab_id: Lab id from the URL path.
+    :type lab_id: UUID
+    :param user: The person, signed in.
+    :type user: User
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :return: The lab.
+    :rtype: Lab
+    :raises HTTPException: 404 if missing or someone else's.
+    """
+    lab = await db.get(Lab, lab_id)
+    its_admin = user.role == Role.ADMIN and user.lab_id == lab_id
+    if lab is None or not (user.is_owner or its_admin):
+        raise not_found(LAB_KIND, lab_id)
+    return lab
+
+
+async def get_my_catalog(
+    user: User = Depends(get_current_user),
+    current: CurrentCatalog = Depends(get_current_catalog),
+    db: AsyncSession = Depends(get_db),
+) -> CurrentCatalog:
+    """
+    The catalog as this person sees it: the one gate behind the task
+    menu, the templates and every submission. What is outside their
+    workflows is not there for them; an owner sees everything.
+
+    :param user: The person making the request.
+    :type user: User
+    :param current: The current release and its whole catalog.
+    :type current: CurrentCatalog
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :return: The release, and the catalog limited to this person.
+    :rtype: CurrentCatalog
+    """
+    if user.is_owner:
+        return current
+    allowed = await allowed_workflows(db, user)
+    return replace(current, catalog=current.catalog.limited_to(allowed))
 
 
 def may_act_on(user: User, owner_id: UUID | None) -> bool:

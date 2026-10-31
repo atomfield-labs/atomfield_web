@@ -205,7 +205,10 @@ def check_task_request(
     try:
         task = catalog.get(task_id)
     except UnknownTaskError:
-        message = f"Unknown task {task_id!r}; see GET /api/task-definitions"
+        message = (
+            f"Task {task_id!r} isn't available to you; "
+            "see GET /api/task-definitions"
+        )
         name_location = (*location, "script_name")
         error = make_error(name_location, "unknown_task", message, task_id)
         raise RequestValidationError([error]) from None

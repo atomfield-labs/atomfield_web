@@ -11,6 +11,7 @@ from app.api.routes.auth import router as auth_router
 from app.api.routes.catalog import router as catalog_router
 from app.api.routes.data_packs import router as data_packs_router
 from app.api.routes.jobs import router as jobs_router
+from app.api.routes.labs import router as labs_router
 from app.api.routes.pairings import agent_router as pairing_agent_router
 from app.api.routes.pairings import router as pairings_router
 from app.api.routes.releases import router as releases_router
@@ -31,6 +32,7 @@ api_router.include_router(catalog_router)
 api_router.include_router(releases_router)
 api_router.include_router(data_packs_router)
 api_router.include_router(jobs_router)
+api_router.include_router(labs_router)
 api_router.include_router(runs_router)
 api_router.include_router(storage_router)
 api_router.include_router(targets_router)

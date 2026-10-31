@@ -23,14 +23,30 @@ def error_locations(response) -> list[list]:
     return [item["loc"] for item in response.json()["detail"]]
 
 
-def test_task_definitions_are_public(client: TestClient):
+def test_the_catalog_needs_someone_to_show_it_to(client: TestClient):
     """
-    The menu loads without a key, in catalog order.
+    Nobody can read what the catalog holds without signing in or a key.
 
     :param client: In-process API client.
     :type client: TestClient
     """
-    response = client.get("/api/task-definitions")
+    assert client.get("/api/task-definitions").status_code == 401
+    assert client.get("/api/pipeline-templates").status_code == 401
+    assert client.get("/api/workflows").status_code == 401
+
+
+def test_task_definitions_load_in_catalog_order(
+    client: TestClient, make_user_headers: UserHeadersFactory
+):
+    """
+    The menu of someone with every workflow, in catalog order.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param make_user_headers: Factory registering a user key.
+    :type make_user_headers: UserHeadersFactory
+    """
+    response = client.get("/api/task-definitions", headers=make_user_headers())
     assert response.status_code == 200
     assert [task["id"] for task in response.json()] == [
         "toy_opt",
@@ -38,15 +54,21 @@ def test_task_definitions_are_public(client: TestClient):
     ]
 
 
-def test_pipeline_templates_are_public(client: TestClient):
+def test_pipeline_templates_load_whole(
+    client: TestClient, make_user_headers: UserHeadersFactory
+):
     """
-    The ready-made pipelines load without a key, with their steps in
-    order and their structures' text.
+    The ready-made pipelines of someone with every workflow, with their
+    steps in order and their structures' text.
 
     :param client: In-process API client.
     :type client: TestClient
+    :param make_user_headers: Factory registering a user key.
+    :type make_user_headers: UserHeadersFactory
     """
-    response = client.get("/api/pipeline-templates")
+    response = client.get(
+        "/api/pipeline-templates", headers=make_user_headers()
+    )
     assert response.status_code == 200
     (template,) = response.json()
     assert template["id"] == "toy_demo"
