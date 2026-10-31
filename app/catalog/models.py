@@ -29,6 +29,9 @@ NODE_KEY_PATTERN = r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}"
 FILE_NAME_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}"
 # A template's example structures travel inside the catalog.
 MAX_TEMPLATE_STRUCTURE_CHARS = 64 * 1024
+# A workflow's id is stored with what each lab and person may use.
+WORKFLOW_ID_LENGTH = 64
+WORKFLOW_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
 # Variables the agent sets for every job; a data pack may not take one.
 RESERVED_ENVIRONMENT = frozenset(
     {
@@ -295,16 +298,31 @@ class PipelineTemplate(ContractModel):
         return self
 
 
+class Workflow(ContractModel):
+    """
+    What a lab can be given: a named bundle of tasks and ready-made
+    pipelines. A task may be in several workflows.
+    """
+
+    id: str = Field(pattern=WORKFLOW_ID_PATTERN, max_length=WORKFLOW_ID_LENGTH)
+    title: str
+    description: str
+    tasks: list[str]
+    pipelines: list[str] = []
+
+
 class CatalogDocument(ContractModel):
     """
-    The whole ``catalog.json`` file: the tasks, and the ready-made
-    pipelines built from them.
+    The whole ``catalog.json`` file: the tasks, the ready-made pipelines
+    built from them, and the workflows that bundle both. Catalogs from
+    before workflows have none.
     """
 
     # Only format 1 exists; a newer file must fail loudly, not half-load.
     format_version: Literal[1]
     tasks: list[TaskDefinition]
     pipelines: list[PipelineTemplate] = []
+    workflows: list[Workflow] = []
 
     @model_validator(mode="after")
     def check_ids_are_unique(self) -> "CatalogDocument":
@@ -331,4 +349,78 @@ class CatalogDocument(ContractModel):
         ids = (template.id for template in self.pipelines)
         if repeated := given_twice(ids):
             raise ValueError(f"Template ids used twice: {repeated}")
+        return self
+
+    @model_validator(mode="after")
+    def check_workflow_ids_are_unique(self) -> "CatalogDocument":
+        """
+        Reject a catalog in which two workflows share an id.
+
+        :return: The validated document.
+        :rtype: CatalogDocument
+        :raises ValueError: If any workflow id appears more than once.
+        """
+        ids = (workflow.id for workflow in self.workflows)
+        if repeated := given_twice(ids):
+            raise ValueError(f"Workflow ids used twice: {repeated}")
+        return self
+
+    @model_validator(mode="after")
+    def check_workflows_name_what_exists(self) -> "CatalogDocument":
+        """
+        Reject a workflow naming a task or pipeline the catalog lacks.
+
+        :return: The validated document.
+        :rtype: CatalogDocument
+        :raises ValueError: On the first such workflow.
+        """
+        tasks = {task.id for task in self.tasks}
+        pipelines = {template.id for template in self.pipelines}
+        for workflow in self.workflows:
+            unknown = set(workflow.tasks) - tasks
+            unknown |= set(workflow.pipelines) - pipelines
+            if unknown:
+                raise ValueError(
+                    f"Workflow {workflow.id} names unknown {sorted(unknown)}"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def check_pipelines_fit_their_workflows(self) -> "CatalogDocument":
+        """
+        Reject a workflow holding a pipeline without all of its tasks:
+        someone given it could open the pipeline but not run it.
+
+        :return: The validated document.
+        :rtype: CatalogDocument
+        :raises ValueError: On the first such pipeline.
+        """
+        templates = {template.id: template for template in self.pipelines}
+        for workflow in self.workflows:
+            for name in workflow.pipelines:
+                needed = {step.task for step in templates[name].steps}
+                if missing := sorted(needed - set(workflow.tasks)):
+                    raise ValueError(
+                        f"Workflow {workflow.id}: {name} also needs {missing}"
+                    )
+        return self
+
+    @model_validator(mode="after")
+    def check_workflows_leave_nothing_out(self) -> "CatalogDocument":
+        """
+        Reject workflows that leave a task or pipeline out: only the
+        platform's owner could ever use it.
+
+        :return: The validated document.
+        :rtype: CatalogDocument
+        :raises ValueError: If anything is in no workflow.
+        """
+        if not self.workflows:
+            return self
+        everything = {task.id for task in self.tasks}
+        everything |= {template.id for template in self.pipelines}
+        held = {name for item in self.workflows for name in item.tasks}
+        held |= {name for item in self.workflows for name in item.pipelines}
+        if left_out := sorted(everything - held):
+            raise ValueError(f"In no workflow: {left_out}")
         return self

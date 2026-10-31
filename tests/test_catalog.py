@@ -162,9 +162,100 @@ def test_broken_templates_are_rejected(break_it, message: str):
     :type message: str
     """
     document = fixture_document()
+    del document["workflows"]
     break_it(document)
     with pytest.raises(ValueError, match=message):
         Catalog(CatalogDocument.model_validate(document))
+
+
+@pytest.mark.parametrize(
+    ("break_it", "message"),
+    [
+        (
+            lambda doc: doc["workflows"][1].update(id="toy_everything"),
+            "Workflow ids used twice",
+        ),
+        (
+            lambda doc: doc["workflows"][1].update(id="../toy"),
+            "should match pattern",
+        ),
+        (
+            lambda doc: doc["workflows"][1].update(tasks=["toy_md"]),
+            "names unknown",
+        ),
+        (
+            lambda doc: doc["workflows"][1].update(pipelines=["toy_md"]),
+            "names unknown",
+        ),
+        (
+            lambda doc: doc["workflows"][1].update(pipelines=["toy_demo"]),
+            "also needs",
+        ),
+        (
+            lambda doc: doc["workflows"].pop(0),
+            "In no workflow",
+        ),
+    ],
+    ids=["twice", "id", "task", "pipeline", "incomplete", "left-out"],
+)
+def test_broken_workflows_are_rejected(break_it, message: str):
+    """
+    A workflow reusing an id, naming what is not there or holding a
+    pipeline without its tasks stops the catalog from loading, and so
+    does leaving anything outside every workflow.
+
+    :param break_it: Mutates the fixture document.
+    :type break_it: Callable[[dict], None]
+    :param message: Text expected in the error.
+    :type message: str
+    """
+    document = fixture_document()
+    break_it(document)
+    with pytest.raises(ValidationError, match=message):
+        CatalogDocument.model_validate(document)
+
+
+def test_a_catalog_from_before_workflows_still_loads():
+    """
+    Older releases have no workflows; their catalogs load with none.
+    """
+    document = fixture_document()
+    del document["workflows"]
+    assert not Catalog(CatalogDocument.model_validate(document)).workflows
+
+
+def test_a_limited_catalog_holds_only_what_its_workflows_hold(catalog: Catalog):
+    """
+    Limited to one workflow, the catalog lists only its tasks and
+    pipelines and refuses the rest as unknown; the whole catalog is
+    untouched.
+
+    :param catalog: The fixture catalog.
+    :type catalog: Catalog
+    """
+    limited = catalog.limited_to({"toy_opt_only", "no_such_workflow"})
+    assert list(limited.workflows) == ["toy_opt_only"]
+    assert list(limited.tasks) == ["toy_opt"]
+    assert not limited.templates
+    assert limited.validate_values("toy_opt", {})["charge"] == 0
+    with pytest.raises(UnknownTaskError):
+        limited.validate_values("toy_network", {})
+    assert set(catalog.tasks) == {"toy_opt", "toy_network"}
+    whole = catalog.limited_to({"toy_everything"})
+    assert list(whole.templates) == ["toy_demo"]
+    assert not catalog.limited_to(set()).tasks
+
+
+@pytest.mark.skipif(not REAL_CATALOG.exists(), reason="no scripts_repo")
+def test_the_real_workflows_keep_the_pipelines_apart():
+    """
+    Someone given only Quantum ESPRESSO gets its pipeline and tasks,
+    and nothing of the nanoreactor.
+    """
+    limited = Catalog.from_path(REAL_CATALOG).limited_to({"quantum_espresso"})
+    assert list(limited.templates) == ["ahc"]
+    assert "ahc_scf" in limited.tasks
+    assert "xtb_opt" not in limited.tasks
 
 
 def test_validation_fills_in_defaults(catalog: Catalog):

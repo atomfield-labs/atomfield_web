@@ -2,10 +2,11 @@
 Load the task catalog once and look tasks up by id.
 """
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
+from copy import copy
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -13,8 +14,12 @@ from app.catalog.models import (
     CatalogDocument,
     PipelineTemplate,
     TaskDefinition,
+    Workflow,
 )
 from app.catalog.parameters import build_parameter_model, validate_values
+
+# What a mapping holds: tasks, templates or workflows.
+Item = TypeVar("Item")
 
 
 class UnknownTaskError(LookupError):
@@ -35,6 +40,23 @@ def accepts_file(task: TaskDefinition, filename: str) -> bool:
     :rtype: bool
     """
     return any(port.takes(filename) for port in task.inputs)
+
+
+def only_named(
+    items: Mapping[str, Item], names: Collection[str]
+) -> Mapping[str, Item]:
+    """
+    The entries of a mapping with these names, read-only.
+
+    :param items: The mapping.
+    :type items: Mapping[str, Item]
+    :param names: The names to keep.
+    :type names: Collection[str]
+    :return: The kept entries.
+    :rtype: Mapping[str, Item]
+    """
+    kept = {name: item for name, item in items.items() if name in names}
+    return MappingProxyType(kept)
 
 
 class Catalog:
@@ -62,6 +84,9 @@ class Catalog:
         self.templates: Mapping[str, PipelineTemplate] = MappingProxyType(
             {template.id: template for template in document.pipelines}
         )
+        self.workflows: Mapping[str, Workflow] = MappingProxyType(
+            {workflow.id: workflow for workflow in document.workflows}
+        )
         for template in document.pipelines:
             self.check_template(template)
 
@@ -78,6 +103,28 @@ class Catalog:
         """
         text = path.read_text(encoding="utf-8")
         return cls(CatalogDocument.model_validate_json(text))
+
+    def limited_to(self, workflow_ids: Collection[str]) -> "Catalog":
+        """
+        This catalog as someone given only these workflows sees it:
+        anything outside them is simply not there, so listing a task
+        and refusing it cannot disagree. Parameter models stay shared:
+        every lookup goes through ``tasks`` first.
+
+        :param workflow_ids: The workflows; unknown ids are ignored.
+        :type workflow_ids: Collection[str]
+        :return: The limited catalog.
+        :rtype: Catalog
+        """
+        chosen = only_named(self.workflows, workflow_ids)
+        workflows = chosen.values()
+        tasks = {name for item in workflows for name in item.tasks}
+        templates = {name for item in workflows for name in item.pipelines}
+        limited = copy(self)
+        limited.workflows = chosen
+        limited.tasks = only_named(self.tasks, tasks)
+        limited.templates = only_named(self.templates, templates)
+        return limited
 
     def get(self, task_id: str) -> TaskDefinition:
         """
