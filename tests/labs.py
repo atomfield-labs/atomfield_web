@@ -17,8 +17,9 @@ TEST_LAB = "Test lab"
 EVERY_WORKFLOW = (
     "nanoreactor",
     "quantum_espresso",
-    "toy_everything",
-    "toy_opt_only",
+    "wannier90",
+    "toy_chain",
+    "toy_other",
 )
 
 

@@ -87,6 +87,13 @@ class Catalog:
         self.workflows: Mapping[str, Workflow] = MappingProxyType(
             {workflow.id: workflow for workflow in document.workflows}
         )
+        self.workflow_by_task: Mapping[str, str] = MappingProxyType(
+            {
+                task: workflow.id
+                for workflow in document.workflows
+                for task in workflow.tasks
+            }
+        )
         for template in document.pipelines:
             self.check_template(template)
 
@@ -125,6 +132,18 @@ class Catalog:
         limited.tasks = only_named(self.tasks, tasks)
         limited.templates = only_named(self.templates, templates)
         return limited
+
+    def workflow_of(self, task_id: str) -> str | None:
+        """
+        The package a task belongs to, whose file it runs from.
+
+        :param task_id: Task id.
+        :type task_id: str
+        :return: The workflow's id; None in a catalog from before
+            workflows.
+        :rtype: str | None
+        """
+        return self.workflow_by_task.get(task_id)
 
     def get(self, task_id: str) -> TaskDefinition:
         """

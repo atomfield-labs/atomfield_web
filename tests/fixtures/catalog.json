@@ -86,6 +86,18 @@
         {"name": "tags", "flag": "-tags", "kind": "string", "multiple": true},
         {"name": "copy", "flag": "-copy", "kind": "string", "default": "a"}
       ]
+    },
+    {
+      "id": "toy_solo",
+      "title": "Toy solo",
+      "description": "Needs nothing at all.",
+      "category": "Optimizers",
+      "module": "toy.solo_driver",
+      "resources": {"cpus": 1, "memory_mb": 100, "walltime_minutes": 5},
+      "platform_flags": {"job_name": "-JOBNAME", "cpus": "-parallel"},
+      "inputs": [],
+      "outputs": [],
+      "parameters": []
     }
   ],
   "pipelines": [
@@ -120,17 +132,17 @@
   ],
   "workflows": [
     {
-      "id": "toy_everything",
-      "title": "Toy everything",
-      "description": "Both toy tasks and their pipeline.",
+      "id": "toy_chain",
+      "title": "Toy chain",
+      "description": "Both chained tasks and their pipeline.",
       "tasks": ["toy_network", "toy_opt"],
       "pipelines": ["toy_demo"]
     },
     {
-      "id": "toy_opt_only",
-      "title": "Toy optimization",
-      "description": "Only the optimization.",
-      "tasks": ["toy_opt"]
+      "id": "toy_other",
+      "title": "Toy other",
+      "description": "A task of its own.",
+      "tasks": ["toy_solo"]
     }
   ]
 }

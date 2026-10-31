@@ -70,7 +70,7 @@ def test_a_wheel_is_read_without_running_it():
     assert (contents.name, contents.version) == ("toy", "1.2.0")
     assert contents.sha256 == hashlib.sha256(data).hexdigest()
     task_ids = [task.id for task in contents.catalog.tasks]
-    assert task_ids == ["toy_opt", "toy_network"]
+    assert task_ids == ["toy_opt", "toy_network", "toy_solo"]
 
 
 @pytest.mark.parametrize(

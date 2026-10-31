@@ -31,12 +31,13 @@ WORKFLOWS = "/api/workflows"
 SUBMIT = "/api/jobs/submit"
 SUBMIT_PIPELINE = "/api/jobs/pipeline/submit"
 KEYS = "/api/auth/me/keys"
-# The fixture catalog's workflows: one holds both tasks and the
-# pipeline, the other only the optimization.
-EVERYTHING = "toy_everything"
-OPT_ONLY = "toy_opt_only"
+# The fixture catalog's workflows: one holds two tasks and their
+# pipeline, the other a task of its own.
+CHAIN = "toy_chain"
+OTHER = "toy_other"
 OPT = "toy_opt"
 NETWORK = "toy_network"
+SOLO = "toy_solo"
 DEMO = "toy_demo"
 
 
@@ -70,7 +71,7 @@ def become(client: TestClient, google: FakeGoogle, account: Account) -> None:
 def new_lab(
     client: TestClient,
     google: FakeGoogle,
-    workflows: tuple[str, ...] = (OPT_ONLY,),
+    workflows: tuple[str, ...] = (OTHER,),
 ) -> tuple[str, Account]:
     """
     The owner makes a lab holding these workflows, with a new admin.
@@ -164,15 +165,15 @@ def test_workflows_pass_from_the_owner_through_the_admin_to_a_user(
     :param google: The fake Google.
     :type google: FakeGoogle
     """
-    lab_id, admin = new_lab(client, google, (OPT_ONLY,))
+    lab_id, admin = new_lab(client, google, (OTHER,))
 
     become(client, google, admin)
     assert client.get(MY_ACCOUNT).json()["role"] == Role.ADMIN
     assert client.get(MY_ACCOUNT).json()["lab_id"] == lab_id
-    assert ids_at(client, TASKS) == [OPT]
+    assert ids_at(client, TASKS) == [SOLO]
     lab = client.get(f"{LABS}/{lab_id}").json()
-    assert [item["id"] for item in lab["workflows"]] == [OPT_ONLY]
-    assert [item["id"] for item in lab["available"]] == [OPT_ONLY]
+    assert [item["id"] for item in lab["workflows"]] == [OTHER]
+    assert [item["id"] for item in lab["available"]] == [OTHER]
     person, person_id = add_person(client, lab_id)
 
     become(client, google, person)
@@ -181,11 +182,11 @@ def test_workflows_pass_from_the_owner_through_the_admin_to_a_user(
     assert ids_at(client, WORKFLOWS) == []
 
     become(client, google, admin)
-    assert tick(client, lab_id, person_id, OPT_ONLY).status_code == 200
+    assert tick(client, lab_id, person_id, OTHER).status_code == 200
 
     become(client, google, person)
-    assert ids_at(client, TASKS) == [OPT]
-    assert ids_at(client, WORKFLOWS) == [OPT_ONLY]
+    assert ids_at(client, TASKS) == [SOLO]
+    assert ids_at(client, WORKFLOWS) == [OTHER]
     assert ids_at(client, TEMPLATES) == []
 
 
@@ -200,7 +201,7 @@ def test_a_workflow_brings_its_pipelines(
     :param google: The fake Google.
     :type google: FakeGoogle
     """
-    _, admin = new_lab(client, google, (EVERYTHING,))
+    _, admin = new_lab(client, google, (CHAIN,))
     become(client, google, admin)
     assert ids_at(client, TEMPLATES) == [DEMO]
     assert ids_at(client, TASKS) == [OPT, NETWORK]
@@ -218,8 +219,8 @@ def test_the_owner_sees_and_runs_everything(
     :type google: FakeGoogle
     """
     become(client, google, OWNER)
-    assert set(ids_at(client, WORKFLOWS)) == {EVERYTHING, OPT_ONLY}
-    assert ids_at(client, TASKS) == [OPT, NETWORK]
+    assert set(ids_at(client, WORKFLOWS)) == {CHAIN, OTHER}
+    assert ids_at(client, TASKS) == [OPT, NETWORK, SOLO]
     body = {
         "script_name": NETWORK,
         "parameters": {"method": "smiles"},
@@ -241,10 +242,10 @@ def test_a_task_outside_someones_workflows_cannot_run(
     :param google: The fake Google.
     :type google: FakeGoogle
     """
-    lab_id, admin = new_lab(client, google, (OPT_ONLY,))
+    lab_id, admin = new_lab(client, google, (OTHER,))
     become(client, google, admin)
     person, person_id = add_person(client, lab_id)
-    tick(client, lab_id, person_id, OPT_ONLY)
+    tick(client, lab_id, person_id, OTHER)
     become(client, google, person)
     key = client.post(KEYS, json={"label": "script"}, headers=OWN_PAGE).json()
     with_key = {API_KEY_HEADER: key["api_key"]}
@@ -263,7 +264,7 @@ def test_a_task_outside_someones_workflows_cannot_run(
             SUBMIT_PIPELINE, json=other_pipeline, headers=headers
         )
         assert pipeline.status_code == 422
-    mine = {"script_name": OPT, "parameters": {}}
+    mine = {"script_name": SOLO, "parameters": {}}
     assert client.post(SUBMIT, json=mine, headers=with_key).status_code == 202
 
 
@@ -279,24 +280,24 @@ def test_taking_a_workflow_from_a_lab_stops_everyone_at_once(
     :param google: The fake Google.
     :type google: FakeGoogle
     """
-    lab_id, admin = new_lab(client, google, (OPT_ONLY,))
+    lab_id, admin = new_lab(client, google, (OTHER,))
     become(client, google, admin)
     person, person_id = add_person(client, lab_id)
-    tick(client, lab_id, person_id, OPT_ONLY)
+    tick(client, lab_id, person_id, OTHER)
 
     become(client, google, OWNER)
     client.patch(f"{LABS}/{lab_id}", json={"workflows": []}, headers=OWN_PAGE)
     for someone in (person, admin):
         become(client, google, someone)
         assert ids_at(client, TASKS) == []
-    body = {"script_name": OPT, "parameters": {}}
+    body = {"script_name": SOLO, "parameters": {}}
     assert client.post(SUBMIT, json=body, headers=OWN_PAGE).status_code == 422
 
     become(client, google, OWNER)
-    given = {"workflows": [OPT_ONLY]}
+    given = {"workflows": [OTHER]}
     client.patch(f"{LABS}/{lab_id}", json=given, headers=OWN_PAGE)
     become(client, google, person)
-    assert ids_at(client, TASKS) == [OPT]
+    assert ids_at(client, TASKS) == [SOLO]
 
 
 def test_an_admin_gives_only_what_the_lab_has(
@@ -311,14 +312,14 @@ def test_an_admin_gives_only_what_the_lab_has(
     :param google: The fake Google.
     :type google: FakeGoogle
     """
-    lab_id, admin = new_lab(client, google, (OPT_ONLY,))
+    lab_id, admin = new_lab(client, google, (OTHER,))
     become(client, google, admin)
     _, person_id = add_person(client, lab_id)
 
-    refused = tick(client, lab_id, person_id, EVERYTHING)
+    refused = tick(client, lab_id, person_id, CHAIN)
     assert refused.status_code == 422
-    assert EVERYTHING in refused.json()["detail"]
-    given = {"workflows": [EVERYTHING]}
+    assert CHAIN in refused.json()["detail"]
+    given = {"workflows": [CHAIN]}
     more = client.patch(f"{LABS}/{lab_id}", json=given, headers=OWN_PAGE)
     assert more.status_code == 403
     assert client.get(LABS).status_code == 403
@@ -339,7 +340,7 @@ def test_only_the_owner_changes_roles_or_removes_an_admin(
     :param google: The fake Google.
     :type google: FakeGoogle
     """
-    lab_id, admin = new_lab(client, google, (OPT_ONLY,))
+    lab_id, admin = new_lab(client, google, (OTHER,))
     become(client, google, admin)
     person, person_id = add_person(client, lab_id)
     people = f"{LABS}/{lab_id}/people"
@@ -365,7 +366,7 @@ def test_only_the_owner_changes_roles_or_removes_an_admin(
     assert gone.status_code == 200
     become(client, google, person)
     assert client.get(MY_ACCOUNT).json()["role"] == Role.ADMIN
-    assert ids_at(client, TASKS) == [OPT]
+    assert ids_at(client, TASKS) == [SOLO]
 
 
 def test_nobody_outside_a_lab_can_touch_it(
@@ -478,11 +479,11 @@ def test_removing_someone_shuts_them_out_but_keeps_their_runs(
     lab_id, admin = new_lab(client, google)
     become(client, google, admin)
     person, person_id = add_person(client, lab_id)
-    tick(client, lab_id, person_id, OPT_ONLY)
+    tick(client, lab_id, person_id, OTHER)
     become(client, google, person)
     secret = client.post(KEYS, json={}, headers=OWN_PAGE).json()["api_key"]
     with_key = {API_KEY_HEADER: secret}
-    job = {"script_name": OPT, "parameters": {}}
+    job = {"script_name": SOLO, "parameters": {}}
     assert client.post(SUBMIT, json=job, headers=with_key).status_code == 202
     their_cookies = dict(client.cookies)
 
@@ -554,7 +555,7 @@ def test_a_key_cannot_run_a_lab(
     listing = client.get(LABS, headers=admin_headers)
     assert listing.status_code == 403
     assert listing.json()["detail"] == BROWSER_ONLY_MESSAGE
-    body = {"workflows": [EVERYTHING]}
+    body = {"workflows": [CHAIN]}
     changed = client.patch(f"{LABS}/{lab_id}", json=body, headers=admin_headers)
     assert changed.status_code == 403
 
@@ -606,19 +607,19 @@ def test_the_owner_lists_and_renames_labs(
     :param google: The fake Google.
     :type google: FakeGoogle
     """
-    lab_id, _ = new_lab(client, google, (OPT_ONLY,))
+    lab_id, _ = new_lab(client, google, (OTHER,))
     become(client, google, OWNER)
     add_person(client, lab_id)
     labs = {lab["id"]: lab for lab in client.get(LABS).json()}
     assert labs[lab_id]["people"] == 2
     assert [item["title"] for item in labs[lab_id]["workflows"]] == [
-        "Toy optimization"
+        "Toy other"
     ]
     name = f"Renamed {uuid.uuid4().hex}"
     body = {"name": name}
     renamed = client.patch(f"{LABS}/{lab_id}", json=body, headers=OWN_PAGE)
     assert renamed.json()["name"] == name
     assert [item["id"] for item in renamed.json()["available"]] == [
-        EVERYTHING,
-        OPT_ONLY,
+        CHAIN,
+        OTHER,
     ]

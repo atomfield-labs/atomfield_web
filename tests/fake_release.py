@@ -34,6 +34,7 @@ def release_files(version: str) -> dict[str, str]:
         "toy/__init__.py": "",
         "toy/opt_driver.py": FAKE_DRIVER,
         "toy/network_driver.py": "",
+        "toy/solo_driver.py": "",
         "toy/catalog.json": FIXTURE_CATALOG.read_text(),
         f"{dist_info}/METADATA": metadata,
         f"{dist_info}/WHEEL": PURE_WHEEL,

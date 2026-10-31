@@ -172,7 +172,7 @@ def test_broken_templates_are_rejected(break_it, message: str):
     ("break_it", "message"),
     [
         (
-            lambda doc: doc["workflows"][1].update(id="toy_everything"),
+            lambda doc: doc["workflows"][1].update(id="toy_chain"),
             "Workflow ids used twice",
         ),
         (
@@ -192,11 +192,23 @@ def test_broken_templates_are_rejected(break_it, message: str):
             "also needs",
         ),
         (
+            lambda doc: doc["workflows"][1]["tasks"].append("toy_opt"),
+            "In two workflows",
+        ),
+        (
             lambda doc: doc["workflows"].pop(0),
             "In no workflow",
         ),
     ],
-    ids=["twice", "id", "task", "pipeline", "incomplete", "left-out"],
+    ids=[
+        "twice",
+        "id",
+        "task",
+        "pipeline",
+        "incomplete",
+        "held-twice",
+        "left-out",
+    ],
 )
 def test_broken_workflows_are_rejected(break_it, message: str):
     """
@@ -233,26 +245,42 @@ def test_a_limited_catalog_holds_only_what_its_workflows_hold(catalog: Catalog):
     :param catalog: The fixture catalog.
     :type catalog: Catalog
     """
-    limited = catalog.limited_to({"toy_opt_only", "no_such_workflow"})
-    assert list(limited.workflows) == ["toy_opt_only"]
-    assert list(limited.tasks) == ["toy_opt"]
+    limited = catalog.limited_to({"toy_other", "no_such_workflow"})
+    assert list(limited.workflows) == ["toy_other"]
+    assert list(limited.tasks) == ["toy_solo"]
     assert not limited.templates
-    assert limited.validate_values("toy_opt", {})["charge"] == 0
+    assert limited.validate_values("toy_solo", {}) == {}
     with pytest.raises(UnknownTaskError):
-        limited.validate_values("toy_network", {})
-    assert set(catalog.tasks) == {"toy_opt", "toy_network"}
-    whole = catalog.limited_to({"toy_everything"})
+        limited.validate_values("toy_opt", {})
+    assert set(catalog.tasks) == {"toy_opt", "toy_network", "toy_solo"}
+    whole = catalog.limited_to({"toy_chain"})
     assert list(whole.templates) == ["toy_demo"]
     assert not catalog.limited_to(set()).tasks
+
+
+def test_a_task_names_the_package_it_runs_from(catalog: Catalog):
+    """
+    Each task belongs to one workflow; a catalog from before workflows
+    has none to name.
+
+    :param catalog: The fixture catalog.
+    :type catalog: Catalog
+    """
+    assert catalog.workflow_of("toy_opt") == "toy_chain"
+    assert catalog.workflow_of("toy_solo") == "toy_other"
+    document = fixture_document()
+    del document["workflows"]
+    older = Catalog(CatalogDocument.model_validate(document))
+    assert older.workflow_of("toy_opt") is None
 
 
 @pytest.mark.skipif(not REAL_CATALOG.exists(), reason="no scripts_repo")
 def test_the_real_workflows_keep_the_pipelines_apart():
     """
-    Someone given only Quantum ESPRESSO gets its pipeline and tasks,
-    and nothing of the nanoreactor.
+    Someone given only Wannier90 gets its pipeline and tasks, and
+    nothing of the nanoreactor.
     """
-    limited = Catalog.from_path(REAL_CATALOG).limited_to({"quantum_espresso"})
+    limited = Catalog.from_path(REAL_CATALOG).limited_to({"wannier90"})
     assert list(limited.templates) == ["ahc"]
     assert "ahc_scf" in limited.tasks
     assert "xtb_opt" not in limited.tasks

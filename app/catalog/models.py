@@ -300,8 +300,8 @@ class PipelineTemplate(ContractModel):
 
 class Workflow(ContractModel):
     """
-    What a lab can be given: a named bundle of tasks and ready-made
-    pipelines. A task may be in several workflows.
+    A package a lab can be given: a named bundle of tasks and ready-made
+    pipelines, and the file those tasks run from.
     """
 
     id: str = Field(pattern=WORKFLOW_ID_PATTERN, max_length=WORKFLOW_ID_LENGTH)
@@ -403,6 +403,23 @@ class CatalogDocument(ContractModel):
                     raise ValueError(
                         f"Workflow {workflow.id}: {name} also needs {missing}"
                     )
+        return self
+
+    @model_validator(mode="after")
+    def check_workflows_hold_each_once(self) -> "CatalogDocument":
+        """
+        Reject a task or pipeline in two workflows: a job could not say
+        which package's file it runs from.
+
+        :return: The validated document.
+        :rtype: CatalogDocument
+        :raises ValueError: On the first such id.
+        """
+        tasks = (name for item in self.workflows for name in item.tasks)
+        pipes = (name for item in self.workflows for name in item.pipelines)
+        for held in (tasks, pipes):
+            if repeated := given_twice(held):
+                raise ValueError(f"In two workflows: {repeated}")
         return self
 
     @model_validator(mode="after")

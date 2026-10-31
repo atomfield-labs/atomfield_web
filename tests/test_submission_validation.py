@@ -51,6 +51,7 @@ def test_task_definitions_load_in_catalog_order(
     assert [task["id"] for task in response.json()] == [
         "toy_opt",
         "toy_network",
+        "toy_solo",
     ]
 
 
