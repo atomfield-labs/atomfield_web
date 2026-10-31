@@ -10,15 +10,24 @@ import asyncio
 import hashlib
 import io
 import json
+import stat
 import zipfile
 from pathlib import Path
 
+import httpx
 import pytest
 
-from agent.archives import ArchiveCache, ArchiveMismatchError, folder_name
+from agent.archives import (
+    PRIVATE_FOLDER,
+    ArchiveCache,
+    ArchiveMismatchError,
+    folder_name,
+)
+from agent.client import AgentClient
 from agent.made_with import MADE_WITH_NOTE
 from agent.workspace import run_folder
 from app.agents.schemas import DataRef, ReleaseRef
+from app.core.machines import this_machine
 from tests.fake_release import make_wheel
 from tests.test_agent import FakeClient, assign, make_agent, run_until
 
@@ -104,6 +113,45 @@ def test_an_archive_is_downloaded_once_and_checked(tmp_path: Path):
     assert downloads == [RELEASE_URL]
     leftovers = [path.name for path in (tmp_path / "releases").iterdir()]
     assert leftovers == [folder_name(RELEASE)]
+
+
+def test_only_this_account_can_open_what_the_agent_keeps(tmp_path: Path):
+    """
+    The folder of downloaded scripts is closed to everyone else on the
+    computer, including a folder an older agent left open, and even
+    when the archive is already there.
+
+    :param tmp_path: Empty directory for this test.
+    :type tmp_path: Path
+    """
+
+    async def download(url: str, destination: Path) -> None:
+        destination.write_bytes(WHEEL)
+
+    root = tmp_path / "releases"
+    cache = ArchiveCache(root, download)
+    asyncio.run(cache.ensure(RELEASE))
+    assert stat.S_IMODE(root.stat().st_mode) == PRIVATE_FOLDER
+    root.chmod(0o755)
+    asyncio.run(cache.ensure(RELEASE))
+    assert stat.S_IMODE(root.stat().st_mode) == PRIVATE_FOLDER
+
+
+def test_an_agent_says_what_computer_it_is_on():
+    """
+    Each claim names the machine, which decides the build it is sent.
+    """
+    sent = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(204)
+
+    transport = httpx.MockTransport(answer)
+    http = httpx.AsyncClient(base_url="http://api.test", transport=transport)
+    client = AgentClient(http, http)
+    assert asyncio.run(client.claim(0.1)) is None
+    assert sent[0]["machine"] == this_machine()
 
 
 def test_an_archive_that_does_not_match_its_fingerprint_is_not_used(

@@ -21,6 +21,8 @@ from agent.workspace import require_plain_name
 from app.agents.schemas import ArchiveRef
 from app.core.fingerprints import file_sha256
 
+# Only the agent's own account can open it.
+PRIVATE_FOLDER = 0o700
 INCOMING_PREFIX = ".incoming-"
 Download = Callable[[str, Path], Awaitable[None]]
 
@@ -102,6 +104,15 @@ class ArchiveCache:
         # one's download instead of starting its own.
         self.locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
+    def keep_private(self) -> None:
+        """
+        Make sure only this account can enter the folder, including one
+        an older agent left open: on a shared computer, other people's
+        accounts should not get at what is kept here.
+        """
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.root.chmod(PRIVATE_FOLDER)
+
     def folder(self, archive: ArchiveRef) -> Path:
         """
         Where an archive is (or will be) unpacked.
@@ -125,6 +136,7 @@ class ArchiveCache:
             archive the server described.
         :raises httpx.HTTPError: If it cannot be downloaded.
         """
+        self.keep_private()
         folder = self.folder(archive)
         async with self.locks[folder.name]:
             if not folder.is_dir():
@@ -141,7 +153,6 @@ class ArchiveCache:
         :type folder: Path
         :raises ArchiveMismatchError: If its fingerprint is wrong.
         """
-        self.root.mkdir(parents=True, exist_ok=True)
         incoming = self.root / f"{INCOMING_PREFIX}{uuid.uuid4().hex}"
         download = incoming.with_name(f"{incoming.name}.zip")
         try:

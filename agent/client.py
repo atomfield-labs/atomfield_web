@@ -27,6 +27,7 @@ from app.agents.schemas import (
     UploadLinksRequest,
     UploadLinksResponse,
 )
+from app.core.machines import this_machine
 
 NO_JOB = 204
 UNAUTHORIZED = 401
@@ -117,7 +118,11 @@ class AgentClient:
         """
         response = await self.http.post(
             "/api/agent/claims",
-            json={"wait_seconds": wait_seconds, "scheduled": scheduled},
+            json={
+                "wait_seconds": wait_seconds,
+                "scheduled": scheduled,
+                "machine": this_machine(),
+            },
         )
         if response.status_code == NO_JOB:
             return None
