@@ -58,8 +58,8 @@ def test_the_real_catalog_loads():
     afscripts' exported catalog satisfies the platform's models.
     """
     loaded = Catalog.from_path(REAL_CATALOG)
-    assert "xtb_opt" in loaded.tasks
-    assert len(loaded.tasks) == 11
+    assert {"xtb_opt", "ahc_scf", "qe_phonon"} <= set(loaded.tasks)
+    assert {"nanoreactor", "wannier90"} <= set(loaded.workflows)
 
 
 @pytest.mark.parametrize(

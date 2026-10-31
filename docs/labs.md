@@ -54,12 +54,13 @@ Workflows live in afscripts, in `catalog/workflows/<id>.toml`:
 id = "quantum_espresso"
 title = "Quantum ESPRESSO"
 description = "What it does."
-tasks = ["ahc_scf", "ahc_nscf"]
-pipelines = ["ahc"]
+tasks = ["qe_bands", "qe_dos", "qe_phonon", "qe_scf"]
+pipelines = ["si_bands", "si_dos", "si_phonons"]
 ```
 
-A task may be in several workflows. Every task and pipeline must be in at
-least one, and a pipeline's tasks must all be in its workflow, or the
+A workflow is also a **package**: a release holds one compiled file for
+each (see `releases.md`), so a task or pipeline is in exactly one
+workflow. A pipeline's tasks must all be in its workflow, or the
 export stops. Export the catalog from the AtomField folder (the scripts
 need these packages just to describe their options):
 

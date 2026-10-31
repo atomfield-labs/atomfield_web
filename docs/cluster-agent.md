@@ -134,16 +134,30 @@ To stop it: `~/atomfield/agent stop`. Your Slurm jobs keep running.
 ## Where the scripts come from
 
 Every run uses one **release** of the scripts: a version published
-to AtomField, such as `afscripts 0.2.0+g2e6d386` (the part after `+g`
-is the git commit it was built from). The first job that needs a
-release downloads it into `~/atomfield/releases/`, checks its
+to AtomField, such as `afscripts 0.1.0+gb0c454a` (the part after `+g`
+is the git commit it was built from). A release holds one file per
+**package**, the group of scripts a lab is given (Quantum ESPRESSO,
+Wannier90...), and the scripts in it are compiled: nobody can read
+them. The first job that needs a package downloads its file, the one
+built for this computer, into `~/atomfield/releases/`, checks its
 fingerprint (sha256), and unpacks it there; later jobs reuse it.
 
 - All jobs of a run, retries included, use the release the run
   started with, even if a newer one is published meanwhile.
 - Each job folder has a small `.af_made_with` note saying exactly
   which scripts and data packs ran there.
-- Releases are small (about 50 KB) and stay side by side.
+- A package's file is about half a megabyte, and stays beside the
+  others. Your cluster holds only the packages its jobs used.
+- `~/atomfield/releases/` and `~/atomfield/data/` can be opened only by
+  you; the agent makes them so, even ones that already existed.
+
+If an older agent ran here before, its `releases` folder may hold
+readable copies of the scripts. After copying the new agent (step 1),
+delete them, and the new agent downloads what it needs:
+
+```bash
+rm -rf ~/atomfield/releases
+```
 
 Data the scripts read, such as Quantum ESPRESSO pseudopotentials,
 arrives the same way as **data packs**: downloaded once into

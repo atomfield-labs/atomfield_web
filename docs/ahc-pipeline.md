@@ -7,7 +7,10 @@ of the bands near the Fermi level. Computing it takes four programs
 in a row, each building on the one before. The editor offers them as
 one ready-made pipeline: **Prebuilt Pipelines → Anomalous Hall
 (AHC)**. Like every template, it ships in the scripts release, in
-afscripts' `catalog/pipelines/ahc.toml` (see `docs/releases.md`).
+afscripts' `catalog/pipelines/ahc.toml` (see `docs/releases.md`). It
+belongs to the **Wannier90** package, which holds its own SCF and NSCF
+steps (with spin-orbit); the plain Quantum ESPRESSO steps are another
+package (`docs/quantum-espresso.md`).
 
 ## The story of one run
 

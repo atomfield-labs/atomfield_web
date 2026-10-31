@@ -2,20 +2,36 @@
 
 AtomField runs the calculation scripts from afscripts. Agents never
 need afscripts copied to them: the server hands out **releases**, and
-each agent downloads the release a job needs.
+each agent downloads the part of a release a job needs.
+
+The scripts are the product, so they are never readable outside your
+own computer: afscripts lives in a **private** GitHub repository (the
+AtomField server code, `atomfield_web`, can be public), and a release
+holds only compiled code.
 
 ## What a release is
 
-A release is one wheel, the zip file a Python package ships as, with
-the package's `catalog.json` inside. The catalog lists the tasks and
-their flags, so the code and the description of how to call it always
-travel together.
+A release is one **bundle**, a zip file with:
+
+- `catalog.json`, which lists the tasks, pipelines and workflows and
+  their flags;
+- one file per **package** (what a lab sees as a workflow) and per
+  kind of computer: `quantum_espresso`, `wannier90` and `nanoreactor`,
+  each for `darwin-arm64` (a Mac) and `linux-x86_64` (a cluster).
+  Each file is about half a megabyte.
+
+A package's file holds that package's scripts and what they import, as
+compiled modules (`.so`), empty `__init__.py` files, and the small
+tables the scripts read. It holds no `.py` file, no docstring and no
+comment. A job gets only its own package's file, built for its agent's
+machine, so a lab given Quantum ESPRESSO never receives the Nanoreactor
+code.
 
 Each release has:
 
 - a **version**, the one in `pyproject.toml` plus the git commit it
-  was built from: `0.1.0+g2e6d386`;
-- a **fingerprint**, the sha256 of the wheel. Agents refuse a
+  was built from: `0.1.0+gb0c454a`;
+- a **fingerprint** per file, the sha256 of each. Agents refuse a
   download whose fingerprint differs from the server's.
 
 A release never changes. Any change, even a one-line fix, is a new
@@ -23,7 +39,8 @@ commit and so a new release.
 
 ## Publish one
 
-Commit your change in the afscripts repository, then from the
+Commit your change in the afscripts repository, make sure Docker is
+running (the Linux build happens in a container), then from the
 AtomField repository:
 
 ```bash
@@ -35,33 +52,60 @@ The command:
 
 1. copies the commit out of git (unfinished files in your working
    folder stay behind, committed or not);
-2. puts the commit's `catalog.json` inside the package;
-3. adds the commit to the version;
-4. builds the wheel with `uv build`;
-5. uploads it with the administrator key (`ADMIN_API_KEY`, read from
-   the environment or `.env`). Use `--api-url` for another server.
+2. adds the commit to the version;
+3. stops there if the server already has that version;
+4. finds the modules each package needs by following its tasks'
+   imports, and compiles them with Cython, once per kind of computer:
+   a Mac natively, and Linux in the `manylinux2014` image, whose old C
+   library (glibc 2.17) is the oldest a cluster is likely to have. One
+   build serves every Python from 3.11 on;
+5. packs each package's file from the compiled modules only, and
+   checks that nothing readable went in;
+6. uploads the bundle with the administrator key (`ADMIN_API_KEY`,
+   read from the environment or `.env`). Use `--api-url` for another
+   server.
 
-The server checks the wheel without running it. It must be pure
-Python, carry `<package>/catalog.json`, and contain every module its
-catalog names. Then it becomes the release new runs use; the
-pipeline editor shows its tasks at once.
+It takes a few minutes, most of it the Linux build. To publish for one
+kind of computer while testing, add `--machines darwin-arm64`.
+
+The server checks the bundle without running any of it. It must hold a
+file for every package on every machine it names, each file must
+contain every module its package's tasks name, and nothing readable
+(`.py`, `.c`, `.h`...) may be inside. Then it becomes the release new
+runs use; the pipeline editor shows its tasks at once.
 
 Publishing the same commit again changes nothing (`already
 published`). The server refuses the same version with different
-contents.
+contents; a rebuild of the same commit need not match byte for byte,
+so the first copy is the one that stays.
 
 ## What runs where
 
 - A run uses the release that was newest when it was submitted, for
   all its jobs and retries. To use a newer release, run the pipeline
   again.
+- A job runs `python -c "... import main ..."` on its package's
+  compiled modules; no module is started with `python -m`, which
+  needs source.
+- A computer the release has no build for (a kind not listed above)
+  fails the job with a message saying so. So does an agent from before
+  this change: copy the agent again (`docs/cluster-agent.md`).
 - `GET /api/releases/current` shows the newest release.
 - The **Get files** panel of a cluster run shows the release that
   made it; each job folder's `.af_made_with` note records the scripts
   and data packs that ran there.
 - Runs from before the first release use the catalog file the server
-  starts with (`CATALOG_PATH`); their agents need their own copy of
-  the scripts (`pack_dir`).
+  starts with, if it has one (`CATALOG_PATH`); a server normally
+  holds no scripts, and has no tasks until the first release.
+
+## What this stops
+
+Nobody who opens the server's storage, a cluster's work folder or a
+release file finds code they can read, and the agent keeps what it
+downloads in folders only its owner can open. QE input files in a job
+folder stay readable, because Quantum ESPRESSO reads them and they are
+the user's results. The agent and the server stay readable too; they
+hold no science.
 
 ## Ready-made pipelines
 
