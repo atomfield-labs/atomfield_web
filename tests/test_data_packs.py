@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.models.data_pack import DataPack
 from app.releases import data_packs
-from app.releases.wheel import InvalidReleaseError, read_release
+from app.releases.bundle import InvalidReleaseError, read_release
 from tests.fake_release import FIXTURE_CATALOG, make_release
 from tests.test_agent_api import claim, submit_chain
 from tests.test_agent_archives import zipped
@@ -133,7 +133,7 @@ def test_a_release_needs_its_packs_and_a_claim_carries_them(
     :param releases: Cleans up publications afterwards.
     :type releases: None
     """
-    wheel = make_release("3.0.0", {"toy/catalog.json": catalog_needing(NEED)})
+    wheel = make_release("3.0.0", {"catalog.json": catalog_needing(NEED)})
     refused = client.post("/api/releases", content=wheel, headers=admin_headers)
     assert refused.status_code == 422
     assert "toy-data 1" in refused.json()["detail"]
@@ -182,7 +182,7 @@ def test_a_job_whose_pack_is_gone_fails_before_it_starts(
     :type releases: None
     """
     upload(client, admin_headers, zipped({"table.txt": ""}))
-    wheel = make_release("3.0.0", {"toy/catalog.json": catalog_needing(NEED)})
+    wheel = make_release("3.0.0", {"catalog.json": catalog_needing(NEED)})
     client.post("/api/releases", content=wheel, headers=admin_headers)
     headers = make_user_headers()
     first, _ = submit_chain(client, headers)
@@ -205,6 +205,6 @@ def test_a_task_cannot_take_a_variable_the_agent_sets():
     agent sets for every job.
     """
     need = {**NEED, "env": "PYTHONPATH"}
-    catalog = {"toy/catalog.json": catalog_needing(need)}
+    catalog = {"catalog.json": catalog_needing(need)}
     with pytest.raises(InvalidReleaseError, match="PYTHONPATH is set by"):
-        read_release(make_release(replace=catalog))
+        read_release(make_release(replace=catalog), may_hold_source=True)

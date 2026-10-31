@@ -90,6 +90,7 @@ async def claim(
         target,
         request.wait_seconds,
         request.scheduled,
+        request.machine,
         hung_up=connection.is_disconnected,
     )
     if assignment is None:

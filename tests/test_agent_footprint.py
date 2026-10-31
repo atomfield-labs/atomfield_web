@@ -23,6 +23,7 @@ APP_FILES = {
     "app/core/__init__.py",
     "app/core/cli.py",
     "app/core/fingerprints.py",
+    "app/core/machines.py",
     "app/core/names.py",
     "app/runs/__init__.py",
     "app/runs/states.py",

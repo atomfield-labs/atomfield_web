@@ -19,10 +19,10 @@ from agent.archives import ArchiveCache, ArchiveMismatchError, folder_name
 from agent.made_with import MADE_WITH_NOTE
 from agent.workspace import run_folder
 from app.agents.schemas import DataRef, ReleaseRef
-from tests.fake_release import make_release
+from tests.fake_release import make_wheel
 from tests.test_agent import FakeClient, assign, make_agent, run_until
 
-WHEEL = make_release("1.0.0")
+WHEEL = make_wheel()
 RELEASE_URL = "/fake-store/releases/toy-1.0.0.whl"
 RELEASE = ReleaseRef(
     name="toy",

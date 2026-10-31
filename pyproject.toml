@@ -51,6 +51,8 @@ env = [
     "D:SIGN_IN_LIMIT_PER_MINUTE=1000",
     "D:PAIRING_LIMIT_PER_MINUTE=1000",
     "D:CATALOG_PATH=tests/fixtures/catalog.json",
+    # Tests' releases run a real toy driver, in plain Python.
+    "D:RELEASES_MAY_HOLD_SOURCE=true",
     "D:HOUSE_AGENT_TOKEN=af_agent_test_house",
     # Tests run the sweeper explicitly, never in the background.
     "D:SWEEPER_ENABLED=false",

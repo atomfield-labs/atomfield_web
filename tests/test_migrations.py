@@ -415,3 +415,36 @@ def test_0016_lists_past_pipeline_runs(
 
     monkeypatch.setenv("ALLOW_DOWNGRADE", "1")
     command.downgrade(config, "0015")
+
+
+def test_0017_gives_old_releases_a_wheel_for_everything(
+    scratch_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """
+    A release from before compiled packages keeps its one wheel, for any
+    package on any machine.
+
+    :param scratch_database: Name of the scratch database.
+    :type scratch_database: str
+    :param monkeypatch: Sets ALLOW_DOWNGRADE for the reverse check.
+    :type monkeypatch: pytest.MonkeyPatch
+    """
+    config = build_alembic_config()
+    command.upgrade(config, "0016")
+    asyncio.run(
+        run_sql(
+            "INSERT INTO script_releases (id, name, version, sha256, catalog) "
+            f"VALUES ('{KEY}', 'toy', '1', 'abc', '{{}}')"
+        )
+    )
+
+    command.upgrade(config, "0017")
+
+    (wheels,) = asyncio.run(
+        run_sql("SELECT package, machine, sha256 FROM release_wheels")
+    )
+    assert wheels == [("any", "any", "abc")]
+
+    monkeypatch.setenv("ALLOW_DOWNGRADE", "1")
+    command.downgrade(config, "0016")

@@ -23,6 +23,7 @@ from app.agents.schemas import (
     JobAssignment,
     JobReference,
     PackRequest,
+    ReleaseRef,
     UploadLinksRequest,
     UploadLinksResponse,
 )
@@ -36,7 +37,7 @@ from app.models.run import Run
 from app.queue.job_queue import QueuedJob, RedisJobQueue
 from app.releases.catalogs import ReleaseCatalogs
 from app.releases.data_packs import data_refs, missing_data_packs
-from app.releases.service import release_ref
+from app.releases.service import NoBuildError, release_ref
 from app.runs.bundles import record_bundle, take_pack_requests
 from app.runs.lifecycle import (
     Completion,
@@ -132,27 +133,42 @@ async def parent_keys(db: AsyncSession, job_id: uuid.UUID) -> list[str]:
     return list((await db.execute(query)).scalars())
 
 
-async def build_assignment(
-    db: AsyncSession,
-    store: ArtifactStore,
-    job: Job,
-    task: TaskDefinition,
-    data: list[DataRef],
-) -> JobAssignment:
+@dataclass(frozen=True, slots=True)
+class JobNeeds:
     """
-    Describe a started attempt for its agent.
+    What a job must have to start.
 
-    :param db: Asynchronous database session.
-    :type db: AsyncSession
-    :param store: Where the inputs are kept.
-    :type store: ArtifactStore
-    :param job: The job, just started.
-    :type job: Job
     :param task: Its catalog task.
     :type task: TaskDefinition
     :param data: The data packs it reads.
     :type data: list[DataRef]
-    :return: The assignment, naming the run's scripts release.
+    :param release: The file it runs from; None without a release.
+    :type release: ReleaseRef | None
+    """
+
+    task: TaskDefinition
+    data: list[DataRef]
+    release: ReleaseRef | None
+
+
+async def build_assignment(
+    db: AsyncSession,
+    store: ArtifactStore,
+    job: Job,
+    needs: JobNeeds,
+) -> JobAssignment:
+    """
+    Describe one started attempt for the agent.
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param store: Signs the links to the job's input files.
+    :type store: ArtifactStore
+    :param job: The job.
+    :type job: Job
+    :param needs: Its task, data packs and scripts.
+    :type needs: JobNeeds
+    :return: The assignment, naming the file of scripts it runs.
     :rtype: JobAssignment
     """
     run = await db.get(Run, job.run_id)
@@ -162,10 +178,10 @@ async def build_assignment(
         run_id=job.run_id,
         node_key=job.node_key,
         parents=await parent_keys(db, job.id),
-        task=task,
+        task=needs.task,
         parameters=job.parameters or {},
-        release=await release_ref(db, store, run.release_id),
-        data=data,
+        release=needs.release,
+        data=needs.data,
         deadline_at=job.deadline_at,
         **await input_fields(store, run, job),
     )
@@ -301,12 +317,49 @@ async def fail_before_start(
     await commit_and_publish(db, services.bus)
 
 
+async def gather_needs(
+    db: AsyncSession,
+    services: AgentServices,
+    job: Job,
+    machine: str | None,
+) -> JobNeeds | None:
+    """
+    What a queued job needs to start. Anything it cannot have fails it.
+
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :param services: Queue, bus, catalogs and store.
+    :type services: AgentServices
+    :param job: A queued job.
+    :type job: Job
+    :param machine: The kind of computer the agent runs on.
+    :type machine: str | None
+    :return: Its needs, or None if the job was failed instead.
+    :rtype: JobNeeds | None
+    """
+    task = await find_task(db, services, job)
+    data = await find_data(db, services, job, task) if task else None
+    if task is None or data is None:
+        return None
+    run = await db.get(Run, job.run_id)
+    catalog = await services.catalogs.of_release(db, run.release_id)
+    package = catalog.workflow_of(job.script_name)
+    store = services.store
+    try:
+        release = await release_ref(db, store, run.release_id, package, machine)
+    except NoBuildError as error:
+        await fail_before_start(db, services, job, str(error))
+        return None
+    return JobNeeds(task, data, release)
+
+
 async def try_start(
     db: AsyncSession,
     services: AgentServices,
     target: ComputeTarget,
     job_id: uuid.UUID,
     scheduled: bool = False,
+    machine: str | None = None,
 ) -> JobAssignment | None:
     """
     Turn one queue message into a started attempt, if still valid.
@@ -326,24 +379,25 @@ async def try_start(
     :param scheduled: The agent hands jobs to a scheduler, so the job
         starts later (its clock starts when reported running).
     :type scheduled: bool
+    :param machine: The kind of computer the agent runs on.
+    :type machine: str | None
     :return: The assignment, or None if this message was stale.
     :rtype: JobAssignment | None
     """
     job = await db.get(Job, job_id)
     if job is None or job.status != JobStatus.QUEUED:
         return None
-    task = await find_task(db, services, job)
-    data = await find_data(db, services, job, task) if task else None
-    if task is None or data is None:
+    needs = await gather_needs(db, services, job, machine)
+    if needs is None:
         return None
-    walltime = task.resources.walltime_minutes
+    walltime = needs.task.resources.walltime_minutes
     started = await start_attempt(
         db, job_id, walltime, agent_id=target.id, scheduled=scheduled
     )
     await commit_and_publish(db, services.bus)
     if started is None:
         return None
-    return await build_assignment(db, services.store, started, task, data)
+    return await build_assignment(db, services.store, started, needs)
 
 
 async def never_hung_up() -> bool:
@@ -362,6 +416,7 @@ async def claim_next(
     target: ComputeTarget,
     wait_seconds: float,
     scheduled: bool = False,
+    machine: str | None = None,
     hung_up: HungUp = never_hung_up,
 ) -> JobAssignment | None:
     """
@@ -381,6 +436,8 @@ async def claim_next(
     :type wait_seconds: float
     :param scheduled: The agent hands jobs to a scheduler.
     :type scheduled: bool
+    :param machine: The kind of computer the agent runs on.
+    :type machine: str | None
     :param hung_up: Asks whether the agent stopped waiting.
     :type hung_up: HungUp
     :return: An assignment, or None if nothing arrived in time.
@@ -395,7 +452,7 @@ async def claim_next(
         if taken is None:
             return None
         assignment = await try_start(
-            db, services, target, taken.job_id, scheduled
+            db, services, target, taken.job_id, scheduled, machine
         )
         if assignment is not None:
             return assignment

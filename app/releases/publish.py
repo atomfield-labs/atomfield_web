@@ -21,6 +21,7 @@ same bytes, and the server keeps the release it already has.
 """
 
 import argparse
+import re
 import shutil
 import subprocess
 import tempfile
@@ -37,8 +38,8 @@ from app.core.cli import fail, print_outcome, stops_cleanly
 from app.core.config import settings
 from app.core.names import version_label
 from app.core.security import API_KEY_HEADER
+from app.releases.bundle import CATALOG_NAME
 from app.releases.published import PublishConflictError
-from app.releases.wheel import CATALOG_NAME, package_name
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_REPO = REPO_ROOT / "scripts_repo"
@@ -112,6 +113,19 @@ def export_commit(repo: Path, commit: str, tree: Path) -> None:
     run_tool([*git, f"--output={archive}", commit])
     with zipfile.ZipFile(archive) as source:
         source.extractall(tree)
+
+
+def package_name(distribution: str) -> str:
+    """
+    The package a distribution installs: ``af-scripts`` installs
+    ``af_scripts``.
+
+    :param distribution: Distribution name.
+    :type distribution: str
+    :return: Import name of its package.
+    :rtype: str
+    """
+    return re.sub(r"[-.]+", "_", distribution).lower()
 
 
 def project_name(tree: Path) -> str:

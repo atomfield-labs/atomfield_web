@@ -10,6 +10,7 @@ from typing import Any, Literal, Self
 from pydantic import BaseModel, Field
 
 from app.catalog.models import TaskDefinition
+from app.core.machines import MACHINE_LENGTH
 from app.core.names import version_label
 from app.runs.states import JobStatus
 
@@ -39,6 +40,12 @@ class ClaimRequest(BaseModel):
         description="This agent hands jobs to a scheduler (Slurm): they "
         "may wait in its queue, so their clock starts only when the "
         "agent reports them started.",
+    )
+    machine: str | None = Field(
+        default=None,
+        max_length=MACHINE_LENGTH,
+        description="The kind of computer the agent runs on, e.g. "
+        "linux-x86_64: which build of a job's scripts it can run.",
     )
 
 
@@ -78,7 +85,7 @@ class ArchiveRef(BaseModel):
 
 class ReleaseRef(ArchiveRef):
     """
-    The scripts release a job runs (a wheel).
+    The file of a scripts release a job runs: its package's wheel.
     """
 
 

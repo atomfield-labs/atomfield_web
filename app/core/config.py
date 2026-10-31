@@ -76,6 +76,9 @@ class Settings(BaseSettings):
 
     # --- Task catalog, written by the domain pack (afscripts) ---
     CATALOG_PATH: str = str(_BASE_DIR / "scripts_repo" / "catalog.json")
+    # Accept releases holding readable code. Only tests turn this on: a
+    # release must never put source on a server or a cluster.
+    RELEASES_MAY_HOLD_SOURCE: bool = False
 
     # --- Computational Chemistry Driver ---
     CHEMISTRY_PYTHON_BIN: str = (

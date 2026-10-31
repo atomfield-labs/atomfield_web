@@ -1,13 +1,7 @@
 """
 HTTP routes for script releases: the administrator publishes one (the
-wheel as the request body), and anyone may ask which release new runs
-use.
-
-    curl -X POST -H "X-API-Key: $ADMIN_API_KEY" \\
-        --data-binary @afscripts-0.2.0-py3-none-any.whl \\
-        "$API/api/releases?git_commit=2e6d386"
-
-``python -m app.releases.publish`` builds the wheel and does this.
+bundle as the request body), and anyone may ask which release new runs
+use. ``python -m app.releases.publish`` builds the bundle and sends it.
 """
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
@@ -15,21 +9,26 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_store, require_owner
-from app.api.errors import conflict, too_large, unprocessable
+from app.api.errors import conflict, not_found, too_large, unprocessable
 from app.db.session import get_db
 from app.models.user import User
-from app.releases.published import PublishConflictError
-from app.releases.service import latest_release, publish_release
-from app.releases.wheel import (
+from app.releases.bundle import (
     MAX_RELEASE_BYTES,
     TOO_BIG_MESSAGE,
     InvalidReleaseError,
+)
+from app.releases.published import PublishConflictError
+from app.releases.service import (
+    find_release,
+    latest_release,
+    publish_release,
 )
 from app.schemas.releases import ReleaseInfo
 from app.storage.store import ArtifactStore
 
 router = APIRouter(prefix="/releases", tags=["Releases"])
 COMMIT_PATTERN = r"^[0-9a-f]{7,40}$"
+RELEASE_KIND = "Release"
 
 
 async def read_upload(request: Request) -> bytes:
@@ -70,23 +69,23 @@ async def publish(
     store: ArtifactStore = Depends(get_store),
 ) -> ReleaseInfo:
     """
-    Publish a wheel as the newest release (administrator only).
+    Publish a bundle as the newest release (administrator only).
 
-    :param request: Carries the wheel as its body.
+    :param request: Carries the bundle as its body.
     :type request: Request
     :param response: Its status becomes 200 for a repeat publish.
     :type response: Response
-    :param git_commit: The commit the wheel was built from.
+    :param git_commit: The commit the bundle was built from.
     :type git_commit: str | None
     :param _owner: The owner.
     :type _owner: User
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :param store: Where the wheel is kept.
+    :param store: Where the wheels are kept.
     :type store: ArtifactStore
     :return: The release.
     :rtype: ReleaseInfo
-    :raises HTTPException: 422 for an unusable wheel, 409 for a
+    :raises HTTPException: 422 for an unusable bundle, 409 for a
         version that exists with other contents.
     """
     data = await read_upload(request)
@@ -114,3 +113,27 @@ async def current(db: AsyncSession = Depends(get_db)) -> ReleaseInfo | None:
     """
     release = await latest_release(db)
     return ReleaseInfo.model_validate(release) if release else None
+
+
+@router.get("/{name}/{version}", response_model=ReleaseInfo)
+async def get_release(
+    name: str, version: str, db: AsyncSession = Depends(get_db)
+) -> ReleaseInfo:
+    """
+    A release by name and version, so a publisher can skip building one
+    that is already there.
+
+    :param name: Its name.
+    :type name: str
+    :param version: Its version.
+    :type version: str
+    :param db: Asynchronous database session.
+    :type db: AsyncSession
+    :return: The release.
+    :rtype: ReleaseInfo
+    :raises HTTPException: 404 if it was never published.
+    """
+    release = await find_release(db, name, version)
+    if release is None:
+        raise not_found(RELEASE_KIND, f"{name} {version}")
+    return ReleaseInfo.model_validate(release)

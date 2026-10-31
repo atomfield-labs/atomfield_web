@@ -10,7 +10,7 @@ from app.models.job import Job, JobDependency
 from app.models.lab import Lab, LabWorkflow, UserWorkflow
 from app.models.pipeline_session import PipelineSession
 from app.models.run import Run
-from app.models.script_release import ScriptRelease
+from app.models.script_release import ReleaseWheel, ScriptRelease
 from app.models.user import User
 
 __all__ = [
@@ -23,6 +23,7 @@ __all__ = [
     "Lab",
     "LabWorkflow",
     "PipelineSession",
+    "ReleaseWheel",
     "Run",
     "ScriptRelease",
     "User",
