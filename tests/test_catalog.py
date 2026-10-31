@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from app.catalog.argv import Invocation, build_argv
+from app.catalog.argv import RUN_MAIN, Invocation, build_argv
 from app.catalog.catalog import Catalog, UnknownTaskError
 from app.catalog.models import CatalogDocument, InputPort
 
@@ -78,6 +78,10 @@ def test_the_real_catalog_loads():
         (
             lambda doc: doc["tasks"][1].update(id="toy_opt"),
             "ids used twice",
+        ),
+        (
+            lambda doc: doc["tasks"][0].update(module="toy; import os"),
+            "should match pattern",
         ),
     ],
 )
@@ -376,7 +380,7 @@ def test_build_argv_renders_the_exact_command(catalog: Catalog):
     argv = build_argv(task, invocation, PYTHON)
 
     assert argv == [
-        PYTHON, "-u", "-m", "toy.opt_driver",
+        PYTHON, "-u", "-c", RUN_MAIN.format(module="toy.opt_driver"),
         "-i", "in/water.xyz",
         "-JOBNAME", "job42",
         "-parallel", "4",

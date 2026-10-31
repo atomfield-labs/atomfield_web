@@ -14,30 +14,33 @@ WATER_XYZ = "3\nwater\nO 0 0 0\nH 0.76 0.59 0\nH -0.76 0.59 0\n"
 SLOW_CHARGE = 99
 FAKE_DRIVER = """
 import argparse, json, os, shutil, sys, time
-parser = argparse.ArgumentParser()
-parser.add_argument("-i", dest="input")
-parser.add_argument("-JOBNAME", dest="jobname")
-parser.add_argument("-parallel", dest="parallel", type=int)
-parser.add_argument("-charge", dest="charge", type=int, default=0)
-parser.add_argument("-temp", dest="temp", type=float, default=300.0)
-parser.add_argument("-gfnff", dest="gfnff", action="store_true")
-parser.add_argument("-nokeep", dest="keep", action="store_false")
-parser.add_argument("-optlevel", dest="optlevel", default="normal")
-parser.add_argument("-gfn", dest="gfn", type=int, default=2)
-parser.add_argument("-solvent", dest="solvent")
-options = parser.parse_args()
-if options.charge == 99:
-    time.sleep(60)
-if options.charge < 0:
-    print("negative charge refused", file=sys.stderr)
-    sys.exit(3)
-with open(f"{options.jobname}_optimized.xyz", "w") as out:
-    out.write(open(options.input).read())
-with open("received.json", "w") as out:
-    json.dump(vars(options), out)
-if os.environ.get("TOY_DATA"):
-    table = os.path.join(os.environ["TOY_DATA"], "table.txt")
-    shutil.copyfile(table, "data_used.txt")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-i", dest="input")
+    parser.add_argument("-JOBNAME", dest="jobname")
+    parser.add_argument("-parallel", dest="parallel", type=int)
+    parser.add_argument("-charge", dest="charge", type=int, default=0)
+    parser.add_argument("-temp", dest="temp", type=float, default=300.0)
+    parser.add_argument("-gfnff", dest="gfnff", action="store_true")
+    parser.add_argument("-nokeep", dest="keep", action="store_false")
+    parser.add_argument("-optlevel", dest="optlevel", default="normal")
+    parser.add_argument("-gfn", dest="gfn", type=int, default=2)
+    parser.add_argument("-solvent", dest="solvent")
+    options = parser.parse_args()
+    if options.charge == 99:
+        time.sleep(60)
+    if options.charge < 0:
+        print("negative charge refused", file=sys.stderr)
+        sys.exit(3)
+    with open(f"{options.jobname}_optimized.xyz", "w") as out:
+        out.write(open(options.input).read())
+    with open("received.json", "w") as out:
+        json.dump(vars(options), out)
+    if os.environ.get("TOY_DATA"):
+        table = os.path.join(os.environ["TOY_DATA"], "table.txt")
+        shutil.copyfile(table, "data_used.txt")
 """
 
 

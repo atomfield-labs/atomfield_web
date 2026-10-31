@@ -29,6 +29,8 @@ NODE_KEY_PATTERN = r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}"
 FILE_NAME_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}"
 # A template's example structures travel inside the catalog.
 MAX_TEMPLATE_STRUCTURE_CHARS = 64 * 1024
+# A task's module goes into the line of code that starts it.
+MODULE_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$"
 # A workflow's id is stored with what each lab and person may use.
 WORKFLOW_ID_LENGTH = 64
 WORKFLOW_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
@@ -191,7 +193,7 @@ class TaskDefinition(ContractModel):
     title: str
     description: str
     category: str
-    module: str
+    module: str = Field(pattern=MODULE_PATTERN)
     resources: Resources
     platform_flags: PlatformFlags
     inputs: list[InputPort]

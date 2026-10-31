@@ -20,7 +20,11 @@ from app.catalog.models import (
 )
 
 UNBUFFERED = "-u"
-RUN_MODULE = "-m"
+RUN_CODE = "-c"
+# Compiled scripts cannot start with ``python -m``, which needs code it
+# can read. Every script has ``main``; ``module`` is checked by the
+# catalog's pattern, since it lands inside this line of code.
+RUN_MAIN = "import sys; from {module} import main; sys.exit(main())"
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,7 +128,8 @@ def build_argv(
     :rtype: list[str]
     :raises ValueError: If a single-file port is given several files.
     """
-    argv = [python_bin, UNBUFFERED, RUN_MODULE, task.module]
+    start = RUN_MAIN.format(module=task.module)
+    argv = [python_bin, UNBUFFERED, RUN_CODE, start]
     for port in task.inputs:
         argv += input_tokens(port, invocation.inputs.get(port.name, ()))
     argv += platform_tokens(task.platform_flags, invocation)
