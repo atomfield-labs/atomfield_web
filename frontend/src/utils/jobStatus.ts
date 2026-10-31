@@ -52,8 +52,10 @@ const LOOKS: Record<string, StatusLook> = {
   ready: 'none',
   pending: 'waiting',
   blocked: 'waiting',
+  waiting: 'waiting',
   running: 'running',
   success: 'done',
+  done: 'done',
   completed: 'done',
   failed: 'failed',
   cancelled: 'stopped',
@@ -100,22 +102,4 @@ export function runProgress(statuses: (string | undefined)[]): RunProgress {
   else if (count('stopped') > 0) phase = 'cancelled';
   else if (total > 0 && done === total) phase = 'done';
   return { phase, done, total };
-}
-
-const PHASE_STATUS: Record<RunPhase, JobStatus> = {
-  idle: 'Draft',
-  running: 'Running',
-  done: 'Success',
-  failed: 'Failed',
-  cancelled: 'Cancelled',
-};
-
-/**
- * One status for a whole run, read from all its steps. A run with
- * nothing running right now is waiting, not running.
- */
-export function runStatus(statuses: string[]): JobStatus {
-  const { phase } = runProgress(statuses);
-  const working = statuses.some((status) => statusLook(status) === 'running');
-  return phase === 'running' && !working ? 'Pending' : PHASE_STATUS[phase];
 }

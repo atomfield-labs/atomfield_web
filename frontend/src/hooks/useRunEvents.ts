@@ -57,27 +57,6 @@ function withExecution(
 }
 
 /**
- * Mark a stored session as finished, for the sessions dashboard.
- */
-function markSessionFinished(pipelineId: string): void {
-  try {
-    const raw = localStorage.getItem('atomfield_sessions');
-    if (!raw) return;
-    const list = JSON.parse(raw);
-    const index = list.findIndex((item: any) =>
-      typeof item === 'string' ? item === pipelineId : item.id === pipelineId
-    );
-    if (index >= 0) {
-      list[index].status = 'Success';
-      list[index].updatedAt = new Date().toISOString();
-      localStorage.setItem('atomfield_sessions', JSON.stringify(list));
-    }
-  } catch (error) {
-    console.error('Failed to update session status in storage', error);
-  }
-}
-
-/**
  * Turn a stream frame into status changes.
  */
 function changesIn(frame: StreamFrame, view: RunView): StatusChange[] {
@@ -139,7 +118,6 @@ export function useRunEvents({
       if (!view.allFinished) return;
       // Nothing can change any more: close the stream.
       controller.abort();
-      if (activePipelineId) markSessionFinished(activePipelineId);
       onAllFinished?.();
     };
 

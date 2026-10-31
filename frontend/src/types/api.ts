@@ -19,7 +19,7 @@ export type JobStatus =
   | 'Ready'
   | 'Cancelled';
 
-export type SaveStatus = 'saved' | 'saving' | 'deployed' | 'idle';
+export type SaveStatus = 'saved' | 'saving' | 'deployed' | 'idle' | 'failed';
 
 // Task catalog (GET /api/task-definitions); mirrors app/catalog/models.py.
 export type ParameterKind = 'boolean' | 'integer' | 'number' | 'string';
@@ -195,31 +195,36 @@ export interface JobLogsResponse {
   artifacts: string[];
 }
 
-export interface SessionMetadata {
+// How a pipeline stands, from its newest run.
+export type SessionState =
+  | 'draft'
+  | 'waiting'
+  | 'running'
+  | 'done'
+  | 'failed'
+  | 'cancelled';
+
+export interface SessionSummary {
   id: string;
-  title: string;
-  // Named by its template or by the person, so saving keeps the name.
-  named?: boolean;
-  status: JobStatus;
-  nodeCount: number;
-  updatedAt: string;
+  // None until the person or a template names it.
+  title: string | null;
+  state: SessionState;
+  node_count: number;
+  updated_at: string;
 }
 
-export interface JobItem {
-  id: string;
-  run_id: string;
-  script_name: string;
-  status: ServerJobStatus;
-  parameters: Record<string, any>;
-  output_data?: Record<string, any> | null;
-  error_message?: string | null;
-  execution_time_seconds?: number | null;
-  created_at: string;
+export interface SessionDetail extends SessionSummary {
+  blueprint: PipelineBlueprint | null;
+  run_id: string | null;
+  // Which job each node of the newest run became.
+  job_ids: Record<string, string>;
 }
 
-export interface JobListResponse {
-  jobs: JobItem[];
-  total: number;
+// What changed about a pipeline; what is left out stays.
+export interface SessionSave {
+  title?: string;
+  blueprint?: PipelineBlueprint;
+  node_count?: number;
 }
 
 // A person as the API shows them: who they are and their job quota.

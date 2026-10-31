@@ -8,6 +8,7 @@ from app.models.compute_target import ComputeTarget
 from app.models.data_pack import DataPack
 from app.models.job import Job, JobDependency
 from app.models.lab import Lab, LabWorkflow, UserWorkflow
+from app.models.pipeline_session import PipelineSession
 from app.models.run import Run
 from app.models.script_release import ScriptRelease
 from app.models.user import User
@@ -21,6 +22,7 @@ __all__ = [
     "JobDependency",
     "Lab",
     "LabWorkflow",
+    "PipelineSession",
     "Run",
     "ScriptRelease",
     "User",

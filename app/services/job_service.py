@@ -23,7 +23,7 @@ from app.agents.targets import usable_target
 from app.api.errors import too_many_requests
 from app.core.config import settings
 from app.core.identifiers import assign_node_keys, sanitize_identifier
-from app.models import Job, JobDependency, Run, User
+from app.models import Job, JobDependency, PipelineSession, Run, User
 from app.queue.job_queue import RedisJobQueue
 from app.runs.lifecycle import create_run, dispatch
 from app.runs.states import JobStatus
@@ -35,6 +35,7 @@ from app.schemas.job import (
     PipelineSubmitRequest,
 )
 from app.services.pipeline_graph import check_pipeline_graph
+from app.services.sessions import record_run
 from app.storage.keys import (
     RUNS,
     UPLOADS,
@@ -49,14 +50,16 @@ from app.storage.store import ArtifactStore
 ARTIFACTS_DIR = Path(settings.ARTIFACTS_DIR)
 DEFAULT_MAX_LOG_BYTES = 131072
 SUCCESS = "success"
-# The web app groups a user's jobs into sessions by this parameter.
+# Which session a pipeline's job came from.
 PIPELINE_ID = "pipeline_id"
 QUOTA_MESSAGE = (
     "Quota exceeded: this submission needs {needed} and your quota has "
     "{remaining} left. Contact the administrator."
 )
 ERROR_LOG_HEADER = "[ERROR]"
-TRUNCATE_ALL = "TRUNCATE TABLE job_dependencies, jobs, runs CASCADE;"
+TRUNCATE_ALL = (
+    "TRUNCATE TABLE job_dependencies, jobs, runs, pipeline_sessions CASCADE;"
+)
 WIPED_MESSAGE = "All runs, jobs and stored files cleared."
 logger = logging.getLogger(__name__)
 
@@ -450,6 +453,7 @@ async def submit_pipeline(
     run = await start_run(db, user, session, request.target_id, release_id)
     jobs = await add_pipeline_jobs(db, run, request, parent_counts)
     await store_attachments(store, request.files, run)
+    await record_run(db, run, jobs)
     await db.commit()
     summary = submission_summary(request, run, jobs)
     roots = [job for job in jobs.values() if job.status == JobStatus.QUEUED]
@@ -639,6 +643,13 @@ async def delete_session(
     deleted = await delete_owned_runs(
         db, store, user_id, uploads, Run.session_id == session
     )
+    await db.execute(
+        delete(PipelineSession).where(
+            PipelineSession.owner_id == user_id,
+            PipelineSession.id == session,
+        )
+    )
+    await db.commit()
     message = f"Session {session} and {deleted} jobs deleted."
     return {"status": SUCCESS, "message": message}
 
@@ -665,5 +676,9 @@ async def clear_user_data(
     """
     uploads = owner_uploads_folder(user_id)
     deleted = await delete_owned_runs(db, store, user_id, uploads)
+    await db.execute(
+        delete(PipelineSession).where(PipelineSession.owner_id == user_id)
+    )
+    await db.commit()
     message = f"Deleted your {deleted} jobs and their files."
     return {"status": SUCCESS, "message": message}

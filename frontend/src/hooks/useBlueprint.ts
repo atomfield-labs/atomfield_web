@@ -1,36 +1,51 @@
-import { useCallback, useMemo, useState } from 'react';
-import type { PipelineBlueprint } from '../types/api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { sessionsService } from '../api/services';
+import type { PipelineBlueprint, SessionDetail } from '../types/api';
 
 const EMPTY_BLUEPRINT: PipelineBlueprint = { nodes: [], edges: [] };
 
 /**
- * The draft of a session saved in this browser, if any.
+ * What a session opens with: its saved draft, else an empty canvas;
+ * until a template replaces it (``setBlueprint``). While the draft is
+ * on its way, ``saved`` is undefined: the canvas must wait, or an empty
+ * canvas could be saved over the draft.
  */
-function savedDraft(sessionId: string): PipelineBlueprint | null {
-  const saved = localStorage.getItem(`atomfield_blueprint_${sessionId}`);
-  if (!saved) return null;
-  try {
-    return JSON.parse(saved);
-  } catch (err) {
-    console.error('Failed to parse saved blueprint from localStorage', err);
-    return null;
-  }
-}
-
-/**
- * What a session opens with: the draft saved in this browser, else an
- * empty canvas; until a template replaces it (``setBlueprint``).
- */
-export function useBlueprint(activeSessionId: string) {
-  // Read once per session: the canvas reloads whenever this changes.
-  const draft = useMemo(
-    () => savedDraft(activeSessionId) ?? EMPTY_BLUEPRINT,
-    [activeSessionId]
-  );
+export function useBlueprint(activeSessionId: string, isNew: boolean) {
+  const [loaded, setLoaded] = useState<{
+    id: string;
+    session: SessionDetail | null;
+  } | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [replaced, setReplaced] = useState<{
     id: string;
     blueprint: PipelineBlueprint;
   } | null>(null);
+
+  useEffect(() => {
+    if (isNew) return;
+    let active = true;
+    sessionsService
+      .get(activeSessionId)
+      .then((session) => {
+        if (active) setLoaded({ id: activeSessionId, session });
+      })
+      .catch((error) => {
+        console.error('Failed to load the pipeline', error);
+        if (active) setLoadFailed(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeSessionId, isNew]);
+
+  const isLoaded = loaded?.id === activeSessionId;
+  const loadedHere = isLoaded ? loaded.session : undefined;
+  const saved = isNew ? null : loadedHere;
+  // Read once per session: the canvas reloads whenever this changes.
+  const draft = useMemo(
+    () => saved?.blueprint ?? EMPTY_BLUEPRINT,
+    [saved]
+  );
   const blueprint =
     replaced?.id === activeSessionId ? replaced.blueprint : draft;
 
@@ -40,5 +55,5 @@ export function useBlueprint(activeSessionId: string) {
     [activeSessionId]
   );
 
-  return { blueprint, setBlueprint };
+  return { saved, loadFailed, blueprint, setBlueprint };
 }

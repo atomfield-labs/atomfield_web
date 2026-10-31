@@ -25,14 +25,6 @@ export const jobsService = {
     return response.data;
   },
 
-  async listJobs(params?: { status?: string; limit?: number; offset?: number }) {
-    const response = await apiClient.get<{ jobs: import('../../types/api').JobItem[]; total: number }>(
-      '/api/jobs',
-      { params }
-    );
-    return response.data;
-  },
-
   async clearAllJobs(): Promise<{ status: string; message: string }> {
     const response = await apiClient.delete<{ status: string; message: string }>(
       '/api/jobs/clear'

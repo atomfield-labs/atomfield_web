@@ -1,11 +1,21 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Node, Edge } from '@xyflow/react';
-import type { SaveStatus, SessionMetadata, BlueprintNode, BlueprintEdge } from '../types/api';
+import { sessionsService } from '../api/services';
+import type {
+  BlueprintEdge,
+  BlueprintNode,
+  PipelineBlueprint,
+  SaveStatus,
+  SessionDetail,
+  SessionSave,
+} from '../types/api';
 import { saveEdge } from '../utils/graphEdges';
 
-// This browser's list of pipelines, shown on the sessions page.
-const SESSIONS_KEY = 'atomfield_sessions';
 export const UNTITLED = 'Untitled pipeline';
+// Steps that run as jobs: plain steps, and a sweep's copies.
+export const STEP_TYPES = new Set(['default', 'branchCircle']);
+// A moment after the last change, so dragging is one save, not hundreds.
+const SAVE_AFTER_MS = 1000;
 
 export function serializeGraphToBlueprint(nodes: Node[], edges: Edge[]): { nodes: BlueprintNode[]; edges: BlueprintEdge[] } {
   return {
@@ -54,130 +64,116 @@ export function serializeGraphToBlueprint(nodes: Node[], edges: Edge[]): { nodes
 }
 
 /**
- * This browser's pipelines. Old entries may be bare ids.
+ * What a save must keep of a draft: all of it but the steps' statuses,
+ * which the server knows anyway. So a status changing is not an edit.
  */
-function readSessions(): (SessionMetadata | string)[] {
-  try {
-    const raw = localStorage.getItem(SESSIONS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+function draftKey(blueprint: PipelineBlueprint): string {
+  const nodes = blueprint.nodes.map((node) => ({ ...node, status: undefined }));
+  return JSON.stringify({ nodes, edges: blueprint.edges });
 }
 
-function writeSessions(list: (SessionMetadata | string)[]): void {
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(list));
-}
+const EMPTY_DRAFT = draftKey({ nodes: [], edges: [] });
+// A saved draft is on its way onto the canvas; what first appears there
+// is that draft, not an edit.
+const AWAITING_CANVAS = 'awaiting canvas';
+// The last save failed, so whatever comes next is worth saving.
+const NOT_SAVED = 'not saved';
 
-function indexOf(list: (SessionMetadata | string)[], id: string): number {
-  return list.findIndex((item) =>
-    typeof item === 'string' ? item === id : item.id === id
-  );
+/**
+ * How many steps a draft has: its input files don't count.
+ */
+function stepCount(blueprint: PipelineBlueprint): number {
+  return blueprint.nodes.filter((node) => STEP_TYPES.has(node.type ?? ''))
+    .length;
 }
 
 /**
- * A pipeline's name as this browser saved it.
+ * Save a pipeline on the server as it changes: a moment after the last
+ * change, and on leaving. Nothing is saved until something changes, so
+ * opening a pipeline does not touch it and an empty one leaves no card.
  */
-function storedTitle(id: string): string {
-  const list = readSessions();
-  const found = list[indexOf(list, id)];
-  return found && typeof found !== 'string' ? found.title : UNTITLED;
-}
-
-/**
- * Change one pipeline's entry, adding it first if it is new.
- */
-function updateSession(id: string, change: Partial<SessionMetadata>): void {
-  const list = readSessions();
-  const index = indexOf(list, id);
-  const existing = index >= 0 ? list[index] : null;
-  const base: SessionMetadata =
-    existing && typeof existing !== 'string'
-      ? existing
-      : {
-          id,
-          title: UNTITLED,
-          status: 'Draft',
-          nodeCount: 0,
-          updatedAt: new Date().toISOString(),
-        };
-  const updated = { ...base, ...change };
-  if (index >= 0) list[index] = updated;
-  else list.unshift(updated);
-  writeSessions(list);
-}
-
-export function useSessionDraft(activeSessionId: string) {
+export function useSessionDraft(
+  activeSessionId: string,
+  saved: SessionDetail | null | undefined
+) {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
-  // A name given in this view; otherwise the name this browser saved.
+  // A name given in this view; otherwise the name it was saved with.
   const [named, setNamed] = useState<{ id: string; title: string } | null>(
     null
   );
   const title =
-    named?.id === activeSessionId ? named.title : storedTitle(activeSessionId);
+    named?.id === activeSessionId ? named.title : saved?.title || UNTITLED;
+  const lastDraft = useRef<{ id: string; key: string } | null>(null);
+  const waiting = useRef<SessionSave | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // One save at a time, so they reach the server in order.
+  const sending = useRef<Promise<void>>(Promise.resolve());
 
-  // List a new pipeline on the sessions page.
-  useEffect(() => {
-    if (!activeSessionId) return;
-    try {
-      updateSession(activeSessionId, {});
-    } catch (err) {
-      console.error('Failed to register session draft', err);
-    }
-  }, [activeSessionId]);
+  const send = useCallback(
+    (change: SessionSave) => {
+      setSaveStatus('saving');
+      sending.current = sending.current
+        .then(() => sessionsService.save(activeSessionId, change))
+        .then(
+          () => setSaveStatus('saved'),
+          (error) => {
+            console.error('Save failed', error);
+            lastDraft.current = { id: activeSessionId, key: NOT_SAVED };
+            setSaveStatus('failed');
+          }
+        );
+    },
+    [activeSessionId]
+  );
 
-  // Save the canvas in this browser as it changes.
+  const saveNow = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    if (waiting.current) send(waiting.current);
+    waiting.current = null;
+  }, [send]);
+
+  // Whatever is waiting goes on leaving this pipeline.
+  useEffect(() => saveNow, [saveNow]);
+
   const autosaveGraph = useCallback(
     (graph: { nodes: Node[]; edges: Edge[] }) => {
-      setSaveStatus('saving');
-      const serializedBlueprint = serializeGraphToBlueprint(graph.nodes, graph.edges);
-      try {
-        localStorage.setItem(
-          `atomfield_blueprint_${activeSessionId}`,
-          JSON.stringify(serializedBlueprint)
-        );
-        updateSession(activeSessionId, {
-          nodeCount: graph.nodes.length,
-          updatedAt: new Date().toISOString(),
-        });
-        setSaveStatus('saved');
-      } catch (err) {
-        console.error('Autosave failed', err);
+      if (lastDraft.current?.id !== activeSessionId) {
+        const hasDraft = (saved?.blueprint?.nodes?.length ?? 0) > 0;
+        const key = hasDraft ? AWAITING_CANVAS : EMPTY_DRAFT;
+        lastDraft.current = { id: activeSessionId, key };
       }
+      const blueprint = serializeGraphToBlueprint(graph.nodes, graph.edges);
+      const key = draftKey(blueprint);
+      if (lastDraft.current.key === AWAITING_CANVAS) {
+        if (blueprint.nodes.length > 0) lastDraft.current.key = key;
+        return;
+      }
+      if (key === lastDraft.current.key) return;
+      lastDraft.current.key = key;
+      waiting.current = { blueprint, node_count: stepCount(blueprint) };
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(saveNow, SAVE_AFTER_MS);
     },
-    [activeSessionId]
+    [activeSessionId, saved, saveNow]
   );
 
-  // Name the pipeline: after its template, or as the person types.
+  // Name the pipeline: after its template, or as the person types. An
+  // empty name makes it untitled again.
   const nameSession = useCallback(
     (newTitle: string) => {
-      const clean = newTitle.trim() || UNTITLED;
-      setNamed({ id: activeSessionId, title: clean });
-      try {
-        updateSession(activeSessionId, { title: clean, named: true });
-      } catch (err) {
-        console.error('Failed to name the session', err);
-      }
+      const clean = newTitle.trim();
+      setNamed({ id: activeSessionId, title: clean || UNTITLED });
+      send({ title: clean });
     },
-    [activeSessionId]
+    [activeSessionId, send]
   );
-
-  const markSessionRunning = useCallback(() => {
-    try {
-      updateSession(activeSessionId, {
-        status: 'Running',
-        updatedAt: new Date().toISOString(),
-      });
-    } catch (err) {
-      console.error('Failed to mark session as running', err);
-    }
-  }, [activeSessionId]);
 
   return {
     saveStatus,
     setSaveStatus,
     autosaveGraph,
-    markSessionRunning,
+    saveNow,
     title,
     nameSession,
   };

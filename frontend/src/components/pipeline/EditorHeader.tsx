@@ -147,6 +147,11 @@ export default function EditorHeader({
         {saveStatus === 'saving' && (
           <span className="ml-2 text-xs text-stone-400">Saving…</span>
         )}
+        {saveStatus === 'failed' && (
+          <span role="alert" className="ml-2 text-xs text-red-600">
+            Not saved
+          </span>
+        )}
       </div>
       <div className="flex items-center gap-2">
         <RunOnPicker value={targetId} onChange={onTargetChange} />

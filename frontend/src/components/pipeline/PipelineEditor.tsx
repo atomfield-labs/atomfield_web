@@ -8,7 +8,7 @@ import { describeError } from '../../api/client';
 import { jobsService } from '../../api/services';
 import { useBlueprint } from '../../hooks/useBlueprint';
 import { loadPipelineTemplates } from '../../hooks/usePipelineTemplates';
-import { useSessionDraft } from '../../hooks/useSessionDraft';
+import { STEP_TYPES, useSessionDraft } from '../../hooks/useSessionDraft';
 import { useRunEvents } from '../../hooks/useRunEvents';
 import {
   loadTaskDefinitions,
@@ -17,24 +17,25 @@ import {
 import { buildPipelineSubmitPayload } from '../../utils/pipelinePayload';
 import { runProgress, type RunProgress } from '../../utils/jobStatus';
 import { templateToBlueprint } from '../../utils/templates';
-import type {
-  PipelineTemplate,
-  SessionMetadata,
-  TaskDefinition,
-} from '../../types/api';
-
-export type { SessionMetadata };
+import type { PipelineTemplate, TaskDefinition } from '../../types/api';
 
 interface PipelineEditorProps {
   sessionId?: string;
 }
 
+interface StartedRun {
+  sessionId: string;
+  runId: string | null;
+  jobIds: Record<string, string>;
+}
+
+const NO_JOBS: Record<string, string> = {};
+const LOAD_FAILED = 'p-8 text-center text-sm text-red-600';
+
 // A new pipeline: #pipeline/new, or #pipeline/new/<template id> to
 // start from one of the catalog's templates.
 const NEW_SESSION = 'new';
 const FROM_TEMPLATE = 'new/';
-// Steps that run as jobs: plain steps, and a sweep's copies.
-const STEP_TYPES = new Set(['default', 'branchCircle']);
 const NOT_RUN: RunProgress = { phase: 'idle', done: 0, total: 0 };
 
 function isNewSession(sessionId?: string): boolean {
@@ -74,14 +75,17 @@ function sameProgress(left: RunProgress, right: RunProgress): boolean {
 
 export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
   const [activeSessionId, setActiveSessionId] = useState<string>(() => generateSessionId(sessionId));
+  // A new pipeline has nothing saved to wait for.
+  const [newSessionId] = useState(() =>
+    isNewSession(sessionId) ? activeSessionId : null
+  );
   // A template to open with, when arriving by a template's link.
   const [templateId] = useState(() => templateIdOf(sessionId));
   const [selectedNode, setSelectedNode] = useState<any | null>(null);
   const [isDeploying, setIsDeploying] = useState(false);
   const [progress, setProgress] = useState<RunProgress>(NOT_RUN);
-  const [activeJobMap, setActiveJobMap] = useState<Record<string, string>>({});
-  const [activePipelineId, setActivePipelineId] = useState<string | null>(null);
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  // A run started from this view; otherwise the newest one saved.
+  const [startedRun, setStartedRun] = useState<StartedRun | null>(null);
   // Where to run; null means the shared AtomField server.
   const [targetId, setTargetId] = useState<string | null>(null);
   // Which input of each task a connected structure file belongs to.
@@ -93,15 +97,22 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
   const updateNodeExecutionRef = useRef<((nodeId: string, status: string, logs?: string, artifacts?: string[], jobId?: string) => void) | null>(null);
   const replicateNodeRef = useRef<((nodeId: string, count: number) => void) | null>(null);
 
-  const { blueprint, setBlueprint } = useBlueprint(activeSessionId);
+  const { saved, loadFailed, blueprint, setBlueprint } = useBlueprint(
+    activeSessionId,
+    activeSessionId === newSessionId
+  );
   const {
     saveStatus,
     setSaveStatus,
     autosaveGraph,
-    markSessionRunning,
+    saveNow,
     title,
     nameSession,
-  } = useSessionDraft(activeSessionId);
+  } = useSessionDraft(activeSessionId, saved);
+  const started =
+    startedRun?.sessionId === activeSessionId ? startedRun : null;
+  const activeRunId = started?.runId ?? saved?.run_id ?? null;
+  const activeJobMap = started?.jobIds ?? saved?.job_ids ?? NO_JOBS;
 
   // Route hash sync
   useEffect(() => {
@@ -111,68 +122,6 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
       window.location.hash = `#pipeline/${activeSessionId}`;
     }
   }, [sessionId, activeSessionId]);
-
-  // Reconnect to active or existing jobs for this session
-  useEffect(() => {
-    let isCancelled = false;
-
-    // 1. Try reading stored job map for this session
-    const savedJobs = localStorage.getItem(`atomfield_jobs_${activeSessionId}`);
-    let existingMap: Record<string, string> = {};
-    if (savedJobs) {
-      try {
-        const parsed = JSON.parse(savedJobs);
-        if (parsed.job_ids && Object.keys(parsed.job_ids).length > 0) {
-          existingMap = parsed.job_ids;
-          setActiveJobMap(parsed.job_ids);
-          if (parsed.pipeline_id) setActivePipelineId(parsed.pipeline_id);
-          if (parsed.run_id) setActiveRunId(parsed.run_id);
-        }
-      } catch (e) {
-        console.error('Failed to parse saved jobs for session', e);
-      }
-    }
-
-    // 2. Query cluster jobs for this session to ensure we connect to latest job execution
-    jobsService
-      .listJobs({ limit: 25 })
-      .then(({ jobs }) => {
-        if (isCancelled) return;
-        const matchingJobs = jobs.filter(
-          (j) => j.parameters?.pipeline_id === activeSessionId
-        );
-
-        if (matchingJobs.length > 0) {
-          const resolvedMap: Record<string, string> = { ...existingMap };
-          matchingJobs.forEach((j) => {
-            const nodeKey = j.parameters?.node || j.script_name;
-            resolvedMap[nodeKey] = j.id;
-          });
-          // Follow the newest submission of this session.
-          const newest = matchingJobs.reduce((a, b) =>
-            a.created_at > b.created_at ? a : b
-          );
-          setActiveJobMap(resolvedMap);
-          setActivePipelineId(activeSessionId);
-          setActiveRunId(newest.run_id);
-          localStorage.setItem(
-            `atomfield_jobs_${activeSessionId}`,
-            JSON.stringify({
-              job_ids: resolvedMap,
-              pipeline_id: activeSessionId,
-              run_id: newest.run_id,
-            })
-          );
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to query cluster jobs for session', err);
-      });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [activeSessionId]);
 
   // Live job updates
   const handleUpdateExecution = useCallback(
@@ -187,7 +136,7 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
   useRunEvents({
     runId: activeRunId,
     activeJobMap,
-    activePipelineId,
+    activePipelineId: activeSessionId,
     onUpdateExecution: handleUpdateExecution,
     onUpdateSelectedNode: setSelectedNode,
   });
@@ -236,37 +185,23 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
     }
     payload.target_id = targetId;
 
+    saveNow();
     setIsDeploying(true);
     setSaveStatus('saving');
     try {
       const response = await jobsService.submitPipeline(payload);
       if (response.job_ids) {
-        // Cached at once, so a reload follows the same run.
-        try {
-          localStorage.setItem(
-            `atomfield_jobs_${activeSessionId}`,
-            JSON.stringify({
-              job_ids: response.job_ids,
-              pipeline_id: response.pipeline_id || activeSessionId,
-              run_id: response.run_id,
-            })
-          );
-        } catch (e) {
-          console.error('Failed to cache job mapping', e);
-        }
-
-        setActiveJobMap(response.job_ids);
-        setActiveRunId(response.run_id);
-        if (response.pipeline_id) {
-          setActivePipelineId(response.pipeline_id);
-        }
+        setStartedRun({
+          sessionId: activeSessionId,
+          runId: response.run_id ?? null,
+          jobIds: response.job_ids,
+        });
         Object.entries(response.job_ids).forEach(([uiId, jobId]) => {
           if (updateNodeExecutionRef.current) {
             updateNodeExecutionRef.current(uiId, 'Pending', 'Waiting to start...', [], jobId);
           }
         });
       }
-      markSessionRunning();
       setSaveStatus('deployed');
     } catch (err: any) {
       console.error('Pipeline deploy failed', err);
@@ -294,13 +229,9 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
     (template: PipelineTemplate, tasks: Map<string, TaskDefinition>) => {
       const loaded = templateToBlueprint(template, tasks);
       setBlueprint(loaded);
-      localStorage.setItem(
-        `atomfield_blueprint_${activeSessionId}`,
-        JSON.stringify(loaded)
-      );
       nameSession(template.title);
     },
-    [activeSessionId, setBlueprint, nameSession]
+    [setBlueprint, nameSession]
   );
 
   const handleLoadTemplate = useCallback(
@@ -339,24 +270,40 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
           <LeftSidebar />
 
           <div className="flex-1 h-full relative">
-            <GraphCanvas
-              blueprint={blueprint}
-              onNodeDoubleClick={(node) => setSelectedNode(node)}
-              selectedNodeId={selectedNode?.id}
-              isEditable={true}
-              sessionId={activeSessionId}
-              onRegisterDeleteHandler={(handler) => { deleteNodeRef.current = handler; }}
-              onRegisterUpdateParamsHandler={(handler) => { updateNodeParamsRef.current = handler; }}
-              onRegisterUpdateExecutionHandler={(handler) => { updateNodeExecutionRef.current = handler; }}
-              onRegisterReplicateHandler={(handler) => { replicateNodeRef.current = handler; }}
-              onGraphChange={handleGraphChange}
-              onLoadTemplate={handleLoadTemplate}
-              onNodesDelete={(deleted) => {
-                if (selectedNode && deleted.some((d) => d.id === selectedNode.id || d.id === selectedNode.ui_id)) {
-                  setSelectedNode(null);
-                }
-              }}
-            />
+            {loadFailed && saved === undefined && (
+              <p role="alert" className={LOAD_FAILED}>
+                Could not load this pipeline. Refresh to try again.
+              </p>
+            )}
+            {saved !== undefined && (
+              <GraphCanvas
+                blueprint={blueprint}
+                onNodeDoubleClick={(node) => setSelectedNode(node)}
+                selectedNodeId={selectedNode?.id}
+                isEditable={true}
+                sessionId={activeSessionId}
+                onRegisterDeleteHandler={(handler) => {
+                  deleteNodeRef.current = handler;
+                }}
+                onRegisterUpdateParamsHandler={(handler) => {
+                  updateNodeParamsRef.current = handler;
+                }}
+                onRegisterUpdateExecutionHandler={(handler) => {
+                  updateNodeExecutionRef.current = handler;
+                }}
+                onRegisterReplicateHandler={(handler) => {
+                  replicateNodeRef.current = handler;
+                }}
+                onGraphChange={handleGraphChange}
+                onLoadTemplate={handleLoadTemplate}
+                onNodesDelete={(deleted) => {
+                  const selectedId = selectedNode?.id ?? selectedNode?.ui_id;
+                  if (deleted.some((node) => node.id === selectedId)) {
+                    setSelectedNode(null);
+                  }
+                }}
+              />
+            )}
           </div>
 
           <InspectorDrawer

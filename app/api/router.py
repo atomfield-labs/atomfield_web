@@ -17,6 +17,7 @@ from app.api.routes.pairings import router as pairings_router
 from app.api.routes.releases import router as releases_router
 from app.api.routes.runs import router as runs_router
 from app.api.routes.script_keys import router as script_keys_router
+from app.api.routes.sessions import router as sessions_router
 from app.api.routes.storage import router as storage_router
 from app.api.routes.targets import router as targets_router
 
@@ -34,6 +35,7 @@ api_router.include_router(data_packs_router)
 api_router.include_router(jobs_router)
 api_router.include_router(labs_router)
 api_router.include_router(runs_router)
+api_router.include_router(sessions_router)
 api_router.include_router(storage_router)
 api_router.include_router(targets_router)
 

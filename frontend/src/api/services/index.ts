@@ -4,5 +4,6 @@ export { catalogService } from './catalogService';
 export { jobsService } from './jobsService';
 export { labsService } from './labsService';
 export { pairingService } from './pairingService';
+export { sessionsService } from './sessionsService';
 export { targetsService } from './targetsService';
 

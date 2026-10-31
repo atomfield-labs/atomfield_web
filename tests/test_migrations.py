@@ -194,6 +194,43 @@ def test_backup_only_when_existing_data_would_change():
 
 KEY = "11111111-1111-1111-1111-111111111111"
 OTHER_KEY = "22222222-2222-2222-2222-222222222222"
+TARGET = "33333333-3333-3333-3333-333333333333"
+OLDER_RUN = "44444444-4444-4444-4444-444444444444"
+NEWER_RUN = "55555555-5555-5555-5555-555555555555"
+JOB_RUN = "66666666-6666-6666-6666-666666666666"
+RUN_COLUMNS = (
+    "(id, owner_id, session_id, target_id, event_seq, bundle_status, "
+    "created_at)"
+)
+PAST_RUNS = [
+    (
+        "INSERT INTO users (id, role, quota_limit, quota_used, is_active) "
+        f"VALUES ('{KEY}', 'user', 1, 0, true)"
+    ),
+    (
+        "INSERT INTO compute_targets (id, name, kind, max_jobs, "
+        "bundles_automatically) "
+        f"VALUES ('{TARGET}', 't', 'local', 1, false)"
+    ),
+    (
+        f"INSERT INTO runs {RUN_COLUMNS} VALUES ('{OLDER_RUN}', '{KEY}', "
+        f"'pipeline_a', '{TARGET}', 0, 'none', now() - interval '1 hour')"
+    ),
+    (
+        f"INSERT INTO runs {RUN_COLUMNS} VALUES ('{NEWER_RUN}', '{KEY}', "
+        f"'pipeline_a', '{TARGET}', 0, 'none', now())"
+    ),
+    (
+        f"INSERT INTO runs {RUN_COLUMNS} VALUES ('{JOB_RUN}', '{KEY}', "
+        f"'job_b', '{TARGET}', 0, 'none', now())"
+    ),
+    (
+        "INSERT INTO jobs (id, script_name, node_key, status, run_id, "
+        "pending_parents, attempt, max_attempts) VALUES "
+        "('77777777-7777-7777-7777-777777777777', 'x', 'x', 'queued', "
+        f"'{NEWER_RUN}', 0, 0, 2)"
+    ),
+]
 JOB_A, JOB_B, JOB_C, JOB_D, JOB_E = (
     f"00000000-0000-0000-0000-00000000000{n}" for n in range(1, 6)
 )
@@ -347,3 +384,34 @@ def test_0015_turns_the_administrator_into_the_owner(
         run_sql("SELECT name, is_admin FROM users ORDER BY name")
     )
     assert admins == [("me", False), ("them", True)]
+
+
+def test_0016_lists_past_pipeline_runs(
+    scratch_database: str,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """
+    Each person's pipeline sessions are listed from their newest run,
+    with its job count; a single job's session is not listed.
+
+    :param scratch_database: Name of the scratch database.
+    :type scratch_database: str
+    :param monkeypatch: Sets ALLOW_DOWNGRADE for the reverse check.
+    :type monkeypatch: pytest.MonkeyPatch
+    """
+    config = build_alembic_config()
+    command.upgrade(config, "0015")
+    asyncio.run(run_sql(*PAST_RUNS))
+
+    command.upgrade(config, "0016")
+
+    (sessions,) = asyncio.run(
+        run_sql(
+            "SELECT id, title, node_count, run_id::text, job_ids::text "
+            "FROM pipeline_sessions"
+        )
+    )
+    assert sessions == [("pipeline_a", None, 1, NEWER_RUN, "{}")]
+
+    monkeypatch.setenv("ALLOW_DOWNGRADE", "1")
+    command.downgrade(config, "0015")
