@@ -3,6 +3,7 @@ HTTP route handlers for simulation jobs and DAG pipelines.
 """
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
@@ -13,6 +14,7 @@ from app.api.dependencies import (
     get_owned_job,
     get_store,
 )
+from app.api.errors import not_found
 from app.db.session import get_db
 from app.models.job import Job
 from app.models.user import User
@@ -20,6 +22,7 @@ from app.queue.job_queue import RedisJobQueue
 from app.releases.catalogs import CurrentCatalog
 from app.runs.states import JobStatus
 from app.schemas.job import (
+    JobFilesResponse,
     JobListResponse,
     JobResponse,
     JobSubmitRequest,
@@ -34,6 +37,9 @@ from app.services.submission_validation import (
 from app.storage.store import ArtifactStore
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
+FILE_KIND = "File"
+# A job wrote this file: a browser must never treat it as a page.
+NEVER_A_PAGE = {"X-Content-Type-Options": "nosniff"}
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
 
@@ -243,3 +249,43 @@ async def get_job_logs(
     :rtype: dict
     """
     return await job_service.job_logs_and_files(store, job)
+
+
+@router.get("/{job_id}/files", response_model=JobFilesResponse)
+async def list_job_files(
+    job: Job = Depends(get_owned_job),
+) -> JobFilesResponse:
+    """
+    The files of a job that can be read here.
+
+    :param job: Job the caller owns (any job, for the admin).
+    :type job: Job
+    :return: Those files, and how many others stay behind.
+    :rtype: JobFilesResponse
+    """
+    return job_service.job_files(job)
+
+
+@router.get("/{job_id}/files/{name}", response_class=PlainTextResponse)
+async def get_job_file(
+    name: str,
+    job: Job = Depends(get_owned_job),
+    store: ArtifactStore = Depends(get_store),
+) -> PlainTextResponse:
+    """
+    One of a job's uploaded files, always as plain text.
+
+    :param name: The file.
+    :type name: str
+    :param job: Job the caller owns (any job, for the admin).
+    :type job: Job
+    :param store: Where the job's uploaded files are kept.
+    :type store: ArtifactStore
+    :return: Its content.
+    :rtype: PlainTextResponse
+    :raises HTTPException: 404 unless the job uploaded it.
+    """
+    content = await job_service.read_job_file(store, job, name)
+    if content is None:
+        raise not_found(FILE_KIND, name)
+    return PlainTextResponse(content, headers=NEVER_A_PAGE)

@@ -77,6 +77,38 @@ def test_logs_come_first_and_big_non_logs_stay_behind():
     ]
 
 
+def test_what_a_task_says_it_writes_goes_before_other_text():
+    """
+    A folder of many small files can't crowd out a task's plots and
+    summary: they come right after its log and output.
+    """
+    cards = [card(f"frame_{index:03}.xyz") for index in range(50)]
+    cards += [card("job_plots.json"), card("job_summary.txt")]
+    cards += [
+        card("job.log"),
+        card("execution.log"),
+        card("job_big.dat", 10**9),
+    ]
+    globs = ["*_plots.json", "*_summary.txt", "*_big.dat"]
+
+    assert pick_ui_files(cards, "job", globs)[:4] == [
+        "job.log",
+        "execution.log",
+        "job_plots.json",
+        "job_summary.txt",
+    ]
+
+
+def test_input_decks_and_wannier_outputs_count_as_text():
+    """
+    The input a program read can be seen beside what it wrote.
+    """
+    names = ["qe_scf.in", "seed.win", "seed.wout", "mols.sdf", "seed.chk"]
+    chosen = pick_ui_files([card(name) for name in names], "qe_scf")
+
+    assert chosen == ["mols.sdf", "qe_scf.in", "seed.win", "seed.wout"]
+
+
 def test_at_most_the_limit_of_ui_files_is_chosen():
     """
     A folder of many small text files sends only ``MAX_UI_FILES``.

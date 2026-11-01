@@ -146,7 +146,9 @@ class Reporter:
         :rtype: set[str]
         :raises httpx.HTTPError: On network trouble.
         """
-        names = pick_ui_files(cards, assignment.task.id)
+        task = assignment.task
+        globs = [port.glob for port in task.outputs]
+        names = pick_ui_files(cards, task.id, globs)
         grant = await self.client.upload_links(
             assignment.job_id, assignment.attempt, names
         )

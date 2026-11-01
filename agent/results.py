@@ -7,6 +7,8 @@ web UI can show them; a log too long for the limit is sent as its end,
 which is what the UI shows anyway.
 """
 
+from collections.abc import Sequence
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 from agent.workspace import own_files
@@ -30,8 +32,16 @@ TEXT_SUFFIXES = {
     ".dat",
     ".mol",
     ".pdb",
+    ".sdf",
     ".inp",
+    ".in",
+    ".win",
+    ".wout",
 }
+# Order of the files after the script's log and the command's output.
+DECLARED_RANK = 2
+LOG_RANK = 3
+TEXT_RANK = 4
 
 
 def card_for(path: Path, workspace: Path) -> FileCard:
@@ -69,26 +79,35 @@ def file_cards(workspace: Path) -> list[FileCard]:
     return sorted(cards, key=lambda card: card.path)
 
 
-def ui_priority(card: FileCard, task_id: str) -> tuple[int, str]:
+def ui_priority(
+    card: FileCard, task_id: str, output_globs: Sequence[str]
+) -> tuple[int, str]:
     """
     Order for choosing UI files: the script's log, the command's
-    output, other logs, then other text.
+    output, what the task says it writes (its plots and summary), other
+    logs, then other text.
 
     :param card: A candidate file.
     :type card: FileCard
     :param task_id: The job's task, which names its log.
     :type task_id: str
+    :param output_globs: The patterns of the task's outputs.
+    :type output_globs: Sequence[str]
     :return: Sort key; lower comes first.
     :rtype: tuple[int, str]
     """
     first = [f"{task_id}{LOG_SUFFIX}", EXECUTION_LOG]
     if card.path in first:
         return first.index(card.path), card.path
+    if any(fnmatchcase(card.path, glob) for glob in output_globs):
+        return DECLARED_RANK, card.path
     is_log = card.path.endswith(LOG_SUFFIX)
-    return (2 if is_log else 3), card.path
+    return (LOG_RANK if is_log else TEXT_RANK), card.path
 
 
-def pick_ui_files(cards: list[FileCard], task_id: str) -> list[str]:
+def pick_ui_files(
+    cards: list[FileCard], task_id: str, output_globs: Sequence[str] = ()
+) -> list[str]:
     """
     Choose the small files to upload for the web UI: text files at
     the top of the folder, logs of any size (sent as their end), other
@@ -98,6 +117,10 @@ def pick_ui_files(cards: list[FileCard], task_id: str) -> list[str]:
     :type cards: list[FileCard]
     :param task_id: The job's task.
     :type task_id: str
+    :param output_globs: The patterns of the task's outputs, which go
+        before other text, so a folder of many small files can't crowd
+        them out.
+    :type output_globs: Sequence[str]
     :return: Up to ``MAX_UI_FILES`` names, most useful first.
     :rtype: list[str]
     """
@@ -111,7 +134,7 @@ def pick_ui_files(cards: list[FileCard], task_id: str) -> list[str]:
             or card.size_bytes <= UI_FILE_MAX_BYTES
         )
     ]
-    chosen.sort(key=lambda card: ui_priority(card, task_id))
+    chosen.sort(key=lambda card: ui_priority(card, task_id, output_globs))
     return [card.path for card in chosen[:MAX_UI_FILES]]
 
 

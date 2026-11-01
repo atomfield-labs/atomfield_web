@@ -3,6 +3,7 @@ Pydantic schemas for job and pipeline requests and responses.
 """
 
 from datetime import datetime
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -80,6 +81,35 @@ class JobListResponse(BaseModel):
 
     jobs: list[JobResponse]
     total: int
+
+
+class JobFileKind(StrEnum):
+    """
+    What the web app does with a job's file.
+    """
+
+    PLOTS = "plots"
+    TEXT = "text"
+
+
+class JobFileView(BaseModel):
+    """
+    One file of a job that can be read through the API.
+    """
+
+    name: str
+    size_bytes: int
+    kind: JobFileKind
+
+
+class JobFilesResponse(BaseModel):
+    """
+    The files of a job that can be read here, and how many stay behind
+    on the computer that ran it.
+    """
+
+    files: list[JobFileView]
+    others: int
 
 
 class JobNode(BaseModel):

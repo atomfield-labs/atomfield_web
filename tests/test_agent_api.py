@@ -32,6 +32,10 @@ OTHER_TOKEN = "af_agent_test_other"
 SHORT_WAIT = {"wait_seconds": 0.2}
 
 
+# What a job might write to trick a browser.
+JOB_PAGE = b"<script>alert(1)</script>"
+
+
 def enqueue(*job_ids: str) -> None:
     """
     Put job ids on the house agent's queue, as the dispatcher would.
@@ -600,6 +604,109 @@ def test_a_finished_jobs_log_and_files_come_from_its_report(
             return run.folder_path, run.folder_address
 
     assert asyncio.run(read_folder()) == (folder["path"], folder["address"])
+
+
+def finish_with_files(
+    client: TestClient, job_id: str, names: list[str]
+) -> None:
+    """
+    Claim a job, upload some files, and report them beside one that
+    stays behind.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param job_id: The job.
+    :type job_id: str
+    :param names: The files to upload.
+    :type names: list[str]
+    """
+    attempt = claim(client).json()["attempt"]
+    body = {"attempt": attempt, "names": names}
+    url = f"/api/agent/jobs/{job_id}/uploads"
+    links = client.post(url, json=body, headers=HOUSE).json()["links"]
+    for name in names:
+        assert client.put(links[name], content=JOB_PAGE).status_code == 201
+    cards = [
+        {"path": name, "size_bytes": 25, "sha256": "a" * 64, "uploaded": True}
+        for name in names
+    ]
+    cards.append({"path": "big.trj", "size_bytes": 9, "sha256": "b" * 64})
+    assert complete(client, job_id, attempt, files=cards).status_code == 200
+
+
+def test_the_file_list_holds_what_a_job_uploaded(
+    client: TestClient,
+    chain,
+):
+    """
+    Nothing while the job runs; then the uploaded files, plots marked,
+    and how many others stay behind.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param chain: Owner headers and job ids.
+    :type chain: tuple
+    """
+    headers, (first, _) = chain
+    url = f"/api/jobs/{first}/files"
+    running = client.get(url, headers=headers).json()
+    finish_with_files(client, first, ["toy_summary.txt", "toy_plots.json"])
+
+    assert running == {"files": [], "others": 0}
+    assert client.get(url, headers=headers).json() == {
+        "files": [
+            {"name": "toy_summary.txt", "size_bytes": 25, "kind": "text"},
+            {"name": "toy_plots.json", "size_bytes": 25, "kind": "plots"},
+        ],
+        "others": 1,
+    }
+
+
+def test_a_jobs_file_comes_back_as_plain_text(
+    client: TestClient,
+    chain,
+):
+    """
+    Whatever a job wrote, a browser shows it as text and never runs it.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param chain: Owner headers and job ids.
+    :type chain: tuple
+    """
+    headers, (first, _) = chain
+    finish_with_files(client, first, ["toy_summary.txt"])
+    found = client.get(
+        f"/api/jobs/{first}/files/toy_summary.txt", headers=headers
+    )
+
+    assert found.content == JOB_PAGE
+    assert found.headers["content-type"].startswith("text/plain")
+    assert found.headers["x-content-type-options"] == "nosniff"
+
+
+@pytest.mark.parametrize("name", ["big.trj", "other.txt", "..%2Fsecret"])
+def test_what_a_job_did_not_upload_is_not_found(
+    client: TestClient,
+    chain,
+    name: str,
+):
+    """
+    A file that stayed behind, one that never was, and a path out of
+    the job's folder are all simply not there.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param chain: Owner headers and job ids.
+    :type chain: tuple
+    :param name: The file asked for.
+    :type name: str
+    """
+    headers, (first, _) = chain
+    finish_with_files(client, first, ["toy_summary.txt"])
+    url = f"/api/jobs/{first}/files/{name}"
+
+    assert client.get(url, headers=headers).status_code == 404
 
 
 def test_a_scheduled_claim_starts_the_clock_only_when_reported(

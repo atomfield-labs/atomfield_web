@@ -48,7 +48,7 @@ def job_paths(job_id: str) -> list[str]:
     :rtype: list[str]
     """
     base = f"/api/jobs/{job_id}"
-    return [base, f"{base}/logs"]
+    return [base, f"{base}/logs", f"{base}/files"]
 
 
 def count_jobs(client: TestClient, headers: dict[str, str]) -> int:

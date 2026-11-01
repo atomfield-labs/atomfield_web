@@ -29,6 +29,9 @@ from app.runs.lifecycle import create_run, dispatch
 from app.runs.states import JobStatus
 from app.schemas.job import (
     JobEdge,
+    JobFileKind,
+    JobFilesResponse,
+    JobFileView,
     JobNode,
     JobSubmitRequest,
     PipelineFile,
@@ -57,6 +60,8 @@ QUOTA_MESSAGE = (
     "{remaining} left. Contact the administrator."
 )
 ERROR_LOG_HEADER = "[ERROR]"
+# A script's plots, which the web app draws (see docs/releases.md).
+PLOTS_SUFFIX = "_plots.json"
 TRUNCATE_ALL = (
     "TRUNCATE TABLE job_dependencies, jobs, runs, pipeline_sessions CASCADE;"
 )
@@ -461,6 +466,18 @@ async def submit_pipeline(
     return summary
 
 
+def uploaded_names(job: Job) -> set[str]:
+    """
+    The files of a job whose agent uploaded a copy.
+
+    :param job: The job.
+    :type job: Job
+    :return: Their names; none while the job runs.
+    :rtype: set[str]
+    """
+    return {card["path"] for card in job.output_files or [] if card["uploaded"]}
+
+
 async def read_job_log(store: ArtifactStore, job: Job) -> str:
     """
     The end of a finished job's log, from the copy its agent uploaded:
@@ -474,9 +491,7 @@ async def read_job_log(store: ArtifactStore, job: Job) -> str:
         while the job runs (nothing is uploaded until it ends).
     :rtype: str
     """
-    uploaded = {
-        card["path"] for card in job.output_files or [] if card["uploaded"]
-    }
+    uploaded = uploaded_names(job)
     for name in (f"{job.script_name}.log", EXECUTION_LOG):
         if name in uploaded:
             data = await store.read(job_file_key(job.run_id, job.id, name))
@@ -508,6 +523,53 @@ async def job_logs_and_files(store: ArtifactStore, job: Job) -> dict:
         "parameters": job.parameters,
         "output_data": job.output_data,
     }
+
+
+def job_files(job: Job) -> JobFilesResponse:
+    """
+    The files of a job the web app can show.
+
+    :param job: The job.
+    :type job: Job
+    :return: The uploaded files, and how many others stay behind.
+    :rtype: JobFilesResponse
+    """
+    cards = job.output_files or []
+    shown = [
+        JobFileView(
+            name=card["path"],
+            size_bytes=card["size_bytes"],
+            kind=(
+                JobFileKind.PLOTS
+                if card["path"].endswith(PLOTS_SUFFIX)
+                else JobFileKind.TEXT
+            ),
+        )
+        for card in cards
+        if card["uploaded"]
+    ]
+    return JobFilesResponse(files=shown, others=len(cards) - len(shown))
+
+
+async def read_job_file(
+    store: ArtifactStore, job: Job, name: str
+) -> bytes | None:
+    """
+    The stored copy of one of a job's files.
+
+    :param store: Where uploaded job files are kept.
+    :type store: ArtifactStore
+    :param job: The job.
+    :type job: Job
+    :param name: The file, as its card names it.
+    :type name: str
+    :return: Its content; None unless the job uploaded a file of that
+        name, so nothing else in the store can be asked for.
+    :rtype: bytes | None
+    """
+    if name not in uploaded_names(job):
+        return None
+    return await store.read(job_file_key(job.run_id, job.id, name))
 
 
 async def empty_redis(redis: Redis) -> None:
