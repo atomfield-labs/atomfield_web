@@ -96,9 +96,9 @@ class Settings(BaseSettings):
     RELEASES_MAY_HOLD_SOURCE: bool = False
 
     # --- Computational Chemistry Driver ---
-    CHEMISTRY_PYTHON_BIN: str = (
-        "python3"
-    )
+    # A Python with the scripts' packages, for the contract test only;
+    # that test is skipped without it. A server runs no scripts.
+    CHEMISTRY_PYTHON_BIN: str | None = None
 
     # --- Environment & Administration ---
     ENVIRONMENT: str = "development"  # development | staging | production

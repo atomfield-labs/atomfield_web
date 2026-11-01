@@ -9,6 +9,16 @@ wheels/
 # Virtual environments
 .venv
 .env
+.env.*
+!.env.example
+
+# Keys, and what a server or a build leaves behind
+*.pem
+*.key
+*.p12
+*.dump
+*.sql.gz
+*.whl
 
 # Test artifacts
 .pytest_cache/

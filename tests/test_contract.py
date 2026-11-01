@@ -37,7 +37,9 @@ print("\\n" + json.dumps(results, default=str))
 
 pytestmark = pytest.mark.skipif(
     not (
-        REAL_CATALOG.exists() and Path(settings.CHEMISTRY_PYTHON_BIN).exists()
+        REAL_CATALOG.exists()
+        and settings.CHEMISTRY_PYTHON_BIN
+        and Path(settings.CHEMISTRY_PYTHON_BIN).exists()
     ),
     reason="needs scripts_repo and the chemistry interpreter",
 )
