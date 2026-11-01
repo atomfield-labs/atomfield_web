@@ -33,15 +33,27 @@ class WebAppMount(Mount):
         return super().matches(scope)
 
 
+class BuiltFiles(StaticFiles):
+    """
+    The built files. With no build (in development Vite serves the
+    pages, and tests need none) every page is simply not found.
+    """
+
+    async def check_config(self) -> None:
+        """
+        Accept a folder that is not there; the parent raises an error
+        on the first request, which would turn a 404 into a 500.
+        """
+
+
 def web_app_mount() -> WebAppMount:
     """
-    The route serving the built files. A server without them (in
-    development Vite serves the pages) answers 404 and still starts.
+    The route serving the built files.
 
     :return: The route, to go after every other.
     :rtype: WebAppMount
     """
-    files = StaticFiles(
+    files = BuiltFiles(
         directory=settings.WEB_DIR,
         html=True,
         check_dir=False,
