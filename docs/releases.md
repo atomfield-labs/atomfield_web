@@ -202,9 +202,11 @@ never as markup, and fields the web app doesn't know are ignored, so a
 file can say what to show but nothing about how the page behaves. The
 format number is there so an old page can say it can't read a new file.
 
-The agent uploads a step's small text files when it ends, what the task
-names first, 20 at most, each up to 2 MB; the **Artifacts** tab shows
-them. A curve past 2,000 points is thinned to fit, and the tables keep
+Each step's modal shows only that job's own files. The agent uploads a
+step's small text files when it ends, what the task names first, 20 at
+most, each up to 2 MB; the **Artifacts** tab shows them. An uploaded input
+counts only for the steps wired to it, though every job of a run receives
+them all. A curve past 2,000 points is thinned to fit, and the tables keep
 them all.
 
 ## What a release does not carry

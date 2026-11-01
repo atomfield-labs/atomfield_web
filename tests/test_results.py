@@ -5,8 +5,14 @@ files the web UI shows (logs first, a long log as its end).
 
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 
-from agent.results import file_cards, pick_ui_files, upload_body
+from agent.results import (
+    file_cards,
+    inputs_for_other_steps,
+    pick_ui_files,
+    upload_body,
+)
 from app.agents.schemas import MAX_UI_FILES, UI_FILE_MAX_BYTES, FileCard
 
 
@@ -107,6 +113,25 @@ def test_input_decks_and_wannier_outputs_count_as_text():
     chosen = pick_ui_files([card(name) for name in names], "qe_scf")
 
     assert chosen == ["mols.sdf", "qe_scf.in", "seed.win", "seed.wout"]
+
+
+def test_a_step_shows_its_own_input_but_not_another_steps():
+    """
+    Every job of a run receives the session's uploads. Only the one it
+    is wired to says anything about its calculation.
+    """
+    assignment = SimpleNamespace(
+        input_files={"structure": ["si.in"]},
+        inputs=[SimpleNamespace(name="si.in"), SimpleNamespace(name="fe.in")],
+    )
+    cards = [card("si.in"), card("fe.in"), card("job_summary.txt")]
+    left_out = inputs_for_other_steps(assignment)
+
+    assert left_out == {"fe.in"}
+    assert pick_ui_files(cards, "job", (), left_out) == [
+        "job_summary.txt",
+        "si.in",
+    ]
 
 
 def test_at_most_the_limit_of_ui_files_is_chosen():

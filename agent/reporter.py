@@ -12,7 +12,12 @@ from typing import Protocol
 import httpx
 
 from agent.config import AgentConfig
-from agent.results import file_cards, pick_ui_files, upload_body
+from agent.results import (
+    file_cards,
+    inputs_for_other_steps,
+    pick_ui_files,
+    upload_body,
+)
 from app.agents.schemas import (
     CompletionRequest,
     CompletionResponse,
@@ -148,7 +153,8 @@ class Reporter:
         """
         task = assignment.task
         globs = [port.glob for port in task.outputs]
-        names = pick_ui_files(cards, task.id, globs)
+        left_out = inputs_for_other_steps(assignment)
+        names = pick_ui_files(cards, task.id, globs, left_out)
         grant = await self.client.upload_links(
             assignment.job_id, assignment.attempt, names
         )

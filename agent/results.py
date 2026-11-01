@@ -7,7 +7,7 @@ web UI can show them; a log too long for the limit is sent as its end,
 which is what the UI shows anyway.
 """
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from fnmatch import fnmatchcase
 from pathlib import Path
 
@@ -17,6 +17,7 @@ from app.agents.schemas import (
     MAX_UI_FILES,
     UI_FILE_MAX_BYTES,
     FileCard,
+    JobAssignment,
 )
 from app.core.fingerprints import file_sha256
 
@@ -105,8 +106,28 @@ def ui_priority(
     return (LOG_RANK if is_log else TEXT_RANK), card.path
 
 
+def inputs_for_other_steps(assignment: JobAssignment) -> set[str]:
+    """
+    The files a job was handed but not wired to. Every job of a run
+    receives the session's uploads, whichever step they were meant for,
+    and they say nothing about this job's calculation.
+
+    :param assignment: The attempt.
+    :type assignment: JobAssignment
+    :return: Their names.
+    :rtype: set[str]
+    """
+    wired = {
+        name for names in assignment.input_files.values() for name in names
+    }
+    return {item.name for item in assignment.inputs} - wired
+
+
 def pick_ui_files(
-    cards: list[FileCard], task_id: str, output_globs: Sequence[str] = ()
+    cards: list[FileCard],
+    task_id: str,
+    output_globs: Sequence[str] = (),
+    left_out: Collection[str] = (),
 ) -> list[str]:
     """
     Choose the small files to upload for the web UI: text files at
@@ -121,6 +142,8 @@ def pick_ui_files(
         before other text, so a folder of many small files can't crowd
         them out.
     :type output_globs: Sequence[str]
+    :param left_out: Files not to send, however they look.
+    :type left_out: Collection[str]
     :return: Up to ``MAX_UI_FILES`` names, most useful first.
     :rtype: list[str]
     """
@@ -128,6 +151,7 @@ def pick_ui_files(
         card
         for card in cards
         if "/" not in card.path
+        and card.path not in left_out
         and Path(card.path).suffix.lower() in TEXT_SUFFIXES
         and (
             card.path.endswith(LOG_SUFFIX)
