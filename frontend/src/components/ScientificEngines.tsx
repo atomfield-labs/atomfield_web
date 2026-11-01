@@ -54,7 +54,7 @@ export const SCIENTIFIC_PACKAGES: ScientificPackage[] = [
 
 export default function ScientificEngines() {
   return (
-    <section className="w-full px-6 py-16 sm:py-20 my-6 sm:my-10">
+    <section className="w-full px-6 py-12 sm:py-16">
       <div className="max-w-6xl mx-auto flex flex-col items-center text-center">
         {/* Simple Centered Heading */}
         <h3 className="text-xs sm:text-sm font-semibold tracking-wider text-slate-500 uppercase mb-10 sm:mb-12">

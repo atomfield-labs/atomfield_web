@@ -5,9 +5,24 @@ import JablonskiDiagram from '../animations/JablonskiDiagram'
 import IonLattice from '../animations/IonLattice'
 import PolymerMelt from '../animations/PolymerMelt'
 
+// Three across on a wide window, two on a medium one, one on a phone. A
+// last row with fewer cards sits in the middle.
+const CARD_ROW = 'flex flex-wrap justify-center gap-8 max-w-6xl mx-auto';
+const MODULE_CARD = [
+  'group relative flex flex-col overflow-hidden bg-white rounded-2xl',
+  'border border-slate-200/90 shadow-xs hover:border-orange-500',
+  'hover:shadow-card-lift hover:ring-2 hover:ring-orange-500/20',
+  'hover:-translate-y-1.5 transition-all duration-300 ease-out',
+  'w-full max-w-[420px] md:max-w-none md:w-[calc((100%-2rem)/2)]',
+  'xl:w-[calc((100%-4rem)/3)]',
+].join(' ');
+
 export default function SectionsContainer() {
   return (
-    <section id="modules-grid" className="w-full px-6 sm:px-12 md:px-16 lg:px-20 pb-24 mx-auto">
+    <section
+      id="modules-grid"
+      className="w-full px-6 sm:px-12 md:px-16 lg:px-20 pt-8 pb-8 mx-auto"
+    >
       {/* Center-Justified Section Header */}
       <div className="mb-12 text-center max-w-2xl mx-auto">
         <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900 text-center">
@@ -18,12 +33,11 @@ export default function SectionsContainer() {
         </p>
       </div>
 
-      {/* Symmetrical 2-Cards Per Row: Preserved Original Card Width, Generous Symmetric Spacing */}
-      <div className="flex flex-wrap justify-center gap-12 sm:gap-16 md:gap-20 lg:gap-24 max-w-[980px] mx-auto">
+      <div className={CARD_ROW}>
         {/* Card 1: Nanoreactor */}
         <div 
           onClick={() => window.location.hash = '#pipeline/new/nanoreactor'}
-          className="group relative bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-[0_20px_45px_-12px_rgba(249,115,22,0.18),0_4px_16px_rgba(0,0,0,0.04)] hover:border-orange-500 hover:ring-2 hover:ring-orange-500/20 transition-all duration-300 ease-out flex flex-col overflow-hidden cursor-pointer hover:-translate-y-1.5 w-full sm:w-[390px] max-w-[400px]"
+          className={`${MODULE_CARD} cursor-pointer`}
         >
           {/* Dominant 3D Animation Header (Slightly Reduced Length) */}
           <div className="w-full h-72 sm:h-80 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
@@ -73,7 +87,7 @@ export default function SectionsContainer() {
         </div>
 
         {/* Card 2: Optoelectronics */}
-        <div className="group relative bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-[0_20px_45px_-12px_rgba(249,115,22,0.18),0_4px_16px_rgba(0,0,0,0.04)] hover:border-orange-500 hover:ring-2 hover:ring-orange-500/20 transition-all duration-300 ease-out flex flex-col overflow-hidden hover:-translate-y-1.5 w-full sm:w-[390px] max-w-[400px]">
+        <div className={MODULE_CARD}>
           {/* Dominant 3D Animation Header (Slightly Reduced Length) */}
           <div className="w-full h-72 sm:h-80 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
             <Suspense fallback={<div className="w-full h-full bg-slate-50 animate-pulse" />}>
@@ -126,7 +140,7 @@ export default function SectionsContainer() {
         </div>
 
         {/* Card 3: Solid State */}
-        <div className="group relative bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-[0_20px_45px_-12px_rgba(249,115,22,0.18),0_4px_16px_rgba(0,0,0,0.04)] hover:border-orange-500 hover:ring-2 hover:ring-orange-500/20 transition-all duration-300 ease-out flex flex-col overflow-hidden hover:-translate-y-1.5 w-full sm:w-[390px] max-w-[400px]">
+        <div className={MODULE_CARD}>
           {/* Dominant 3D Animation Header (Slightly Reduced Length) */}
           <div className="w-full h-72 sm:h-80 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
             <Suspense fallback={<div className="w-full h-full bg-slate-50 animate-pulse" />}>
@@ -167,7 +181,7 @@ export default function SectionsContainer() {
         </div>
 
         {/* Card 4: Polymers */}
-        <div className="group relative bg-white rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-[0_20px_45px_-12px_rgba(249,115,22,0.18),0_4px_16px_rgba(0,0,0,0.04)] hover:border-orange-500 hover:ring-2 hover:ring-orange-500/20 transition-all duration-300 ease-out flex flex-col overflow-hidden hover:-translate-y-1.5 w-full sm:w-[390px] max-w-[400px]">
+        <div className={MODULE_CARD}>
           {/* Dominant 3D Animation Header (Slightly Reduced Length) */}
           <div className="w-full h-72 sm:h-80 bg-white relative overflow-hidden rounded-t-2xl border-b border-slate-100">
             <Suspense fallback={<div className="w-full h-full bg-slate-50 animate-pulse" />}>

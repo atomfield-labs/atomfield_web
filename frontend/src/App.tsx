@@ -128,8 +128,8 @@ function View({ hash }: { hash: string }) {
   return (
     <div className={LANDING}>
       <HeroSection />
-      <ScientificEngines />
       <SectionsContainer />
+      <ScientificEngines />
     </div>
   )
 }

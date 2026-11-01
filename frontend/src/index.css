@@ -1,6 +1,13 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+@theme {
+  /* A module card lifting under the pointer. */
+  --shadow-card-lift:
+    0 20px 45px -12px rgb(249 115 22 / 0.18),
+    0 4px 16px rgb(0 0 0 / 0.04);
+}
+
 :root {
   font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
