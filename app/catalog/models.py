@@ -123,9 +123,18 @@ class OutputPort(ContractModel):
     glob: str
 
 
+class ParameterWidget(StrEnum):
+    """
+    A widget a parameter's kind alone can't call for.
+    """
+
+    MESH = "mesh"
+
+
 class ParameterSpec(ContractModel):
     """
-    One user-settable option of a task, as its script declares it.
+    One user-settable option of a task, as its script declares it, and
+    how a step's form shows it.
     """
 
     name: str
@@ -140,6 +149,15 @@ class ParameterSpec(ContractModel):
     unit: str | None = None
     minimum: float | None = None
     maximum: float | None = None
+    # Which card of the form it sits in, and whether it starts folded.
+    group: str | None = None
+    advanced: bool = False
+    widget: ParameterWidget | None = None
+    # How far the arrows move it, or by a factor of ten.
+    step: float | None = Field(default=None, gt=0)
+    log_step: bool = False
+    # Shown only while each named parameter has the value given.
+    show_when: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def check_default_is_a_choice(self) -> "ParameterSpec":
@@ -235,6 +253,27 @@ class TaskDefinition(ContractModel):
         ]
         if repeated := given_twice(flags):
             raise ValueError(f"{self.id}: flags used twice: {repeated}")
+        return self
+
+    @model_validator(mode="after")
+    def check_show_when_can_happen(self) -> "TaskDefinition":
+        """
+        Reject a parameter that waits for another parameter or a value
+        that doesn't exist, which would hide it for good.
+
+        :return: The validated definition.
+        :rtype: TaskDefinition
+        :raises ValueError: Naming the parameter and what it waits for.
+        """
+        specs = {spec.name: spec for spec in self.parameters}
+        for spec in self.parameters:
+            for name, value in (spec.show_when or {}).items():
+                other = specs.get(name)
+                if other is None or value not in (other.choices or [value]):
+                    raise ValueError(
+                        f"{self.id}.{spec.name}: show_when {name} = "
+                        f"{value!r} can't happen"
+                    )
         return self
 
 

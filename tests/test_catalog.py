@@ -83,6 +83,20 @@ def test_the_real_catalog_loads():
             lambda doc: doc["tasks"][0].update(module="toy; import os"),
             "should match pattern",
         ),
+        (
+            lambda doc: doc["tasks"][0]["parameters"][0].update(widget="dial"),
+            "widget",
+        ),
+        (
+            lambda doc: doc["tasks"][0]["parameters"][0].update(step=0),
+            "greater than 0",
+        ),
+        (
+            lambda doc: doc["tasks"][0]["parameters"][0].update(
+                show_when={"no_such_parameter": 1}
+            ),
+            "can't happen",
+        ),
     ],
 )
 def test_broken_catalogs_are_rejected(break_it, message: str):
@@ -468,3 +482,47 @@ def test_an_input_takes_files_by_their_extension_in_any_case():
     assert port.takes("water.XYZ")
     assert not port.takes("xyz")
     assert not port.takes("water.pdb")
+
+
+def waiting_parameter(document: dict[str, Any]) -> tuple[dict, dict]:
+    """
+    In a catalog document, make one parameter wait for a choice of
+    another.
+
+    :param document: The document, changed in place.
+    :type document: dict[str, Any]
+    :return: The one with choices, and the one waiting for it.
+    :rtype: tuple[dict, dict]
+    """
+    parameters = document["tasks"][0]["parameters"]
+    chooser = next(spec for spec in parameters if spec.get("choices"))
+    waiting = next(spec for spec in parameters if spec is not chooser)
+    waiting["show_when"] = {chooser["name"]: chooser["choices"][0]}
+    return chooser, waiting
+
+
+def test_a_form_field_can_wait_for_a_choice_of_another():
+    """
+    The form's fields load with the task.
+    """
+    document = fixture_document()
+    _, waiting = waiting_parameter(document)
+    waiting.update(group="Accuracy", advanced=True, widget="mesh", step=0.5)
+    task = CatalogDocument.model_validate(document).tasks[0]
+    loaded = {spec.name: spec for spec in task.parameters}[waiting["name"]]
+
+    assert loaded.group == "Accuracy"
+    assert loaded.widget == "mesh"
+    assert loaded.show_when == waiting["show_when"]
+
+
+def test_a_form_field_cannot_wait_for_a_value_never_offered():
+    """
+    A value outside the other parameter's choices would hide it for good.
+    """
+    document = fixture_document()
+    chooser, waiting = waiting_parameter(document)
+    waiting["show_when"] = {chooser["name"]: "never offered"}
+
+    with pytest.raises(ValidationError, match="can't happen"):
+        CatalogDocument.model_validate(document)
