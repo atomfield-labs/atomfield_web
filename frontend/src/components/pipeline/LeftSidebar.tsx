@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
+  GripVertical,
   Info,
   PanelLeftClose,
   PanelLeftOpen,
@@ -55,10 +56,13 @@ const PANEL = [
   'select-none z-20 transition-all duration-300 ease-in-out',
 ].join(' ');
 const ITEM = [
-  'flex items-center justify-between gap-2 min-h-9 px-2.5 rounded-lg',
-  'text-sm text-stone-900 hover:text-orange-600 cursor-grab',
+  'flex items-start gap-1.5 py-1.5 px-2.5 rounded-lg',
+  'text-sm leading-snug text-stone-900 hover:text-orange-600 cursor-grab',
   'active:cursor-grabbing',
 ].join(' ');
+// What can be dragged has a handle, so a name is not taken for a header.
+const GRIP = 'shrink-0 mt-[3px] text-stone-300';
+const GROUP = 'py-2 border-t border-stone-200 first:border-t-0 first:pt-0';
 const OPEN_BUTTON = [
   'absolute top-3 left-3 z-30 h-9 px-3 flex items-center gap-2 rounded-lg',
   'bg-white border border-stone-200 text-sm text-stone-700',
@@ -77,12 +81,12 @@ const SEARCH_INPUT = [
   'outline-none',
 ].join(' ');
 const GROUP_BUTTON = [
-  'w-full flex items-center justify-between py-1.5 px-2.5 rounded-md',
-  'bg-white border border-stone-200 text-stone-600 text-xs font-medium',
-  'enabled:hover:border-orange-400 enabled:hover:text-orange-600',
-  'transition-colors cursor-pointer disabled:cursor-default select-none',
+  'w-full flex items-center justify-between py-1 px-2.5 rounded-md',
+  'text-stone-500 text-[11px] font-semibold tracking-wider uppercase',
+  'enabled:hover:text-stone-800 transition-colors cursor-pointer',
+  'disabled:cursor-default select-none',
 ].join(' ');
-const INFO_BUTTON = 'shrink-0 text-stone-300 hover:text-stone-500';
+const INFO_BUTTON = 'shrink-0 mt-[3px] text-stone-300 hover:text-stone-500';
 const TOOLTIP = [
   'fixed z-50 pointer-events-none w-64 p-3 rounded-lg bg-stone-900/95',
   'text-white text-xs shadow-xl',
@@ -231,7 +235,7 @@ export default function LeftSidebar() {
                 const isOpen = searching || (openGroups[group.id] ?? true);
                 const Chevron = isOpen ? ChevronDown : ChevronRight;
                 return (
-                  <section key={group.id} className="mb-2">
+                  <section key={group.id} className={GROUP}>
                     <button
                       type="button"
                       onClick={() => toggleGroup(group.id)}
@@ -251,7 +255,17 @@ export default function LeftSidebar() {
                             onDragStart={(event) => startDrag(event, item)}
                             className={ITEM}
                           >
-                            <span className="truncate">{item.title}</span>
+                            <GripVertical
+                              size={14}
+                              aria-hidden="true"
+                              className={GRIP}
+                            />
+                            <span
+                              title={item.title}
+                              className="flex-1 min-w-0 line-clamp-2"
+                            >
+                              {item.title}
+                            </span>
                             <button
                               type="button"
                               onMouseEnter={(event) =>
