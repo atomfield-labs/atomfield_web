@@ -58,6 +58,13 @@ flowchart TD
 
 ---
 
+## Running it
+
+Putting AtomField on a server is in `docs/deploy.md`, and connecting a
+cluster in `docs/cluster-agent.md`.
+
+---
+
 ## Proprietary Notice
 
 This software is proprietary and confidential to **AtomField Labs**. Unauthorized copying, distribution, or commercial modification of this codebase is strictly prohibited.
