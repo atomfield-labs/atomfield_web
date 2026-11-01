@@ -1,9 +1,11 @@
-# The web app: built here, served by the API at its own address.
+# The web app: built here, served by the API at its own address. Its
+# guides come from docs/, beside it as in the repository.
 FROM node:24-slim AS web
-WORKDIR /web
+WORKDIR /repo/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
+COPY docs/ /repo/docs/
 RUN npm run build
 
 FROM python:3.11-slim
@@ -29,4 +31,4 @@ RUN uv sync --no-install-project --python 3.11
 
 # Copy application source
 COPY . .
-COPY --from=web /web/dist ./frontend/dist
+COPY --from=web /repo/frontend/dist ./frontend/dist

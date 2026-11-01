@@ -29,6 +29,12 @@ body {
   color: #0f172a;
 }
 
+/* A guide's code block draws its own box; highlighting only colours. */
+.prose pre code.hljs {
+  padding: 0;
+  background: transparent;
+}
+
 /* Publication Grade KaTeX Display Equation Styling */
 .katex-display {
   margin: 1.25rem 0 !important;

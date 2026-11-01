@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -5,9 +6,19 @@ import tailwindcss from '@tailwindcss/vite'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      // The guides live in the repository's docs/ folder: one copy, for
+      // whoever reads them on GitHub and in the web app.
+      '@docs': fileURLToPath(new URL('../docs', import.meta.url)),
+    },
+  },
   server: {
     host: true,
     allowedHosts: true,
+    fs: {
+      allow: ['.', '../docs'],
+    },
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8000',

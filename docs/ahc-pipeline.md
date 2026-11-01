@@ -5,8 +5,8 @@ field: the anomalous Hall effect. Its size, the anomalous Hall
 conductivity (AHC, sigma_xy, in S/cm), comes from the Berry curvature
 of the bands near the Fermi level. Computing it takes four programs
 in a row, each building on the one before. The editor offers them as
-one ready-made pipeline: **Prebuilt Pipelines → Anomalous Hall
-(AHC)**. Like every template, it ships in the scripts release, in
+one ready-made pipeline: choose **New pipeline**, then pick **Anomalous
+Hall (AHC)**. Like every template, it ships in the scripts release, in
 afscripts' `catalog/pipelines/ahc.toml` (see `docs/releases.md`). It
 belongs to the **Wannier90** package, which holds its own SCF and NSCF
 steps (with spin-orbit); the plain Quantum ESPRESSO steps are another
@@ -44,12 +44,11 @@ linked, so big files are not stored twice.
 
 ## Running it
 
-Load the pipeline from the palette. It starts with primitive bcc Fe,
-cube axes along x, y and z, so the magnetization along z points along
-[001] and sigma_xy is the value usually quoted. Replace the structure
-with your own (a `.cif`, or a `pw.x` input like the template's, which
-keeps the cell's orientation). Choose your cluster as the target and
-deploy.
+That template opens with primitive bcc Fe, cube axes along x, y and z, so
+the magnetization along z points along [001] and sigma_xy is the value
+usually quoted. Replace the structure with your own (a `.cif`, or a `pw.x`
+input like the template's, which keeps the cell's orientation). Choose your
+cluster under **Run on** and press **Run**.
 
 The cluster must offer four programs through the agent's setup
 lines: `pw.x` and `pw2wannier90.x` (Quantum ESPRESSO) and

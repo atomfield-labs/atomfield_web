@@ -1,9 +1,9 @@
 # Quantum ESPRESSO: bands, density of states and phonons
 
 The Quantum ESPRESSO package has four steps and three ready-made
-pipelines (**Prebuilt Pipelines → Silicon bands, Silicon density of
-states, Silicon phonons**). A lab is given the package as a whole on
-the Labs page (see `docs/labs.md`). The scripts are afscripts'
+pipelines: choose **New pipeline**, then pick **Silicon bands**, **Silicon
+density of states** or **Silicon phonons**. A lab is given the package as a
+whole on the Labs page (see `docs/labs.md`). The scripts are afscripts'
 `qe_*_driver.py`; the steps and pipelines are described in its
 `catalog/` and ship in the scripts release (see `docs/releases.md`).
 

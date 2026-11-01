@@ -109,7 +109,7 @@ hold no science.
 
 ## Ready-made pipelines
 
-The editor's **Prebuilt Pipelines** come from the release too, so a
+The templates a new pipeline offers come from the release too, so a
 template always matches the tasks it calls. Each is a TOML file in
 afscripts' `catalog/pipelines/`: its example structures (files beside
 it), then its steps in the order they run, each naming a task, the

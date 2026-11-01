@@ -1,4 +1,11 @@
-import { useState, useEffect, Component, type ReactNode } from 'react'
+import {
+  lazy,
+  useState,
+  useEffect,
+  Component,
+  Suspense,
+  type ReactNode,
+} from 'react'
 
 import HeroSection from './components/HeroSection'
 import ScientificEngines from './components/ScientificEngines'
@@ -14,6 +21,9 @@ import PairPage from './components/pairing/PairPage'
 import LabsPage from './components/labs/LabsPage'
 import LabPage from './components/labs/LabPage'
 import { useAccount, useSignedInAccount } from './hooks/useAccount'
+
+// Loaded when opened, so the landing page doesn't carry it.
+const DocsPage = lazy(() => import('./components/docs/DocsPage'))
 
 // Views for a signed-in person; the landing page is open to all.
 const PRIVATE_VIEWS = [
@@ -32,6 +42,8 @@ const CRASH_SCREEN = [
 // #pair, or #pair/<code> from an agent's link.
 const PAIR_VIEW = /^#pair\/?/;
 const LABS_VIEW = '#labs';
+// #docs, or #docs/<guide>.
+const DOCS_VIEW = /^#docs\/?/;
 // #lab is the person's own; #lab/<id> any lab, for the owner.
 const LAB_VIEW = /^#lab\/?/;
 const PAGE = 'absolute inset-0 z-40 overflow-y-auto bg-slate-50';
@@ -96,6 +108,16 @@ function LabView({ labId }: { labId: string }) {
 }
 
 function View({ hash }: { hash: string }) {
+  if (hash.startsWith('#docs')) {
+    const guideId = hash.replace(DOCS_VIEW, '')
+    return (
+      <div className={PAGE}>
+        <Suspense fallback={null}>
+          <DocsPage guideId={guideId} />
+        </Suspense>
+      </div>
+    )
+  }
   if (hash.startsWith('#admin')) {
     return <div className={PAGE}><AdminDashboard /></div>
   }
