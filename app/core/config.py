@@ -11,6 +11,17 @@ from sqlalchemy.engine import URL
 _BASE_DIR = Path(__file__).resolve().parents[2]
 HTTPS = "https"
 LIST_SEPARATOR = ","
+# What .env.example holds until someone replaces it. The repository is
+# public, so a server still using it has no secret at all.
+PLACEHOLDER = "change-me"
+SECRET_SETTINGS = (
+    "POSTGRES_PASSWORD",
+    "REDIS_PASSWORD",
+    "ADMIN_API_KEY",
+    "HOUSE_AGENT_TOKEN",
+    "STORAGE_SIGNING_KEY",
+    "OIDC_CLIENT_SECRET",
+)
 
 
 def comma_list(text: str) -> frozenset[str]:
@@ -193,5 +204,25 @@ class Settings(BaseSettings):
         return urlsplit(self.OIDC_REDIRECT_URI or "").scheme == HTTPS
 
 
+def refuse_placeholders(current: Settings) -> None:
+    """
+    Stop a server whose secrets are still the example's. The message
+    names the settings and never their values, so logs stay safe.
+
+    :param current: The settings to check.
+    :type current: Settings
+    :raises RuntimeError: If any secret is still the placeholder.
+    """
+    left = [
+        name
+        for name in SECRET_SETTINGS
+        if getattr(current, name) == PLACEHOLDER
+    ]
+    if left:
+        names = ", ".join(left)
+        raise RuntimeError(f"Replace {PLACEHOLDER} in .env for: {names}")
+
+
 # Instantiate once — module-level singleton
 settings = Settings()
+refuse_placeholders(settings)

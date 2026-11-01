@@ -56,14 +56,17 @@ services:
         uv run --python 3.11 python -m app.db.migrate
         && exec uv run --python 3.11 uvicorn app.main:app
         --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 5
+    # This machine only: whatever gives the server its https name forwards
+    # here. If that runs on another machine, set API_BIND in .env.
     ports:
-      - "8000:8000"
+      - "${API_BIND:-127.0.0.1}:8000:8000"
     env_file: .env
     environment:
       POSTGRES_HOST: db
       REDIS_HOST: redis
       REDIS_PORT: 6379
       ARTIFACTS_DIR: /app/artifacts
+      STORAGE_DIR: /app/storage
       BACKUP_DIR: /app/backups
     depends_on:
       db:
@@ -74,18 +77,24 @@ services:
       - ./app:/app/app
       - ./migrations:/app/migrations:ro
       - ./artifacts:/app/artifacts
+      # Releases, data packs and uploads: outside the container, or
+      # rebuilding it would lose them while the database still lists them.
+      - ./storage:/app/storage
       - ./backups:/app/backups
     restart: unless-stopped
 
   # The house agent: the same program users run on their own machines,
   # here running jobs for the house compute target. It talks only to
   # the API over HTTP; it needs no database or Redis access.
+  # Off unless asked for (docker compose --profile house up): this image
+  # holds no scientific programs, so it runs only tasks that need none.
   agent:
+    profiles: ["house"]
     build: .
     command: uv run --python 3.11 python -m agent
     environment:
       ATOMFIELD_API_URL: http://api:8000
-      ATOMFIELD_AGENT_TOKEN: ${HOUSE_AGENT_TOKEN:?set HOUSE_AGENT_TOKEN in .env}
+      ATOMFIELD_AGENT_TOKEN: ${HOUSE_AGENT_TOKEN:-}
       ARTIFACTS_DIR: /app/artifacts
       # Our disk, not the user's: once a run's zip is uploaded (users
       # download that), its folder here is removed.
