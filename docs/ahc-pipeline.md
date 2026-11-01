@@ -75,8 +75,8 @@ times would only repeat the work).
   hybrids plus the three t2g d orbitals, 9 orbitals per atom, each
   twice with spin: 18 Wannier functions. Fe's s band crosses its d
   bands near the Fermi level, so d orbitals alone (10 functions)
-  cannot describe them. Another element needs `-projections`, e.g.
-  `Fe: d, O: p`.
+  cannot describe them. Another element needs **Orbitals per element**,
+  e.g. `Fe: d, O: p`.
 - **Windows** (eV from the Fermi energy). The frozen window, -6 to
   +2, holds bands the model reproduces exactly; the outer window,
   from -10 up, holds the bands the Wannier functions are made from.
@@ -107,7 +107,7 @@ and the legend switches on the other two.
   far larger ones mean the projections or windows need another look.
 
 To check convergence, connect several Berry steps to the one Wannier
-step, each with a different `-kmesh` (80, 120 and 160 per side): the
+step, each with a different k-point mesh (80, 120 and 160 per side): the
 expensive steps run once, and the AHC should settle as the mesh
 grows.
 
@@ -115,10 +115,11 @@ grows.
 
 - *No results of a scf step upstream*: the step is not connected to
   the step before it, or that step failed.
-- *the outer window holds N bands, fewer than ...*: raise `-win_max`
-  (or remove it), or compute more bands with the NSCF's `-nbnd`.
-- *the frozen window holds N bands, more than ...*: narrow
-  `-froz_min`/`-froz_max`, or project on more orbitals.
+- *the outer window holds N bands, fewer than ...*: raise the outer
+  window's top (or empty it), or compute more with the NSCF's **Bands to
+  compute**.
+- *the frozen window holds N bands, more than ...*: narrow the frozen
+  window, or project on more orbitals.
 - *Wannier90 stopped with an error*: the text comes from Wannier90's
   `.werr` file; an *unrecognised keyword* there usually means
   Wannier90 2.x, which lacks `dis_froz_min`. Use Wannier90 3.x.

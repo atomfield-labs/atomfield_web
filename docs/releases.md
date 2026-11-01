@@ -209,6 +209,60 @@ counts only for the steps wired to it, though every job of a run receives
 them all. A curve past 2,000 points is thinned to fit, and the tables keep
 them all.
 
+## A step's form
+
+A step's modal shows its parameters as a form. Nothing in the web app
+knows any one step: the widget comes from the kind of parameter, and the
+step's TOML file says the rest, so a new step needs no change in the web
+app.
+
+| Parameter | Widget |
+|---|---|
+| Whole number | Spin box |
+| Number | Double spin box; `1e-12` can be typed |
+| Up to 4 short choices | Joined buttons |
+| More or longer choices | Menu |
+| True or false | Switch |
+| Text | Text box |
+
+The rest goes under `[parameters.<name>]`, and all of it is optional:
+
+| Field | What it does |
+|---|---|
+| `label` | What the form calls it |
+| `unit` | Shown in the box |
+| `minimum`, `maximum` | Limits; the server refuses what is outside too |
+| `group` | Its card; cards keep the order they are first seen in |
+| `advanced` | Folds it under Advanced |
+| `widget` | `"mesh"`: three whole numbers as one value, like `8 8 8` |
+| `step` | How far the arrows move it |
+| `log_step` | The arrows multiply and divide by ten |
+| `show_when` | Shows it only for another parameter's value |
+| `hidden` | Leaves it out; the script's own default stands |
+
+```toml
+[parameters.degauss]
+label = "Smearing width"
+group = "Electrons"
+unit = "Ry"
+minimum = 0.0001
+step = 0.005
+show_when = { occupations = "smearing" }
+```
+
+Two or more groups stand as cards in two columns. One group, or none,
+is one card across the modal, and a step that says nothing still gets a
+working form, its fields named after their flags. Long forms scroll
+inside the tab.
+
+The export stops if a `show_when` names a parameter or value that does
+not exist, or a `widget` it does not know, and publishing checks the
+same. Changes reach people with the next release; nothing needs copying
+to a cluster for them.
+
+The form does not compare fields: `emin` below `emax` stays the script's
+check, so the job fails with its message.
+
 ## What a release does not carry
 
 A release does not carry the Python packages the scripts import (ase,

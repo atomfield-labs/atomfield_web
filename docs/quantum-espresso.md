@@ -19,8 +19,8 @@ the Labs page (see `docs/labs.md`). The scripts are afscripts'
    says whether there is a gap, how big, and whether it is direct.
 3. **Density of states** (`pw.x`, `dos.x`, optionally `projwfc.x`)
    computes the bands on a denser mesh and counts the states at each
-   energy by the optimized tetrahedron method. `-pdos` also splits the
-   count by atom and orbital.
+   energy by the optimized tetrahedron method. **Project on orbitals**
+   also splits the count by atom and orbital.
 4. **Phonons** (`ph.x`, `q2r.x`, `matdyn.x`) finds how the crystal
    vibrates: the dynamical matrices on a coarse q-mesh, turned into
    forces between atoms, then the frequencies along a path and on a
@@ -44,7 +44,7 @@ camera icon saves a PNG.
 |---|---|
 | SCF | how the accuracy fell, iteration by iteration |
 | Bands | the band structure, one colour per spin |
-| Density of states | the density; with `-pdos`, by element and orbital |
+| Density of states | the density; projected, by element and orbital |
 | Phonons | the dispersion beside the phonon density of states |
 
 Its **Artifacts** tab shows its text files, the summary first: the
@@ -54,7 +54,7 @@ input deck, the program's output and the tables. Every step writes
 | Step | Files |
 |---|---|
 | Bands | `_bands.dat` (table), `_bands.json` |
-| Density of states | `_dos.dat`, `_dos.json`; with `-pdos`, `_pdos.dat` |
+| Density of states | `_dos.dat`, `_dos.json`; projected, `_pdos.dat` |
 | Phonons | `_dispersion.dat`, `_phdos.dat`, `_phonons.json`, `.fc` |
 
 The tables and the JSON hold the same numbers, for gnuplot or your own
@@ -75,21 +75,21 @@ path does.
 ## The defaults, and why
 
 - **Cutoffs** are the largest the pseudopotentials suggest, rounded up
-  to whole Ry. Say `-ecutwfc` and `-ecutrho` to choose.
+  to whole Ry. Fill them in to choose.
 - **k-mesh** 8×8×8, a reasonable start for a small cell. The density of
   states uses 12×12×12.
-- **Occupations** are smearing by default (the safe choice for any
+- **Filling** is smearing by default (the safe choice for any
   material). The silicon pipelines set `fixed`, since silicon has a gap.
 - **Bands computed**: the filled ones plus 8 empty ones for the band
   structure, plus 10 for the density of states, so the window above
   the gap is complete. The density of states warns if its bands stop
   below the top of its window.
 - **Phonons** need the SCF converged much more tightly than usual
-  (`conv_thr` of 1e-10 or less; the silicon pipeline sets 1e-12), and
-  a k-mesh the q-mesh divides: 4×4×4 on 8×8×8. The step stops if it
-  does not, and warns if the SCF was too loose. A mode counts as
-  imaginary below -5 cm^-1; smaller negative values are noise from the
-  acoustic sum rule, which `-asr crystal` imposes.
+  (**Convergence**, under Advanced, of 1e-10 or less; the silicon
+  pipeline sets 1e-12), and a k-mesh the q-mesh divides: 4×4×4 on 8×8×8.
+  The step stops if it does not, and warns if the SCF was too loose. A
+  mode counts as imaginary below -5 cm^-1; smaller negative values are
+  noise from the acoustic sum rule, `crystal` by default.
 
 ## What to check on your own system
 

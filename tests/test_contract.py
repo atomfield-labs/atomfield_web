@@ -59,9 +59,9 @@ def probe_value(spec: ParameterSpec) -> Any:
         others = [choice for choice in spec.choices if choice != spec.default]
         return (others or spec.choices)[0]
     if spec.kind is ParameterKind.INTEGER:
-        single = (spec.default or 0) + 1
+        single = (spec.default or spec.minimum or 0) + 1
     elif spec.kind is ParameterKind.NUMBER:
-        single = (spec.default or 0.0) + 0.5
+        single = (spec.default or spec.minimum or 0.0) + 0.5
     else:
         single = "probe"
     return [single, single] if spec.multiple else single
