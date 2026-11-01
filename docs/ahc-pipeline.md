@@ -92,6 +92,11 @@ times would only repeat the work).
 
 ## Reading the results
 
+Double-click a step to see its plots and text files. The SCF's **Plots**
+tab shows its convergence, the Wannier step's the spread of each
+function, and the Berry step's the AHC across the scan: sigma_xy shows,
+and the legend switches on the other two.
+
 - `ahc_berry_results.csv`: sigma_xy, sigma_yz and sigma_zx at the
   Fermi energy. For bcc Fe magnetized along [001] only sigma_xy is
   large; published calculations give about 750 to 1000 S/cm.

@@ -35,24 +35,37 @@ only the phonon step also copies the wavefunctions, which `ph.x` needs.
 
 ## What each step leaves
 
-Every step writes `<job>_summary.txt`, a few lines a person reads.
+Double-click a finished step to see what it left. Its **Plots** tab
+draws these in the browser: hover to read values, drag to zoom,
+double-click to reset, click a legend entry to hide a curve, and the
+camera icon saves a PNG.
+
+| Step | Plots |
+|---|---|
+| SCF | how the accuracy fell, iteration by iteration |
+| Bands | the band structure, one colour per spin |
+| Density of states | the density; with `-pdos`, by element and orbital |
+| Phonons | the dispersion beside the phonon density of states |
+
+Its **Artifacts** tab shows its text files, the summary first: the
+input deck, the program's output and the tables. Every step writes
+`<job>_summary.txt`, a few lines a person reads, and:
 
 | Step | Files |
 |---|---|
-| SCF | the summary (energy, Fermi energy, settings) |
-| Bands | `_bands.dat` (table), `.json`, `.png` |
-| Density of states | `_dos.dat`, `.json`, `.png`, `pdos` files with `-pdos` |
-| Phonons | `_dispersion.dat`, `_phdos.dat`, `_phonons.json`, `.png`, `.fc` |
+| Bands | `_bands.dat` (table), `_bands.json` |
+| Density of states | `_dos.dat`, `_dos.json`; with `-pdos`, `_pdos.dat` |
+| Phonons | `_dispersion.dat`, `_phdos.dat`, `_phonons.json`, `.fc` |
 
-The picture is made only if matplotlib is installed on the cluster;
-the scripts do not need it. The tables and the JSON hold the same
-numbers, for gnuplot or your own plots.
+The tables and the JSON hold the same numbers, for gnuplot or your own
+plots. A plot holds at most 2,000 points per curve; the tables keep them
+all. Files too big to show here stay on the cluster (**Get files**).
 
 ## Where zero is
 
 Energies are in eV from **zero**: the top of the valence band if the
 material has a gap, the Fermi energy if it is a metal. Bands and the
-density of states use the same zero, so their pictures line up. The
+density of states use the same zero, so their plots line up. The
 summary says which it is (`zero_at`).
 
 The gap is found along the path only: the true gap is this one only

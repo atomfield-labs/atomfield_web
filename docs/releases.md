@@ -137,9 +137,81 @@ template refuses the release. `GET /api/pipeline-templates` lists the
 templates of the newest release; the editor lays each one out left to
 right and fills in every other setting from the task's defaults.
 
-What a release does not carry: the Python packages the scripts import
-(ase, numpy...) and the engines (Quantum ESPRESSO, xTB). Each machine
-provides those once: a conda environment, and the cluster's modules
+## Plots
+
+A step's modal draws the plots its script leaves, in the browser. The
+script says what to show and not how to draw it, so a new step's plots
+need no change in the web app. Two things make a step show plots.
+
+Its TOML file names them, which gives its modal a **Plots** tab:
+
+```toml
+[outputs.plots]
+glob = "*_plots.json"
+```
+
+And its script writes them when it ends, with afscripts'
+`utilities/plots.py`:
+
+```python
+from afscripts.utilities.plots import axis, curve, panel, plot, save_plots
+
+
+def plots(self):
+    shape = panel(
+        axis("Step"),
+        axis("Energy (eV)"),
+        curves=[curve("Energy", self.steps, [self.energies])],
+    )
+    return [plot("Energy", shape)]
+
+
+save_plots(self.jobname, self.plots, log)  # in exportData
+```
+
+`save_plots` writes `<job>_plots.json`. Trouble building or writing it
+is said in the log and never fails the step, because the work the plot
+shows is done. The file looks like this:
+
+```json
+{"format": 1, "plots": [{"title": "Band structure", "panels": [{
+  "x": {"label": "", "ticks": [[0.0, "Γ"], [1.15, "X"]]},
+  "y": {"label": "Energy (eV)", "range": [-10, 10], "lines": [0]},
+  "curves": [{"name": "Bands", "x": [0.0, 0.1], "y": [[-5.6, -5.5]],
+              "hover": "Band"}]}]}]}
+```
+
+- A step has one or more **plots**, which the modal offers by `title`.
+- A plot has one or more **panels**, which stand side by side (`width`
+  is each one's share) and share the first one's y axis. Two measures on
+  different scales are two plots, never two axes on one.
+- An **axis** has a `label` with its unit, and may have named `ticks`, a
+  starting `range`, a `log` scale, and guide `lines`, each a place or a
+  place and a name.
+- A panel holds one of three things:
+  - `curves`: each has a `name`, its `x`, and in `y` one line or many
+    drawn alike. `null` leaves a gap. `hover` is what the tooltip calls
+    each of many lines, `hidden` starts a curve off, and `fill` (`x` or
+    `y`) washes the area down to zero on that axis.
+  - `bars`: `labels`, `values`, and `hover` with more about each.
+  - `graph`: `nodes` with `x`, `y`, `label` and `hover`, and `edges` as
+    pairs of positions in that list.
+
+Up to eight curves in a panel get a colour each. Text is shown as it is,
+never as markup, and fields the web app doesn't know are ignored, so a
+file can say what to show but nothing about how the page behaves. The
+format number is there so an old page can say it can't read a new file.
+
+The agent uploads a step's small text files when it ends, what the task
+names first, 20 at most, each up to 2 MB; the **Artifacts** tab shows
+them. A curve past 2,000 points is thinned to fit, and the tables keep
+them all.
+
+## What a release does not carry
+
+A release does not carry the Python packages the scripts import (ase,
+numpy...) or the engines (Quantum ESPRESSO, xTB). Each machine provides
+those once: a conda environment, and the cluster's modules
 loaded by the agent's setup lines.
 
 ## Data packs
