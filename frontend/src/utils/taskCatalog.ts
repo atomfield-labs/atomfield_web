@@ -56,13 +56,19 @@ export function groupByCategory(
 }
 
 /**
- * Drop keys the platform now sets itself (job name, input files),
- * so drafts saved before the catalog existed still submit.
+ * The values to send for a step: only what its task still takes, so a
+ * draft saved earlier still submits after its task file hides or drops
+ * a parameter. Without a task, only what the platform now sets itself
+ * (job name, input files) is dropped.
  */
-export function withoutPlatformKeys(
+export function currentParameters(
+  task: TaskDefinition | undefined,
   parameters: Record<string, unknown>
 ): Record<string, unknown> {
+  const taken = task && new Set(task.parameters.map((spec) => spec.name));
   return Object.fromEntries(
-    Object.entries(parameters).filter(([key]) => !PLATFORM_KEYS.has(key))
+    Object.entries(parameters).filter(([key]) =>
+      taken ? taken.has(key) : !PLATFORM_KEYS.has(key)
+    )
   );
 }

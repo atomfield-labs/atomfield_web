@@ -5,7 +5,7 @@ import { INPUT_FILE_TYPES } from '../../utils/structureParser';
 import JobArtifacts from './JobArtifacts';
 import JobPlots from './JobPlots';
 import RunFilesButton from './RunFilesButton';
-import YamlParamEditor from './YamlParamEditor';
+import ParameterForm from './ParameterForm';
 import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
 import type { InputFiles } from '../../types/api';
 
@@ -57,6 +57,12 @@ function TabButton({ label, isActive, onClick }: TabButtonProps) {
     </button>
   );
 }
+
+// One size whatever the tab, unless the window is too short to hold it.
+const MODAL_BODY = [
+  'h-[min(480px,calc(100vh-184px))]',
+  'p-6 overflow-hidden flex flex-col',
+].join(' ');
 
 interface InspectorDrawerProps {
   node: any | null;
@@ -272,7 +278,7 @@ export default function InspectorDrawer({
         )}
 
         {/* Modal Body: Constant height so tab size never jumps or resizes */}
-        <div className="h-[480px] p-6 overflow-hidden flex flex-col">
+        <div className={MODAL_BODY}>
           {/* Structure Node Body */}
           {isStructureNode && (
             <div className="h-full flex flex-col gap-3">
@@ -300,7 +306,7 @@ export default function InspectorDrawer({
                   ))}
 
                   <div className="flex-1">
-                    <YamlParamEditor
+                    <ParameterForm
                       parameters={parameters}
                       specs={task?.parameters}
                       onChange={(newParams) => {

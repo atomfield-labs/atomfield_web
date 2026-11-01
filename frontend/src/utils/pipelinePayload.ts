@@ -1,4 +1,4 @@
-import { inputPortForFile, withoutPlatformKeys } from './taskCatalog';
+import { currentParameters, inputPortForFile } from './taskCatalog';
 import type { Node, Edge } from '@xyflow/react';
 import type {
   InputFiles,
@@ -85,15 +85,12 @@ export function buildPipelineSubmitPayload(
       const taskId =
         data.task_id || data.filename || data.script_id || data.label;
 
-      const connected = connectedStructureInputs(
-        node.id,
-        graph,
-        taskById.get(taskId)
-      );
+      const task = taskById.get(taskId);
+      const connected = connectedStructureInputs(node.id, graph, task);
       return {
         ui_id: node.id,
         script_name: taskId,
-        parameters: withoutPlatformKeys(data.parameters || {}),
+        parameters: currentParameters(task, data.parameters || {}),
         inputs: { ...(data.inputs || {}), ...connected },
       };
     }),

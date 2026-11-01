@@ -44,6 +44,13 @@ export interface ParameterSpec {
   unit: string | null;
   minimum: number | null;
   maximum: number | null;
+  // How the step's form shows it; all left out for a plain field.
+  group?: string | null;
+  advanced?: boolean;
+  widget?: 'mesh' | null;
+  step?: number | null;
+  log_step?: boolean;
+  show_when?: Record<string, ParameterValue> | null;
 }
 
 export interface InputPort {
