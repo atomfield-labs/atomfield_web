@@ -685,6 +685,29 @@ def test_a_jobs_file_comes_back_as_plain_text(
     assert found.headers["x-content-type-options"] == "nosniff"
 
 
+def test_a_stranger_cannot_read_a_jobs_file(
+    client: TestClient,
+    chain,
+    make_user_headers,
+):
+    """
+    A file the job did upload is still not there for anyone else.
+
+    :param client: In-process API client.
+    :type client: TestClient
+    :param chain: Owner headers and job ids.
+    :type chain: tuple
+    :param make_user_headers: Factory registering a user key.
+    :type make_user_headers: UserHeadersFactory
+    """
+    headers, (first, _) = chain
+    finish_with_files(client, first, ["toy_summary.txt"])
+    url = f"/api/jobs/{first}/files/toy_summary.txt"
+
+    assert client.get(url, headers=headers).status_code == 200
+    assert client.get(url, headers=make_user_headers()).status_code == 404
+
+
 @pytest.mark.parametrize("name", ["big.trj", "other.txt", "..%2Fsecret"])
 def test_what_a_job_did_not_upload_is_not_found(
     client: TestClient,
