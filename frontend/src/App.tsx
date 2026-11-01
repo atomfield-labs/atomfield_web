@@ -11,6 +11,8 @@ import HeroSection from './components/HeroSection'
 import ScientificEngines from './components/ScientificEngines'
 import SectionsContainer from './components/SectionsContainer'
 import Navbar from './components/Navbar'
+import Footer from './components/Footer'
+import AboutPage from './components/AboutPage'
 import SessionsDashboard from './components/dashboard/SessionsDashboard'
 import AdminDashboard from './components/admin/AdminDashboard'
 import PipelineEditor from './components/pipeline/PipelineEditor'
@@ -46,7 +48,9 @@ const LABS_VIEW = '#labs';
 const DOCS_VIEW = /^#docs\/?/;
 // #lab is the person's own; #lab/<id> any lab, for the owner.
 const LAB_VIEW = /^#lab\/?/;
-const PAGE = 'absolute inset-0 z-40 overflow-y-auto bg-slate-50';
+const PAGE = [
+  'absolute inset-0 z-40 flex flex-col overflow-y-auto bg-slate-50',
+].join(' ');
 const EDITOR = 'absolute inset-0 z-50 overflow-hidden bg-slate-50';
 const LANDING = [
   'absolute inset-0 z-10 overflow-y-auto bg-slate-50',
@@ -107,36 +111,52 @@ function LabView({ labId }: { labId: string }) {
   return id ? <LabPage key={id} labId={id} /> : <LabsPage />
 }
 
+/**
+ * A page with the top bar. It fills what the footer leaves, so a short
+ * one keeps the footer at the bottom of the window.
+ */
+function Page({ children }: { children: ReactNode }) {
+  return (
+    <div className={PAGE}>
+      <div className="flex-1">{children}</div>
+      <Footer />
+    </div>
+  )
+}
+
 function View({ hash }: { hash: string }) {
   if (hash.startsWith('#docs')) {
     const guideId = hash.replace(DOCS_VIEW, '')
     return (
-      <div className={PAGE}>
+      <Page>
         <Suspense fallback={null}>
           <DocsPage guideId={guideId} />
         </Suspense>
-      </div>
+      </Page>
     )
   }
+  if (hash.startsWith('#about')) {
+    return <Page><AboutPage /></Page>
+  }
   if (hash.startsWith('#admin')) {
-    return <div className={PAGE}><AdminDashboard /></div>
+    return <Page><AdminDashboard /></Page>
   }
   if (hash.startsWith(LABS_VIEW)) {
-    return <div className={PAGE}><LabsPage /></div>
+    return <Page><LabsPage /></Page>
   }
   if (hash.startsWith('#lab')) {
     const labId = hash.replace(LAB_VIEW, '')
-    return <div className={PAGE}><LabView labId={labId} /></div>
+    return <Page><LabView labId={labId} /></Page>
   }
   if (hash.startsWith('#dashboard')) {
-    return <div className={PAGE}><SessionsDashboard /></div>
+    return <Page><SessionsDashboard /></Page>
   }
   if (hash.startsWith('#account')) {
-    return <div className={PAGE}><AccountPage /></div>
+    return <Page><AccountPage /></Page>
   }
   if (hash.startsWith('#pair')) {
     const code = hash.replace(PAIR_VIEW, '')
-    return <div className={PAGE}><PairPage code={code} /></div>
+    return <Page><PairPage code={code} /></Page>
   }
   // #pipeline/new, #pipeline/new/<template id> or #pipeline/<session>.
   if (hash.startsWith('#pipeline/')) {
@@ -152,6 +172,7 @@ function View({ hash }: { hash: string }) {
       <HeroSection />
       <SectionsContainer />
       <ScientificEngines />
+      <Footer />
     </div>
   )
 }

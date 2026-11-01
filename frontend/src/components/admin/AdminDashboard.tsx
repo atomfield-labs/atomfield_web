@@ -18,6 +18,7 @@ import type {
   AdminStatsResponse,
   AdminUserSummary,
 } from '../../types/api';
+import { PAGE } from '../dashboard/cardStyle';
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState<AdminStatsResponse | null>(null);
@@ -119,7 +120,7 @@ export default function AdminDashboard() {
 
   if (error) {
     return (
-      <div className="w-full min-h-screen bg-slate-50 p-8 pt-24 flex items-center justify-center">
+      <div className={`${PAGE} flex items-center justify-center`}>
         <div className="bg-white border border-slate-200 rounded-xl p-8 max-w-md w-full text-center shadow-sm">
           <div className="w-12 h-12 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-200">
             <AlertTriangle className="w-6 h-6" />
@@ -139,7 +140,7 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 p-8 pt-24">
+    <div className={PAGE}>
       <div className="max-w-7xl mx-auto space-y-8">
         {/* Top Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

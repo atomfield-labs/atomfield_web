@@ -49,7 +49,7 @@ export default function AccountPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-white px-6 pt-28 pb-16">
+    <div className="min-h-full bg-white px-6 pt-28 pb-16">
       <div className="mx-auto max-w-xl space-y-10">
         <header>
           <h1 className="text-2xl font-semibold text-stone-900">

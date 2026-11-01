@@ -1,7 +1,7 @@
 // The look the card pages share (sessions, labs): white cards that turn
 // orange under the pointer, and an orange dashed card to add one.
 
-export const PAGE = 'w-full min-h-screen bg-slate-50 p-8 pt-24';
+export const PAGE = 'w-full min-h-full bg-slate-50 p-8 pt-24';
 export const PAGE_WIDTH = 'max-w-6xl mx-auto';
 export const PAGE_TITLE = 'text-3xl font-extrabold text-slate-800';
 export const CARD_GRID = 'grid grid-cols-1 md:grid-cols-3 gap-6';
