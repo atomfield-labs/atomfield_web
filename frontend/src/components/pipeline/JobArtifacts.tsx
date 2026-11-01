@@ -105,7 +105,8 @@ export default function JobArtifacts({ jobId, status }: JobArtifactsProps) {
         </div>
         {others > 0 && (
           <p className={`text-[11px] leading-snug px-2.5 ${MUTED}`}>
-            {others} more stay on the computer that ran it
+            {others} more {others === 1 ? 'stays' : 'stay'} on the computer
+            that ran it
           </p>
         )}
       </div>

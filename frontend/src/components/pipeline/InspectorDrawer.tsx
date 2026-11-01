@@ -3,6 +3,7 @@ import { X, Trash2, Download, RotateCcw, FileText, Upload } from 'lucide-react';
 import { triggerFileDownload } from '../../utils/downloadHelper';
 import { INPUT_FILE_TYPES } from '../../utils/structureParser';
 import JobArtifacts from './JobArtifacts';
+import JobPlots from './JobPlots';
 import RunFilesButton from './RunFilesButton';
 import YamlParamEditor from './YamlParamEditor';
 import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
@@ -21,6 +22,9 @@ const TILE_CLASS = [
 const FILE_TILE_CLASS = 'bg-orange-50 text-orange-600 border-orange-200';
 
 const STEP_TILE_CLASS = 'bg-slate-100 text-slate-600 border-slate-200';
+
+// The output a task names when its script leaves plots to draw.
+const PLOTS_OUTPUT = 'plots';
 
 const TAB_BUTTON =
   'py-2.5 font-semibold transition-colors border-b-2 -mb-px cursor-pointer';
@@ -78,8 +82,10 @@ export default function InspectorDrawer({
   const modalRef = useRef<HTMLDivElement>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Tabs for script nodes: params | logs | artifacts
-  const [scriptTab, setScriptTab] = useState<'params' | 'logs' | 'artifacts'>('params');
+  // Tabs for script nodes: params | logs | plots | artifacts
+  const [scriptTab, setScriptTab] = useState<
+    'params' | 'logs' | 'plots' | 'artifacts'
+  >('params');
   const { taskById } = useTaskDefinitions();
 
   const handleClose = useCallback(() => {
@@ -159,6 +165,11 @@ export default function InspectorDrawer({
   const logs = node.logs || node.data?.logs || '';
   const jobId: string | undefined = node.job_id ?? node.data?.job_id;
   const stepStatus: string | undefined = node.status ?? node.data?.status;
+  const hasPlots = !!task?.outputs.some(
+    (output) => output.name === PLOTS_OUTPUT
+  );
+  // The tab left open on another step may not exist on this one.
+  const openTab = scriptTab === 'plots' && !hasPlots ? 'params' : scriptTab;
   const fallbackDefaults =
     defaultParameters ||
     node.default_parameters ||
@@ -237,17 +248,24 @@ export default function InspectorDrawer({
           <div className="flex border-b border-slate-200 bg-slate-50/70 px-6 gap-6 text-xs shrink-0">
             <TabButton
               label="Parameters"
-              isActive={scriptTab === 'params'}
+              isActive={openTab === 'params'}
               onClick={() => setScriptTab('params')}
             />
             <TabButton
               label="Logs"
-              isActive={scriptTab === 'logs'}
+              isActive={openTab === 'logs'}
               onClick={() => setScriptTab('logs')}
             />
+            {hasPlots && (
+              <TabButton
+                label="Plots"
+                isActive={openTab === 'plots'}
+                onClick={() => setScriptTab('plots')}
+              />
+            )}
             <TabButton
               label="Artifacts"
-              isActive={scriptTab === 'artifacts'}
+              isActive={openTab === 'artifacts'}
               onClick={() => setScriptTab('artifacts')}
             />
           </div>
@@ -271,7 +289,7 @@ export default function InspectorDrawer({
           {!isStructureNode && (
             <div className="h-full flex flex-col">
               {/* Parameters Tab: with scrollbar when content gets longer */}
-              {scriptTab === 'params' && (
+              {openTab === 'params' && (
                 <div className="h-full overflow-y-auto pr-2 flex flex-col gap-4">
                   {wiredInputs.map(([port, files]) => (
                     <div key={port} className={WIRED_ROW_CLASS}>
@@ -296,7 +314,7 @@ export default function InspectorDrawer({
               )}
 
               {/* Logs Tab: Light background, never black */}
-              {scriptTab === 'logs' && (
+              {openTab === 'logs' && (
                 <div className="h-full flex flex-col">
                   <div className="flex-1 min-h-0 bg-slate-50 border border-slate-200 rounded-lg p-4 font-mono text-xs text-slate-800 overflow-auto leading-relaxed whitespace-pre-wrap select-text">
                     {logs || (
@@ -306,8 +324,12 @@ export default function InspectorDrawer({
                 </div>
               )}
 
+              {openTab === 'plots' && (
+                <JobPlots jobId={jobId} status={stepStatus} />
+              )}
+
               {/* Artifacts Tab */}
-              {scriptTab === 'artifacts' && (
+              {openTab === 'artifacts' && (
                 <JobArtifacts jobId={jobId} status={stepStatus} />
               )}
             </div>
