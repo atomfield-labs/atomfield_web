@@ -37,6 +37,7 @@ from app.sign_in.flow import PendingSignIns, SignInFlow
 from app.sign_in.provider import IdentityProvider, Registration
 from app.storage.links import LinkSigner
 from app.storage.store import LocalDiskStore
+from app.web_app import web_app_mount
 
 ADMIN_QUOTA = 999999
 ADMIN_LABEL = "Cluster Administrator"
@@ -350,3 +351,7 @@ async def health_check() -> dict[str, str]:
         "version": settings.VERSION,
         "environment": settings.ENVIRONMENT,
     }
+
+
+# Last, so every route above comes first: all else is the built web app.
+app.router.routes.append(web_app_mount())

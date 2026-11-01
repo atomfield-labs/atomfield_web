@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     WORKER_KEEP_RESULT: int = 3600  # seconds
 
     # --- Workspaces and Filesystem ---
+    # The built web app, served at /. In development Vite serves it.
+    WEB_DIR: str = str(_BASE_DIR / "frontend" / "dist")
     ARTIFACTS_DIR: str = str(_BASE_DIR / "artifacts")
     # Files kept by the server: uploads, UI files, run zips.
     STORAGE_DIR: str = str(_BASE_DIR / "storage")
