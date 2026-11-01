@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Trash2, Download, RotateCcw, FileText, Upload } from 'lucide-react';
 import { triggerFileDownload } from '../../utils/downloadHelper';
 import { INPUT_FILE_TYPES } from '../../utils/structureParser';
+import JobArtifacts from './JobArtifacts';
 import RunFilesButton from './RunFilesButton';
 import YamlParamEditor from './YamlParamEditor';
 import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
@@ -21,11 +22,37 @@ const FILE_TILE_CLASS = 'bg-orange-50 text-orange-600 border-orange-200';
 
 const STEP_TILE_CLASS = 'bg-slate-100 text-slate-600 border-slate-200';
 
+const TAB_BUTTON =
+  'py-2.5 font-semibold transition-colors border-b-2 -mb-px cursor-pointer';
+const TAB_ACTIVE = 'text-orange-600 border-orange-500';
+const TAB_IDLE = 'text-slate-500 hover:text-slate-800 border-transparent';
+
 const FOOTER_BUTTON = [
   'py-1.5 px-3 border border-slate-200 bg-white hover:bg-slate-100',
   'text-slate-600 text-xs font-medium rounded-lg transition-colors',
   'flex items-center gap-1.5 cursor-pointer shadow-2xs',
 ].join(' ');
+
+interface TabButtonProps {
+  label: string;
+  isActive: boolean;
+  onClick: () => void;
+}
+
+/**
+ * One tab of a step's modal.
+ */
+function TabButton({ label, isActive, onClick }: TabButtonProps) {
+  return (
+    <button
+      type="button"
+      className={`${TAB_BUTTON} ${isActive ? TAB_ACTIVE : TAB_IDLE}`}
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
+}
 
 interface InspectorDrawerProps {
   node: any | null;
@@ -130,6 +157,8 @@ export default function InspectorDrawer({
     (node.data?.inputs ?? node.inputs ?? {}) as InputFiles
   );
   const logs = node.logs || node.data?.logs || '';
+  const jobId: string | undefined = node.job_id ?? node.data?.job_id;
+  const stepStatus: string | undefined = node.status ?? node.data?.status;
   const fallbackDefaults =
     defaultParameters ||
     node.default_parameters ||
@@ -206,39 +235,21 @@ export default function InspectorDrawer({
         {/* Tab Navigation (Script Nodes only) */}
         {!isStructureNode && (
           <div className="flex border-b border-slate-200 bg-slate-50/70 px-6 gap-6 text-xs shrink-0">
-            <button
-              type="button"
-              className={`py-2.5 font-semibold transition-colors border-b-2 -mb-px cursor-pointer ${
-                scriptTab === 'params'
-                  ? 'text-orange-600 border-orange-500'
-                  : 'text-slate-500 hover:text-slate-800 border-transparent'
-              }`}
+            <TabButton
+              label="Parameters"
+              isActive={scriptTab === 'params'}
               onClick={() => setScriptTab('params')}
-            >
-              Parameters
-            </button>
-            <button
-              type="button"
-              className={`py-2.5 font-semibold transition-colors border-b-2 -mb-px cursor-pointer ${
-                scriptTab === 'logs'
-                  ? 'text-orange-600 border-orange-500'
-                  : 'text-slate-500 hover:text-slate-800 border-transparent'
-              }`}
+            />
+            <TabButton
+              label="Logs"
+              isActive={scriptTab === 'logs'}
               onClick={() => setScriptTab('logs')}
-            >
-              Logs
-            </button>
-            <button
-              type="button"
-              className={`py-2.5 font-semibold transition-colors border-b-2 -mb-px cursor-pointer ${
-                scriptTab === 'artifacts'
-                  ? 'text-orange-600 border-orange-500'
-                  : 'text-slate-500 hover:text-slate-800 border-transparent'
-              }`}
+            />
+            <TabButton
+              label="Artifacts"
+              isActive={scriptTab === 'artifacts'}
               onClick={() => setScriptTab('artifacts')}
-            >
-              Artifacts
-            </button>
+            />
           </div>
         )}
 
@@ -297,27 +308,7 @@ export default function InspectorDrawer({
 
               {/* Artifacts Tab */}
               {scriptTab === 'artifacts' && (
-                <div className="h-full overflow-y-auto pr-2 flex flex-col gap-3">
-                  {((node.artifacts && Array.isArray(node.artifacts) && node.artifacts.length > 0) ||
-                    (node.data?.artifacts &&
-                      Array.isArray(node.data?.artifacts) &&
-                      node.data.artifacts.length > 0)) ? (
-                    <div className="flex flex-col gap-2">
-                      {(node.artifacts || node.data?.artifacts || []).map((art: any, idx: number) => (
-                        <div
-                          key={idx}
-                          className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-700 flex items-center justify-between"
-                        >
-                          <span className="truncate">
-                            {typeof art === 'string' ? art : art.name || art.path}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-slate-400">No artifacts yet.</p>
-                  )}
-                </div>
+                <JobArtifacts jobId={jobId} status={stepStatus} />
               )}
             </div>
           )}

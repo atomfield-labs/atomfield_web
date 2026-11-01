@@ -195,6 +195,19 @@ export interface JobLogsResponse {
   artifacts: string[];
 }
 
+// A job's file that can be read here: its plots, or text to show.
+export interface JobFile {
+  name: string;
+  size_bytes: number;
+  kind: 'plots' | 'text';
+}
+
+export interface JobFilesResponse {
+  files: JobFile[];
+  // How many others stay on the computer that ran the job.
+  others: number;
+}
+
 // How a pipeline stands, from its newest run.
 export type SessionState =
   | 'draft'

@@ -3,6 +3,7 @@ import type {
   PipelineSubmitRequest,
   PipelineSubmitResponse,
   JobLogsResponse,
+  JobFilesResponse,
   BundleInfo,
 } from '../../types/api';
 
@@ -22,6 +23,23 @@ export const jobsService = {
 
   async getJobLogs(jobId: string): Promise<JobLogsResponse> {
     const response = await apiClient.get<JobLogsResponse>(`/api/jobs/${jobId}/logs`);
+    return response.data;
+  },
+
+  // The files of a job that can be read here.
+  async listJobFiles(jobId: string): Promise<JobFilesResponse> {
+    const response = await apiClient.get<JobFilesResponse>(
+      `/api/jobs/${jobId}/files`
+    );
+    return response.data;
+  },
+
+  // One of those files, as the text it is.
+  async readJobFile(jobId: string, name: string): Promise<string> {
+    const response = await apiClient.get<string>(
+      `/api/jobs/${jobId}/files/${encodeURIComponent(name)}`,
+      { responseType: 'text' }
+    );
     return response.data;
   },
 
