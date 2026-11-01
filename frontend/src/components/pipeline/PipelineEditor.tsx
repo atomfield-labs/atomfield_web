@@ -86,7 +86,7 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
   const [progress, setProgress] = useState<RunProgress>(NOT_RUN);
   // A run started from this view; otherwise the newest one saved.
   const [startedRun, setStartedRun] = useState<StartedRun | null>(null);
-  // Where to run; null means the shared AtomField server.
+  // Where to run; null until the picker finds somewhere.
   const [targetId, setTargetId] = useState<string | null>(null);
   // Which input of each task a connected structure file belongs to.
   const { taskById } = useTaskDefinitions();

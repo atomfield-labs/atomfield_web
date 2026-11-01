@@ -14,9 +14,9 @@ interface EditorHeaderProps {
   isStarting: boolean;
   onRun: () => void;
   onStop: () => void;
-  // Where the pipeline runs; null means the shared AtomField server.
+  // Where the pipeline runs; null until there is somewhere to run.
   targetId: string | null;
-  onTargetChange: (targetId: string | null) => void;
+  onTargetChange: (targetId: string) => void;
 }
 
 const HEADER = [
@@ -37,6 +37,7 @@ const SECONDARY = [
   'font-medium text-stone-900 hover:bg-stone-50 cursor-pointer',
 ].join(' ');
 const TITLE = 'truncate text-[15px] font-semibold text-stone-900 cursor-text';
+const NOWHERE_TO_RUN = 'Add a cluster to run on';
 const TITLE_INPUT = [
   'h-8 w-64 px-2 rounded-md border border-stone-300 text-[15px]',
   'font-semibold focus:outline-none focus:border-orange-600',
@@ -163,7 +164,10 @@ export default function EditorHeader({
           <button
             type="button"
             onClick={onRun}
-            disabled={isStarting || progress.total === 0}
+            disabled={
+              isStarting || progress.total === 0 || targetId === null
+            }
+            title={targetId === null ? NOWHERE_TO_RUN : undefined}
             className={PRIMARY}
           >
             {isStarting ? 'Starting…' : 'Run'}

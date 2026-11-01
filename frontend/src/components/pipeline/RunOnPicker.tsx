@@ -16,9 +16,9 @@ const SELECT = [
 const ICON = 'pointer-events-none absolute text-stone-500';
 
 interface RunOnPickerProps {
-  // The chosen target's id; null means the shared AtomField server.
+  // The chosen target's id; null until there is somewhere to run.
   value: string | null;
-  onChange: (targetId: string | null) => void;
+  onChange: (targetId: string) => void;
 }
 
 /**
@@ -30,8 +30,21 @@ function label(target: ComputeTarget): string {
 }
 
 /**
- * Choose where a pipeline runs: the shared server, or one of your own
- * clusters (with a dot showing whether its agent is online).
+ * Where a pipeline starts out running: the person's own cluster, one
+ * that is online first, else the shared server if an agent serves it.
+ */
+function startingTarget(targets: ComputeTarget[]): ComputeTarget | undefined {
+  const mine = targets.filter((target) => !target.shared);
+  return (
+    mine.find((target) => target.online) ??
+    mine[0] ??
+    targets.find((target) => target.online)
+  );
+}
+
+/**
+ * Choose where a pipeline runs: one of your own clusters, or the shared
+ * server (with a dot showing whether the agent is online).
  */
 export default function RunOnPicker({ value, onChange }: RunOnPickerProps) {
   const [targets, setTargets] = useState<ComputeTarget[]>([]);
@@ -53,17 +66,22 @@ export default function RunOnPicker({ value, onChange }: RunOnPickerProps) {
     };
   }, []);
 
+  // Until the person chooses, start somewhere that can run it.
+  useEffect(() => {
+    const start = value === null ? startingTarget(targets) : undefined;
+    if (start) onChange(start.id);
+  }, [targets, value, onChange]);
+
   const choose = (chosen: string) => {
-    if (chosen === ADD_CLUSTER) {
-      setIsAdding(true);
-      return;
-    }
-    const target = targets.find((item) => item.id === chosen);
-    onChange(target && !target.shared ? target.id : null);
+    if (chosen === ADD_CLUSTER) setIsAdding(true);
+    else onChange(chosen);
   };
 
-  const selected =
-    value ?? targets.find((target) => target.shared)?.id ?? '';
+  // The shared server shows only while an agent serves it: with none, a
+  // run there would wait forever. One already chosen stays in the list.
+  const shown = targets.filter(
+    (target) => !target.shared || target.online || target.id === value
+  );
 
   return (
     <>
@@ -71,12 +89,17 @@ export default function RunOnPicker({ value, onChange }: RunOnPickerProps) {
         <span className="sr-only">Run on</span>
         <Server size={16} aria-hidden="true" className={`${ICON} left-3`} />
         <select
-          value={selected}
+          value={value ?? ''}
           onChange={(event) => choose(event.target.value)}
           title="Where this pipeline runs (● online, ○ offline)"
           className={SELECT}
         >
-          {targets.map((target) => (
+          {value === null && (
+            <option value="" hidden>
+              Run on…
+            </option>
+          )}
+          {shown.map((target) => (
             <option key={target.id} value={target.id}>
               {label(target)}
             </option>
