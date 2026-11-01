@@ -42,6 +42,8 @@ const THIN_LINE_WIDTH = 1.5;
 // A curve of more lines than this is drawn thinner.
 const FEW_LINES = 3;
 const WASH_OPACITY = 0.1;
+// A tooltip listing more lines than this would hide the chart.
+const MAX_TOOLTIP_ROWS = 16;
 const PANEL_GAP = 0.03;
 const NUMBER_FORMAT = '.5~g';
 const MARGIN = { l: 12, r: 16, b: 12 };
@@ -383,13 +385,26 @@ function baseLayout(panels: PanelSpec[], unified: boolean): object {
 }
 
 /**
+ * Whether one tooltip lists every line at a position, under a crosshair.
+ * That suits one set of curves that are few enough to list; otherwise
+ * the tooltip is of the nearest line.
+ */
+function listsEveryLine(panels: PanelSpec[]): boolean {
+  if (panels.length !== 1 || !panels[0].curves) return false;
+  const lines = panels[0].curves.reduce(
+    (sum, curve) => sum + curve.y.length,
+    0
+  );
+  return lines <= MAX_TOOLTIP_ROWS;
+}
+
+/**
  * One plot as the chart library wants it. Panels share the y axis: a
  * vertical zoom moves them together, a horizontal one only its own.
  */
 export function toFigure(plot: PlotSpec): Figure {
   const { panels } = plot;
-  // One crosshair and one tooltip per x make sense for one set of curves.
-  const unified = panels.length === 1 && !!panels[0].curves;
+  const unified = listsEveryLine(panels);
   const domains = panelDomains(panels);
   const axes: Record<string, object> = {
     yaxis: axisLayout(panels[0].y, !!panels[0].graph),
