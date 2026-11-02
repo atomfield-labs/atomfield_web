@@ -308,6 +308,23 @@ def test_a_page_is_only_a_web_address_or_a_guide(page: str):
         CatalogDocument.model_validate(document)
 
 
+@pytest.mark.skipif(not REAL_CATALOG.exists(), reason="no scripts_repo")
+def test_the_guides_the_real_catalog_lists_are_here():
+    """
+    A task file names guides in this repository's docs/, read locally.
+    """
+    loaded = Catalog.from_path(REAL_CATALOG)
+    root = REAL_CATALOG.parents[1]
+    listed = {
+        page.page
+        for pages in loaded.references.values()
+        for page in pages
+        if page.page.startswith("docs/")
+    }
+    assert listed
+    assert all((root / page).exists() for page in listed)
+
+
 def test_pages_stay_out_of_what_agents_read():
     """
     Agents read a task strictly, so a new field in it would make one not
