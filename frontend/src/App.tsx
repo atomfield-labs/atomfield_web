@@ -23,6 +23,7 @@ import PairPage from './components/pairing/PairPage'
 import LabsPage from './components/labs/LabsPage'
 import LabPage from './components/labs/LabPage'
 import { useAccount, useSignedInAccount } from './hooks/useAccount'
+import { mayLeave } from './utils/leaveGuard'
 
 // Loaded when opened, so the landing page doesn't carry it.
 const DocsPage = lazy(() => import('./components/docs/DocsPage'))
@@ -95,7 +96,10 @@ class ErrorBoundary extends Component<
 function useHash(): string {
   const [hash, setHash] = useState(window.location.hash);
   useEffect(() => {
-    const follow = () => setHash(window.location.hash);
+    const follow = (event: HashChangeEvent) => {
+      if (mayLeave()) setHash(window.location.hash);
+      else window.history.pushState(null, '', event.oldURL);
+    };
     window.addEventListener('hashchange', follow);
     return () => window.removeEventListener('hashchange', follow);
   }, []);

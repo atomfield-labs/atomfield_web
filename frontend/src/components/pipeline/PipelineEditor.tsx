@@ -17,6 +17,7 @@ import {
 import { buildPipelineSubmitPayload } from '../../utils/pipelinePayload';
 import { runProgress, type RunProgress } from '../../utils/jobStatus';
 import { templateToBlueprint } from '../../utils/templates';
+import { setLeaveGuard } from '../../utils/leaveGuard';
 import type { PipelineTemplate, TaskDefinition } from '../../types/api';
 
 interface PipelineEditorProps {
@@ -36,7 +37,10 @@ const LOAD_FAILED = 'p-8 text-center text-sm text-red-600';
 // start from one of the catalog's templates.
 const NEW_SESSION = 'new';
 const FROM_TEMPLATE = 'new/';
+const NEW_ADDRESS = `#pipeline/${NEW_SESSION}`;
 const NOT_RUN: RunProgress = { phase: 'idle', done: 0, total: 0 };
+const LEAVE_QUESTION =
+  'This pipeline has changes that are not saved. Leave without saving?';
 
 function isNewSession(sessionId?: string): boolean {
   return (
@@ -103,11 +107,14 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
   );
   const {
     saveStatus,
-    setSaveStatus,
-    autosaveGraph,
-    saveNow,
-    title,
+    save,
+    trackGraph,
+    openTemplate,
     nameSession,
+    title,
+    unsaved,
+    edited,
+    isStored,
   } = useSessionDraft(activeSessionId, saved);
   const started =
     startedRun?.sessionId === activeSessionId ? startedRun : null;
@@ -118,10 +125,29 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
   useEffect(() => {
     if (sessionId && !isNewSession(sessionId)) {
       setActiveSessionId(sessionId);
-    } else {
-      window.location.hash = `#pipeline/${activeSessionId}`;
     }
-  }, [sessionId, activeSessionId]);
+  }, [sessionId]);
+
+  // Ask before leaving work that isn't saved, however the person leaves.
+  useEffect(() => {
+    if (!edited) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    setLeaveGuard(() => window.confirm(LEAVE_QUESTION));
+    return () => {
+      window.removeEventListener('beforeunload', warn);
+      setLeaveGuard(null);
+    };
+  }, [edited]);
+
+  // Store the pipeline. A new one takes its own address only now, so
+  // until then reloading opens it afresh, and no address leads nowhere.
+  const handleSave = useCallback(async () => {
+    const stored = await save();
+    if (stored && window.location.hash.startsWith(NEW_ADDRESS)) {
+      window.history.replaceState(null, '', `#pipeline/${activeSessionId}`);
+    }
+  }, [save, activeSessionId]);
 
   // Live job updates
   const handleUpdateExecution = useCallback(
@@ -144,13 +170,13 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
   const handleGraphChange = useCallback(
     (graph: { nodes: Node[]; edges: Edge[] }) => {
       currentGraphRef.current = graph;
-      autosaveGraph(graph);
+      trackGraph(graph);
       const next = runProgress(stepStatuses(graph.nodes));
       setProgress((previous) =>
         sameProgress(previous, next) ? previous : next
       );
     },
-    [autosaveGraph]
+    [trackGraph]
   );
 
   const handleDeleteNode = useCallback(() => {
@@ -185,9 +211,9 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
     }
     payload.target_id = targetId;
 
-    saveNow();
     setIsDeploying(true);
-    setSaveStatus('saving');
+    // A run needs its pipeline stored, to come back to it.
+    if (unsaved) await handleSave();
     try {
       const response = await jobsService.submitPipeline(payload);
       if (response.job_ids) {
@@ -202,12 +228,10 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
           }
         });
       }
-      setSaveStatus('deployed');
     } catch (err: any) {
       console.error('Pipeline deploy failed', err);
       const reason = describeError(err, err?.message || 'Unknown error');
       alert(`The pipeline did not start: ${reason}`);
-      setSaveStatus('saved');
     } finally {
       setIsDeploying(false);
     }
@@ -228,10 +252,10 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
   const loadTemplate = useCallback(
     (template: PipelineTemplate, tasks: Map<string, TaskDefinition>) => {
       const loaded = templateToBlueprint(template, tasks);
+      openTemplate(template.title);
       setBlueprint(loaded);
-      nameSession(template.title);
     },
-    [setBlueprint, nameSession]
+    [setBlueprint, openTemplate]
   );
 
   const handleLoadTemplate = useCallback(
@@ -257,6 +281,9 @@ export default function PipelineEditor({ sessionId }: PipelineEditorProps) {
         title={title}
         onRename={nameSession}
         saveStatus={saveStatus}
+        canSave={unsaved}
+        isStored={isStored}
+        onSave={handleSave}
         progress={progress}
         isStarting={isDeploying}
         onRun={handleDeploy}

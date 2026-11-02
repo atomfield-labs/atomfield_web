@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Check, Copy, Download } from 'lucide-react';
 import { jobsService } from '../../api/services';
 import type { BundleInfo } from '../../types/api';
+import { openDownloadLink } from '../../utils/downloadHelper';
 
 // A zip on its way: keep asking until it is ready (about 2 minutes).
 const WAITING = new Set(['requested', 'packing']);
@@ -50,7 +51,7 @@ export default function RunFilesButton({ runId }: { runId: string | null }) {
     if (current.download_url) {
       // The server's own store gives a path on this site, a cloud
       // store a full URL; the browser opens either.
-      window.location.assign(current.download_url);
+      openDownloadLink(current.download_url);
     }
   };
 

@@ -19,7 +19,7 @@ export type JobStatus =
   | 'Ready'
   | 'Cancelled';
 
-export type SaveStatus = 'saved' | 'saving' | 'deployed' | 'idle' | 'failed';
+export type SaveStatus = 'saved' | 'saving' | 'idle' | 'failed';
 
 // Task catalog (GET /api/task-definitions); mirrors app/catalog/models.py.
 export type ParameterKind = 'boolean' | 'integer' | 'number' | 'string';

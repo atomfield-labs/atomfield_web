@@ -10,6 +10,10 @@ interface EditorHeaderProps {
   title: string;
   onRename: (title: string) => void;
   saveStatus: SaveStatus;
+  // Whether there is anything to store, and whether it has been before.
+  canSave: boolean;
+  isStored: boolean;
+  onSave: () => void;
   progress: RunProgress;
   isStarting: boolean;
   onRun: () => void;
@@ -35,6 +39,10 @@ const PRIMARY = [
 const SECONDARY = [
   'h-10 px-4 rounded-[10px] border border-stone-200 bg-white text-sm',
   'font-medium text-stone-900 hover:bg-stone-50 cursor-pointer',
+].join(' ');
+const SAVE = [
+  SECONDARY,
+  'disabled:text-stone-400 disabled:bg-white disabled:cursor-not-allowed',
 ].join(' ');
 const TITLE = 'truncate text-[15px] font-semibold text-stone-900 cursor-text';
 const NOWHERE_TO_RUN = 'Add a cluster to run on';
@@ -114,13 +122,28 @@ function Initials() {
 }
 
 /**
+ * The word on the Save button.
+ */
+function saveLabel(
+  saveStatus: SaveStatus,
+  canSave: boolean,
+  isStored: boolean
+): string {
+  if (saveStatus === 'saving') return 'Saving…';
+  return !canSave && isStored ? 'Saved' : 'Save';
+}
+
+/**
  * The editor's bar: back, the pipeline's name and how its run stands;
- * where it runs; Run (or Stop while it runs); your account.
+ * where it runs; Save; Run (or Stop while it runs); your account.
  */
 export default function EditorHeader({
   title,
   onRename,
   saveStatus,
+  canSave,
+  isStored,
+  onSave,
   progress,
   isStarting,
   onRun,
@@ -145,9 +168,6 @@ export default function EditorHeader({
           label="Pipeline name"
         />
         <RunStatus progress={progress} />
-        {saveStatus === 'saving' && (
-          <span className="ml-2 text-xs text-stone-400">Saving…</span>
-        )}
         {saveStatus === 'failed' && (
           <span role="alert" className="ml-2 text-xs text-red-600">
             Not saved
@@ -156,6 +176,14 @@ export default function EditorHeader({
       </div>
       <div className="flex items-center gap-2">
         <RunOnPicker value={targetId} onChange={onTargetChange} />
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={!canSave || saveStatus === 'saving'}
+          className={SAVE}
+        >
+          {saveLabel(saveStatus, canSave, isStored)}
+        </button>
         {running ? (
           <button type="button" onClick={onStop} className={SECONDARY}>
             Stop

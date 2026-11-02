@@ -13,3 +13,15 @@ export function triggerFileDownload(content: Blob | string, filename: string, mi
   anchorElement.remove();
   window.URL.revokeObjectURL(downloadUrl);
 }
+
+/**
+ * Downloads what a link serves, staying on this page.
+ */
+export function openDownloadLink(url: string): void {
+  const anchorElement = document.createElement('a');
+  anchorElement.href = url;
+  anchorElement.download = '';
+  document.body.appendChild(anchorElement);
+  anchorElement.click();
+  anchorElement.remove();
+}

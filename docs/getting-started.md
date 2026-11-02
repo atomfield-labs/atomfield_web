@@ -23,6 +23,9 @@ the list on the left onto the canvas, where each becomes a step. Link one
 step to the next by dragging from the edge of one box to the next. Drop your
 input files on the canvas.
 
+Press **Save** to keep the pipeline. Until then it stays out of **Sessions**,
+and leaving with changes asks you first. **Run** saves it too.
+
 ## 4. Set each step
 
 Double-click a step. Its **Parameters** tab shows what you can set, and the

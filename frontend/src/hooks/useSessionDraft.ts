@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import type { Node, Edge } from '@xyflow/react';
 import { sessionsService } from '../api/services';
 import type {
@@ -14,8 +14,6 @@ import { saveEdge } from '../utils/graphEdges';
 export const UNTITLED = 'Untitled pipeline';
 // Steps that run as jobs: plain steps, and a sweep's copies.
 export const STEP_TYPES = new Set(['default', 'branchCircle']);
-// A moment after the last change, so dragging is one save, not hundreds.
-const SAVE_AFTER_MS = 1000;
 
 export function serializeGraphToBlueprint(nodes: Node[], edges: Edge[]): { nodes: BlueprintNode[]; edges: BlueprintEdge[] } {
   return {
@@ -73,11 +71,9 @@ function draftKey(blueprint: PipelineBlueprint): string {
 }
 
 const EMPTY_DRAFT = draftKey({ nodes: [], edges: [] });
-// A saved draft is on its way onto the canvas; what first appears there
-// is that draft, not an edit.
+// A saved draft or a template is on its way onto the canvas; what first
+// appears there is that, not an edit.
 const AWAITING_CANVAS = 'awaiting canvas';
-// The last save failed, so whatever comes next is worth saving.
-const NOT_SAVED = 'not saved';
 
 /**
  * How many steps a draft has: its input files don't count.
@@ -87,94 +83,168 @@ function stepCount(blueprint: PipelineBlueprint): number {
     .length;
 }
 
+// One draft as three moments: on the canvas now, last stored on the
+// server, and as it opened (leaving that unchanged loses no work).
+interface DraftKeys {
+  id: string;
+  current: string;
+  stored: string;
+  opened: string;
+}
+
+interface Titles {
+  id: string;
+  shown: string;
+  stored: string;
+  opened: string;
+}
+
 /**
- * Save a pipeline on the server as it changes: a moment after the last
- * change, and on leaving. Nothing is saved until something changes, so
- * opening a pipeline does not touch it and an empty one leaves no card.
+ * A pipeline being edited. The server keeps it only when asked: by Save,
+ * or by Run, which needs it stored. So opening a pipeline or a template,
+ * or changing one, leaves no card until then.
  */
 export function useSessionDraft(
   activeSessionId: string,
   saved: SessionDetail | null | undefined
 ) {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
-  // A name given in this view; otherwise the name it was saved with.
-  const [named, setNamed] = useState<{ id: string; title: string } | null>(
-    null
-  );
-  const title =
-    named?.id === activeSessionId ? named.title : saved?.title || UNTITLED;
-  const lastDraft = useRef<{ id: string; key: string } | null>(null);
-  const waiting = useRef<SessionSave | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedTitle = saved?.title || UNTITLED;
+  const [titles, setTitles] = useState<Titles | null>(null);
+  const titlesNow =
+    titles?.id === activeSessionId
+      ? titles
+      : {
+          id: activeSessionId,
+          shown: savedTitle,
+          stored: savedTitle,
+          opened: savedTitle,
+        };
+  const [graphUnsaved, setGraphUnsaved] = useState(false);
+  const [graphEdited, setGraphEdited] = useState(false);
+  const [storedHere, setStoredHere] = useState<string | null>(null);
+  const keys = useRef<DraftKeys | null>(null);
+  const latest = useRef<PipelineBlueprint>({ nodes: [], edges: [] });
   // One save at a time, so they reach the server in order.
-  const sending = useRef<Promise<void>>(Promise.resolve());
+  const sending = useRef<Promise<boolean>>(Promise.resolve(true));
 
-  const send = useCallback(
-    (change: SessionSave) => {
-      setSaveStatus('saving');
-      sending.current = sending.current
-        .then(() => sessionsService.save(activeSessionId, change))
-        .then(
-          () => setSaveStatus('saved'),
-          (error) => {
-            console.error('Save failed', error);
-            lastDraft.current = { id: activeSessionId, key: NOT_SAVED };
-            setSaveStatus('failed');
-          }
-        );
-    },
-    [activeSessionId]
+  const keysFor = useCallback((): DraftKeys => {
+    if (keys.current?.id !== activeSessionId) {
+      const hasDraft = (saved?.blueprint?.nodes?.length ?? 0) > 0;
+      const start = hasDraft ? AWAITING_CANVAS : EMPTY_DRAFT;
+      keys.current = {
+        id: activeSessionId,
+        current: start,
+        stored: start,
+        opened: start,
+      };
+    }
+    return keys.current;
+  }, [activeSessionId, saved]);
+
+  const showKeys = useCallback((now: DraftKeys) => {
+    setGraphUnsaved(
+      now.stored !== AWAITING_CANVAS && now.current !== now.stored
+    );
+    setGraphEdited(
+      now.opened !== AWAITING_CANVAS && now.current !== now.opened
+    );
+  }, []);
+
+  const changeTitles = useCallback(
+    (change: Partial<Titles>) =>
+      setTitles((previous) => ({
+        ...(previous?.id === activeSessionId
+          ? previous
+          : {
+              id: activeSessionId,
+              shown: savedTitle,
+              stored: savedTitle,
+              opened: savedTitle,
+            }),
+        ...change,
+      })),
+    [activeSessionId, savedTitle]
   );
 
-  const saveNow = useCallback(() => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
-    if (waiting.current) send(waiting.current);
-    waiting.current = null;
-  }, [send]);
-
-  // Whatever is waiting goes on leaving this pipeline.
-  useEffect(() => saveNow, [saveNow]);
-
-  const autosaveGraph = useCallback(
+  // Note what the canvas now holds.
+  const trackGraph = useCallback(
     (graph: { nodes: Node[]; edges: Edge[] }) => {
-      if (lastDraft.current?.id !== activeSessionId) {
-        const hasDraft = (saved?.blueprint?.nodes?.length ?? 0) > 0;
-        const key = hasDraft ? AWAITING_CANVAS : EMPTY_DRAFT;
-        lastDraft.current = { id: activeSessionId, key };
-      }
+      const now = keysFor();
       const blueprint = serializeGraphToBlueprint(graph.nodes, graph.edges);
-      const key = draftKey(blueprint);
-      if (lastDraft.current.key === AWAITING_CANVAS) {
-        if (blueprint.nodes.length > 0) lastDraft.current.key = key;
-        return;
+      latest.current = blueprint;
+      now.current = draftKey(blueprint);
+      if (blueprint.nodes.length > 0) {
+        if (now.stored === AWAITING_CANVAS) now.stored = now.current;
+        if (now.opened === AWAITING_CANVAS) now.opened = now.current;
       }
-      if (key === lastDraft.current.key) return;
-      lastDraft.current.key = key;
-      waiting.current = { blueprint, node_count: stepCount(blueprint) };
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(saveNow, SAVE_AFTER_MS);
+      showKeys(now);
     },
-    [activeSessionId, saved, saveNow]
+    [keysFor, showKeys]
   );
 
-  // Name the pipeline: after its template, or as the person types. An
-  // empty name makes it untitled again.
-  const nameSession = useCallback(
-    (newTitle: string) => {
-      const clean = newTitle.trim();
-      setNamed({ id: activeSessionId, title: clean || UNTITLED });
-      send({ title: clean });
+  // Store the pipeline as it stands. True if the server now has it.
+  const save = useCallback((): Promise<boolean> => {
+    const blueprint = latest.current;
+    const key = draftKey(blueprint);
+    const name = titlesNow.shown;
+    const change: SessionSave = {
+      title: name === UNTITLED ? '' : name,
+      blueprint,
+      node_count: stepCount(blueprint),
+    };
+    setSaveStatus('saving');
+    sending.current = sending.current
+      .then(() => sessionsService.save(activeSessionId, change))
+      .then(
+        () => {
+          const now = keysFor();
+          now.stored = key;
+          now.opened = key;
+          showKeys(now);
+          changeTitles({ stored: name, opened: name });
+          setStoredHere(activeSessionId);
+          setSaveStatus('saved');
+          return true;
+        },
+        (error) => {
+          console.error('Save failed', error);
+          setSaveStatus('failed');
+          return false;
+        }
+      );
+    return sending.current;
+  }, [activeSessionId, titlesNow.shown, keysFor, showKeys, changeTitles]);
+
+  // A template is about to open: it is not an edit, though it isn't
+  // stored either, and the pipeline takes its name.
+  const openTemplate = useCallback(
+    (templateTitle: string) => {
+      keysFor().opened = AWAITING_CANVAS;
+      changeTitles({ shown: templateTitle, opened: templateTitle });
     },
-    [activeSessionId, send]
+    [keysFor, changeTitles]
+  );
+
+  // Name the pipeline as the person types. An empty name makes it
+  // untitled again.
+  const nameSession = useCallback(
+    (newTitle: string) =>
+      changeTitles({ shown: newTitle.trim() || UNTITLED }),
+    [changeTitles]
   );
 
   return {
     saveStatus,
-    setSaveStatus,
-    autosaveGraph,
-    saveNow,
-    title,
+    save,
+    trackGraph,
+    openTemplate,
     nameSession,
+    title: titlesNow.shown,
+    // Whether there is anything to store.
+    unsaved: graphUnsaved || titlesNow.shown !== titlesNow.stored,
+    // Whether leaving now would lose work.
+    edited: graphEdited || titlesNow.shown !== titlesNow.opened,
+    isStored: Boolean(saved) || storedHere === activeSessionId,
   };
 }
