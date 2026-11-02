@@ -109,7 +109,8 @@ read -rs ADMIN_API_KEY && export ADMIN_API_KEY
 ```
 
 Data packs go first, since a release naming a missing one is refused.
-Publish each pack its tasks name (`docs/releases.md`, "Data packs"):
+Publish each pack its tasks name, at the version they name
+(`docs/releases.md`, "Data packs"):
 
 ```bash
 uv run --python 3.11 python -m app.releases.publish_data \
