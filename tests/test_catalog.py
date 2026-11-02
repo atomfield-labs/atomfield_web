@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from app.catalog.argv import RUN_MAIN, Invocation, build_argv
 from app.catalog.catalog import Catalog, UnknownTaskError
-from app.catalog.models import CatalogDocument, InputPort
+from app.catalog.models import CatalogDocument, InputPort, TaskDefinition
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "catalog.json"
 REAL_CATALOG = Path(__file__).resolve().parents[1] / "scripts_repo"
@@ -252,6 +252,79 @@ def test_a_catalog_from_before_workflows_still_loads():
     document = fixture_document()
     del document["workflows"]
     assert not Catalog(CatalogDocument.model_validate(document)).workflows
+
+
+def test_a_catalog_from_before_references_still_loads(catalog: Catalog):
+    """
+    Releases already published list no pages, and no task has any.
+
+    :param catalog: The fixture catalog.
+    :type catalog: Catalog
+    """
+    assert "references" not in fixture_document()
+    assert catalog.pages_for(next(iter(catalog.tasks))) == []
+
+
+def test_a_task_lists_the_pages_that_explain_it():
+    """
+    An https address and a guide in docs/ are both accepted.
+    """
+    document = fixture_document()
+    task_id = document["tasks"][0]["id"]
+    pages = [
+        {"title": "Input", "page": "https://example.org/input.html"},
+        {"title": "Guide", "page": "docs/quantum-espresso.md"},
+    ]
+    document["references"] = {task_id: pages}
+    loaded = Catalog(CatalogDocument.model_validate(document))
+    assert [page.title for page in loaded.pages_for(task_id)] == [
+        "Input",
+        "Guide",
+    ]
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        "http://example.org/not-encrypted.html",
+        "file:///etc/passwd",
+        "docs/../.env",
+        "/etc/passwd",
+        "https://example.org/has space",
+    ],
+)
+def test_a_page_is_only_a_web_address_or_a_guide(page: str):
+    """
+    Nothing else can be listed, so the server never reads a local file
+    outside docs/ or fetches an unencrypted address.
+
+    :param page: A page that must be refused.
+    :type page: str
+    """
+    document = fixture_document()
+    task_id = document["tasks"][0]["id"]
+    document["references"] = {task_id: [{"title": "Bad", "page": page}]}
+    with pytest.raises(ValidationError):
+        CatalogDocument.model_validate(document)
+
+
+def test_pages_stay_out_of_what_agents_read():
+    """
+    Agents read a task strictly, so a new field in it would make one not
+    yet copied again refuse every job. Pages live beside the tasks.
+    """
+    assert "references" not in TaskDefinition.model_fields
+
+
+def test_pages_must_be_for_a_task_that_exists():
+    """
+    A misspelt task id fails when the catalog loads, not silently.
+    """
+    document = fixture_document()
+    page = {"title": "Input", "page": "https://example.org/input.html"}
+    document["references"] = {"no_such_task": [page]}
+    with pytest.raises(ValidationError, match="no_such_task"):
+        CatalogDocument.model_validate(document)
 
 
 def test_a_limited_catalog_holds_only_what_its_workflows_hold(catalog: Catalog):

@@ -13,6 +13,7 @@ from pydantic import BaseModel, ValidationError
 from app.catalog.models import (
     CatalogDocument,
     PipelineTemplate,
+    ReferencePage,
     TaskDefinition,
     Workflow,
 )
@@ -94,6 +95,9 @@ class Catalog:
                 for task in workflow.tasks
             }
         )
+        self.references: Mapping[str, list[ReferencePage]] = MappingProxyType(
+            document.references
+        )
         for template in document.pipelines:
             self.check_template(template)
 
@@ -132,6 +136,17 @@ class Catalog:
         limited.tasks = only_named(self.tasks, tasks)
         limited.templates = only_named(self.templates, templates)
         return limited
+
+    def pages_for(self, task_id: str) -> list[ReferencePage]:
+        """
+        The pages that explain a task's settings.
+
+        :param task_id: Task id.
+        :type task_id: str
+        :return: Its pages; none if the catalog lists none.
+        :rtype: list[ReferencePage]
+        """
+        return self.references.get(task_id, [])
 
     def workflow_of(self, task_id: str) -> str | None:
         """

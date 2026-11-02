@@ -31,6 +31,8 @@ FILE_NAME_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}"
 MAX_TEMPLATE_STRUCTURE_CHARS = 64 * 1024
 # A task's module goes into the line of code that starts it.
 MODULE_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$"
+# A task's reference page: an https address, or a guide in docs/.
+REFERENCE_PAGE_PATTERN = r"^(https://\S+|docs/[A-Za-z0-9_-]+\.md)$"
 # A workflow's id is stored with what each lab and person may use.
 WORKFLOW_ID_LENGTH = 64
 WORKFLOW_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]*$"
@@ -352,6 +354,17 @@ class Workflow(ContractModel):
     pipelines: list[str] = []
 
 
+class ReferencePage(ContractModel):
+    """
+    A page that explains a task's settings, which AI help may read. The
+    catalog's author lists it, so the server only ever fetches addresses
+    written here, never one from a log or a model's reply.
+    """
+
+    title: str = Field(min_length=1)
+    page: str = Field(pattern=REFERENCE_PAGE_PATTERN)
+
+
 class CatalogDocument(ContractModel):
     """
     The whole ``catalog.json`` file: the tasks, the ready-made pipelines
@@ -364,6 +377,10 @@ class CatalogDocument(ContractModel):
     tasks: list[TaskDefinition]
     pipelines: list[PipelineTemplate] = []
     workflows: list[Workflow] = []
+    # Task id -> pages about it. Beside the tasks, not in them: agents
+    # read ``TaskDefinition`` strictly, and one not yet copied again
+    # would refuse every job over a field it has never heard of.
+    references: dict[str, list[ReferencePage]] = {}
 
     @model_validator(mode="after")
     def check_ids_are_unique(self) -> "CatalogDocument":
@@ -404,6 +421,20 @@ class CatalogDocument(ContractModel):
         ids = (workflow.id for workflow in self.workflows)
         if repeated := given_twice(ids):
             raise ValueError(f"Workflow ids used twice: {repeated}")
+        return self
+
+    @model_validator(mode="after")
+    def check_references_name_tasks(self) -> "CatalogDocument":
+        """
+        Reject pages listed for a task the catalog lacks.
+
+        :return: The validated document.
+        :rtype: CatalogDocument
+        :raises ValueError: Naming those tasks.
+        """
+        tasks = {task.id for task in self.tasks}
+        if unknown := set(self.references) - tasks:
+            raise ValueError(f"References name unknown {sorted(unknown)}")
         return self
 
     @model_validator(mode="after")
