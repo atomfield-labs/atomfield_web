@@ -19,9 +19,19 @@ const BRAND = [
   'text-slate-900 leading-[1.08] mb-4',
 ].join(' ');
 const SUBTEXT = [
-  'text-2xl sm:text-3xl font-extrabold text-slate-800 tracking-tight',
+  'grid text-2xl sm:text-3xl font-extrabold text-slate-800 tracking-tight',
   'leading-snug mb-5 max-w-xl',
 ].join(' ');
+// One cell for both, so the points below stay put when the motto gives
+// way to the sentence (the timing is in index.css).
+const MOTTO = 'hero-motto col-start-1 row-start-1';
+const FIELD = 'hero-field col-start-1 row-start-1';
+// The motto again, for good, once the sentence has taken its place.
+const KEPT_MOTTO = [
+  'hero-kept-motto mt-6 text-lg sm:text-xl font-extrabold tracking-tight',
+  'text-slate-800',
+].join(' ');
+const FIGURE = 'lg:col-span-6 w-full flex flex-col items-center justify-center';
 const POINTS_LIST = 'flex flex-col gap-3 mb-9 max-w-xl';
 const POINT = 'flex gap-3 text-base leading-relaxed text-pretty text-slate-600';
 const POINT_MARK = 'mt-2.5 w-1.5 h-1.5 shrink-0 rounded-full bg-orange-500';
@@ -46,22 +56,25 @@ const SECONDARY = [
 ].join(' ');
 const POINTS = [
   {
-    lead: 'You set the workflow and the parameters.',
-    rest: 'Agentic AI chat apps write their own, and can hallucinate.',
+    lead: 'Modular workflow nodes, like Lego.',
+    rest: 'Snap them together. No scripting.',
   },
   {
-    lead: 'No black box on top of a black box.',
-    rest: 'Scientific packages are opaque enough without an AI agent above.',
-  },
-  {
-    lead: 'AI where it helps.',
+    lead: 'Physics first, AI assists.',
     rest:
-      'Use it to fix simulation errors and analyse results, not to decide ' +
-      'your science.',
+      'Simulation packages are complex enough, so every step stays visible.',
   },
   {
-    lead: 'Engage, learn, research.',
-    rest: 'Every step shows you its inputs, logs and results.',
+    lead: 'Design your own deterministic workflows.',
+    rest: 'No costly AI hallucinations.',
+  },
+  {
+    lead: 'Your intellect. Your compute. Your data privacy.',
+    rest: 'Jobs run on your cluster, under your control.',
+  },
+  {
+    lead: 'Learn by doing the science.',
+    rest: 'Set the parameters. Understand the results.',
   },
 ];
 
@@ -75,14 +88,20 @@ export default function HeroSection() {
       <div className={LAYOUT}>
         <div className="lg:col-span-6 flex flex-col items-start text-left">
           <div className={PILL}>
-            <span className={PILL_TEXT}>You decide. AtomField runs it.</span>
+            <span className={PILL_TEXT}>Modern standard in simulation</span>
           </div>
 
           <h1 className={BRAND}>AtomField.</h1>
 
           <h2 className={SUBTEXT}>
-            Create workflow pipelines of{' '}
-            <span className="text-orange-600">simulations.</span>
+            <span className={MOTTO}>
+              <span>Design.</span> <span>Simulate.</span>{' '}
+              <span className="text-orange-600">Discover.</span>
+            </span>
+            <span className={FIELD}>
+              DAG workflows for computational chemistry and{' '}
+              <span className="text-orange-600">materials science.</span>
+            </span>
           </h2>
 
           <ul className={POINTS_LIST}>
@@ -122,8 +141,12 @@ export default function HeroSection() {
           </div>
         </div>
 
-        <div className="lg:col-span-6 w-full flex items-center justify-center">
+        <div className={FIGURE}>
           <PipelineFlowHero />
+          <p className={KEPT_MOTTO}>
+            Design. Simulate.{' '}
+            <span className="text-orange-600">Discover.</span>
+          </p>
         </div>
       </div>
     </section>

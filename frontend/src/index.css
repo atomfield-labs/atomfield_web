@@ -29,6 +29,50 @@ body {
   color: #0f172a;
 }
 
+/* The hero's motto: its words arrive one by one, slowly, then the line
+   gives way to the sentence saying what AtomField is for, and the motto
+   settles under the figure. With reduced motion, both are there at once. */
+.hero-motto {
+  opacity: 0;
+}
+
+@keyframes hero-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(0.25em);
+  }
+}
+
+@keyframes hero-leave {
+  from {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hero-motto {
+    animation: hero-leave 0.8s ease-in 5.6s both;
+  }
+
+  .hero-motto > span {
+    display: inline-block;
+    animation: hero-arrive 1.2s ease-out 0.3s both;
+  }
+
+  .hero-motto > span:nth-child(2) {
+    animation-delay: 1.6s;
+  }
+
+  .hero-motto > span:nth-child(3) {
+    animation-delay: 2.9s;
+  }
+
+  .hero-field,
+  .hero-kept-motto {
+    animation: hero-arrive 1s ease-out 6.2s both;
+  }
+}
+
 /* A guide's code block draws its own box; highlighting only colours. */
 .prose pre code.hljs {
   padding: 0;
