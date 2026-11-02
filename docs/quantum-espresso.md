@@ -110,13 +110,16 @@ the q-mesh until the result stops moving.
 - **Polar crystals** get no splitting of the optical modes at Gamma
   (LO-TO), since no dielectric constant or effective charges are
   computed.
-- **Other elements** than silicon need a bigger pseudopotential pack.
-  The pack `pslibrary-pbe 1.0.0-si` holds silicon only (the PAW file
-  `Si.pbe-n-kjpaw_psl.1.0.0.UPF`, scalar relativistic). To add elements,
-  put their files in a folder with silicon's, publish it as a new
-  version (`docs/releases.md`, "Data packs"), add them to afscripts'
-  `utilities/pseudopotentials.toml`, and name the new version in the
-  four tasks' `[[data]]` tables.
+- **Choosing a pseudopotential** is not offered. The pack
+  `pslibrary-pbe 1.0.0` holds PSLibrary's scalar relativistic PBE PAW
+  files for hydrogen to plutonium, and afscripts'
+  `utilities/pseudopotentials.toml` picks one per element: the type
+  PSLibrary suggests, or the only one there is. Silicon uses
+  `Si.pbe-n-kjpaw_psl.1.0.0.UPF`. Mn, Co, Tc and Ir have no 1.0.0 file
+  and use PSLibrary's older ones. A step's `.in` file names the file
+  used. To use another file or functional, publish a new version of
+  the pack (`docs/releases.md`, "Data packs"), change the table, and
+  name the new version in the four tasks' `[[data]]` tables.
 
 ## Running it on a cluster
 

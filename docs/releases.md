@@ -330,6 +330,21 @@ machine, into `<work>/data/`), checks the fingerprint, unpacks it, and
 sets the variable: `ESPRESSO_PSEUDO=<work>/data/pslibrary-rel-pbe-...`.
 The job folder's `.af_made_with` note lists the packs the job used.
 
-`GET /api/data-packs` lists the published packs. Packs over 100 MB do
-not fit through a Cloudflare tunnel on the free plan; split them (for
-example one pack per functional).
+`GET /api/data-packs` lists the published packs. A pack may be up to
+1 GB, but one over 100 MB does not fit through a Cloudflare tunnel on
+the free plan. Publish it over a direct address or on the server
+itself instead.
+
+The Quantum ESPRESSO and Wannier90 tasks read two packs, both version
+`1.0.0`. Each holds PSLibrary's PBE PAW files as
+[Quantum ESPRESSO's site](https://pseudopotentials.quantum-espresso.org/)
+offers them, for hydrogen to plutonium: version 1.0.0 of each file, or
+the older ones for Mn, Co, Tc and Ir, which have none.
+
+| Pack | Files | Zipped | Unpacked on a cluster |
+|---|---|---|---|
+| `pslibrary-pbe` (scalar relativistic) | 116 | 78 MB | 223 MB |
+| `pslibrary-rel-pbe` (fully relativistic) | 116 | 184 MB | 529 MB |
+
+afscripts' `utilities/pseudopotentials.toml` picks the file each element
+uses.

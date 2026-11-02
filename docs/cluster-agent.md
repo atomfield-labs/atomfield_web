@@ -161,9 +161,9 @@ rm -rf ~/atomfield/releases
 
 Data the scripts read, such as Quantum ESPRESSO pseudopotentials,
 arrives the same way as **data packs**: downloaded once into
-`~/atomfield/data/` when a job first needs them (a few hundred MB for
-a full set of pseudopotentials; mind your quota). There is nothing to
-download or unpack by hand.
+`~/atomfield/data/` when a job first needs them (223 MB for the scalar
+relativistic pseudopotentials, 529 MB for the fully relativistic ones;
+mind your quota). There is nothing to download or unpack by hand.
 
 To run your own copy of the scripts instead (for example, while you
 edit them on the cluster), point the agent at it:

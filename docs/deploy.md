@@ -109,12 +109,17 @@ read -rs ADMIN_API_KEY && export ADMIN_API_KEY
 ```
 
 Data packs go first, since a release naming a missing one is refused.
-Publish each pack its tasks name, at the version they name
-(`docs/releases.md`, "Data packs"):
+Publish both pseudopotential packs (`docs/releases.md`, "Data packs"):
 
 ```bash
 uv run --python 3.11 python -m app.releases.publish_data \
   ~/pseudo/pslibrary-pbe --name pslibrary-pbe --version 1.0.0 \
+  --api-url "$ATOMFIELD"
+```
+
+```bash
+uv run --python 3.11 python -m app.releases.publish_data \
+  ~/pseudo/pslibrary-rel-pbe --name pslibrary-rel-pbe --version 1.0.0 \
   --api-url "$ATOMFIELD"
 ```
 
@@ -124,9 +129,9 @@ Then the release:
 uv run --python 3.11 python -m app.releases.publish --api-url "$ATOMFIELD"
 ```
 
-A tunnel may limit uploads (Cloudflare's free plan stops at 100 MB).
-Publish a bigger pack on the server itself, with
-`--api-url http://127.0.0.1:8000`.
+A tunnel may limit uploads: Cloudflare's free plan stops at 100 MB, which
+`pslibrary-rel-pbe` is over. Publish a bigger pack on the server itself,
+with `--api-url http://127.0.0.1:8000`.
 
 ## 6. Set up people and clusters
 
