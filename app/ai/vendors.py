@@ -327,6 +327,29 @@ def claude_reply(message: Any) -> LlmReply:
     )
 
 
+def claude_request(question: Question) -> dict[str, Any]:
+    """
+    A question, as Claude's API takes it.
+
+    :param question: The question.
+    :type question: Question
+    :return: The request's fields.
+    :rtype: dict[str, Any]
+    """
+    is_covered = question.model in CLAUDE_FALLBACK_MODELS
+    return {
+        "model": question.model,
+        "max_tokens": MAX_OUTPUT_TOKENS,
+        "system": question.system,
+        "messages": [{"role": USER_ROLE, "content": question.user}],
+        "output_config": {
+            "effort": CLAUDE_EFFORT,
+            "format": {"type": "json_schema", "schema": question.schema},
+        },
+        **(CLAUDE_FALLBACK if is_covered else {}),
+    }
+
+
 class ClaudeClient(SdkClient):
     """
     Claude, through Anthropic's library.
@@ -355,22 +378,9 @@ class ClaudeClient(SdkClient):
         :rtype: LlmReply
         :raises LlmError: If it can't be asked, or doesn't fully answer.
         """
-        fallback = (
-            CLAUDE_FALLBACK if question.model in CLAUDE_FALLBACK_MODELS else {}
-        )
-        output = {
-            "effort": CLAUDE_EFFORT,
-            "format": {"type": "json_schema", "schema": question.schema},
-        }
+        request = claude_request(question)
         with plain_errors(anthropic, ASKING_MESSAGES):
-            async with self.sdk.beta.messages.stream(
-                model=question.model,
-                max_tokens=MAX_OUTPUT_TOKENS,
-                system=question.system,
-                messages=[{"role": USER_ROLE, "content": question.user}],
-                output_config=output,
-                **fallback,
-            ) as stream:
+            async with self.sdk.beta.messages.stream(**request) as stream:
                 message = await stream.get_final_message()
         return claude_reply(message)
 
