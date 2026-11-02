@@ -7,6 +7,7 @@ from fastapi import APIRouter
 
 from app.agents.routes import router as agents_router
 from app.api.routes.admin import router as admin_router
+from app.api.routes.ai import router as ai_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.catalog import router as catalog_router
 from app.api.routes.data_packs import router as data_packs_router
@@ -26,6 +27,7 @@ api_router = APIRouter(prefix="/api")
 api_router.include_router(auth_router)
 api_router.include_router(script_keys_router)
 api_router.include_router(admin_router)
+api_router.include_router(ai_router)
 api_router.include_router(agents_router)
 api_router.include_router(pairing_agent_router)
 api_router.include_router(pairings_router)

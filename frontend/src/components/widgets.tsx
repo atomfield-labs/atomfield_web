@@ -427,20 +427,23 @@ export function TextBox({
   onChange,
   placeholder,
   required,
+  secret,
 }: {
   id?: string;
   value: string | null;
   onChange: (value: string | null) => void;
   placeholder?: string;
   required?: boolean;
+  // Shown as dots, and not offered for saving as a password.
+  secret?: boolean;
 }) {
   const wrong = required && !value;
   return (
     <div className={`${FRAME} ${wrong ? FRAME_WRONG : FRAME_CALM}`}>
       <input
         id={id}
-        type="text"
-        autoComplete="off"
+        type={secret ? 'password' : 'text'}
+        autoComplete={secret ? 'new-password' : 'off'}
         spellCheck={false}
         value={value ?? ''}
         placeholder={placeholder}

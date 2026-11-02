@@ -9,9 +9,12 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "alembic>=1.20.1",
+    "anthropic>=2.3.0",
     "asyncpg>=0.32.0",
+    "cryptography>=50.0.2",
     "fastapi>=0.142.2",
     "httpx>=0.28.1",
+    "openai>=3.42.1",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
     "pyjwt[crypto]>=2.15.1",
@@ -47,6 +50,8 @@ env = [
     "D:ARTIFACTS_DIR=.pytest_cache/test-artifacts",
     "D:STORAGE_DIR=.pytest_cache/test-storage",
     "D:STORAGE_SIGNING_KEY=test-storage-signing-key",
+    "D:AI_KEY_SECRET=test-ai-key-secret",
+    "D:AI_CALLS_PER_MINUTE=1000",
     # Tests start many sign-ins from one client; the limit itself is
     # tested by lowering it in test_sign_in.py.
     "D:SIGN_IN_LIMIT_PER_MINUTE=1000",

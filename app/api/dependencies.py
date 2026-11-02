@@ -11,6 +11,8 @@ from redis.asyncio import Redis
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.vault import KeyVault
+from app.ai.vendors import AiVendor, LlmClient, client_for
 from app.api.errors import (
     forbidden,
     not_found,
@@ -33,6 +35,9 @@ from app.releases.catalogs import CurrentCatalog, ReleaseCatalogs
 from app.sign_in.flow import SignInFlow
 from app.storage.store import LocalDiskStore
 
+# Makes a vendor's client from a person's key.
+LlmFactory = Callable[[AiVendor, str], LlmClient]
+AI_CALL_LIMIT = "ai-call"
 CLOUDFLARE_CLIENT_HEADER = "CF-Connecting-IP"
 UNKNOWN_CLIENT = "unknown"
 SECONDS_PER_HOUR = 3600
@@ -570,6 +575,51 @@ class AddressLimit:
         limiter = FixedWindowRateLimiter(redis, limit)
         decision = await limiter.check(client_address(request))
         return decision.allowed
+
+
+async def get_key_vault(request: Request) -> KeyVault | None:
+    """
+    Provide the vault that keeps people's AI keys.
+
+    :param request: Active FastAPI HTTP request object.
+    :type request: Request
+    :return: The vault; None if this server has no secret for it.
+    :rtype: KeyVault | None
+    """
+    return request.app.state.key_vault
+
+
+async def get_llm_factory() -> LlmFactory:
+    """
+    Provide what makes a vendor's client; tests replace it with a fake.
+
+    :return: The factory.
+    :rtype: LlmFactory
+    """
+    return client_for
+
+
+async def ai_call_allowed(
+    user: User = Depends(get_browser_user),
+    redis: Redis = Depends(get_redis),
+) -> bool:
+    """
+    Count a call to an AI vendor against the person's limit per minute.
+
+    :param user: The person, signed in.
+    :type user: User
+    :param redis: Shared Redis client holding the counters.
+    :type redis: Redis
+    :return: True while within the limit.
+    :rtype: bool
+    """
+    limit = RateLimit(
+        name=AI_CALL_LIMIT,
+        max_requests=settings.AI_CALLS_PER_MINUTE,
+        window_seconds=SECONDS_PER_MINUTE,
+    )
+    decision = await FixedWindowRateLimiter(redis, limit).check(str(user.id))
+    return decision.allowed
 
 
 # Each one started keeps its secrets in Redis for minutes, so a flood

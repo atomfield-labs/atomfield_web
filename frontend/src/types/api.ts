@@ -429,3 +429,31 @@ export interface TargetToken {
   target: ComputeTarget;
   token: string;
 }
+
+// Whose model a person's key is for.
+export type AiVendor = 'claude' | 'openai' | 'gemini';
+
+export interface AiVendorView {
+  id: AiVendor;
+  title: string;
+  // What someone choosing it should know, if anything.
+  warning?: string | null;
+}
+
+// A person's saved key, as far as anyone is ever shown it.
+export interface SavedAiKey {
+  vendor: AiVendor;
+  model: string;
+  key_ending: string;
+}
+
+export interface AiKeyState {
+  // False if the server has no secret to keep keys with.
+  available: boolean;
+  vendors: AiVendorView[];
+  saved?: SavedAiKey | null;
+}
+
+export interface AiKeySaved extends AiKeyState {
+  models: string[];
+}

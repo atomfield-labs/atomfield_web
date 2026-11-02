@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { authService } from '../../api/services/authService';
 import { useSignedInAccount } from '../../hooks/useAccount';
 import type { UserStatsResponse } from '../../types/api';
-
-const SECTION_TITLE = 'text-sm font-semibold text-stone-900';
+import { SECTION_TITLE } from './accountStyle';
+import AiKeySection from './AiKeySection';
 
 function Quota({ stats }: { stats: UserStatsResponse }) {
   const left = Math.max(0, stats.quota_remaining);
@@ -32,7 +32,7 @@ function Quota({ stats }: { stats: UserStatsResponse }) {
 }
 
 /**
- * Who you are, and how many jobs you have left.
+ * Who you are, how many jobs you have left, and your key for AI help.
  */
 export default function AccountPage() {
   const account = useSignedInAccount();
@@ -60,6 +60,7 @@ export default function AccountPage() {
           )}
         </header>
         {stats && <Quota stats={stats} />}
+        <AiKeySection />
       </div>
     </div>
   );

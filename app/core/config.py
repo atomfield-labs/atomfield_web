@@ -21,6 +21,7 @@ SECRET_SETTINGS = (
     "HOUSE_AGENT_TOKEN",
     "STORAGE_SIGNING_KEY",
     "OIDC_CLIENT_SECRET",
+    "AI_KEY_SECRET",
 )
 
 
@@ -116,6 +117,13 @@ class Settings(BaseSettings):
     # once a lab has added them.
     OWNER_EMAILS: str = ""
     SESSION_DAYS: int = 14
+
+    # --- AI help on a finished step ---
+    # Encrypts each person's own key for an AI vendor. Unset, nobody can
+    # save a key and the AI buttons stay off.
+    AI_KEY_SECRET: str | None = None
+    # Each AI call costs its person money, so a stuck click can't repeat.
+    AI_CALLS_PER_MINUTE: int = 10
 
     # --- Agents ---
     # Token of the platform's own (house) agent; None disables it.

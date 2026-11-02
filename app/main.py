@@ -19,6 +19,7 @@ from sqlalchemy.dialects.postgresql import Insert, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.auth import provision_house_target
+from app.ai.vault import KeyVault
 from app.api.router import api_router
 from app.catalog.catalog import Catalog
 from app.catalog.models import CatalogDocument
@@ -111,6 +112,7 @@ async def set_up(app: FastAPI) -> None:
     app.state.event_bus = RedisEventBus(app.state.redis)
     app.state.http = httpx.AsyncClient(timeout=PROVIDER_TIMEOUT_SECONDS)
     app.state.sign_in = create_sign_in(app.state.http, app.state.redis)
+    app.state.key_vault = create_key_vault()
 
 
 async def stop_task(task: asyncio.Task | None) -> None:
@@ -141,6 +143,18 @@ def create_store() -> LocalDiskStore:
         raise RuntimeError("Set STORAGE_SIGNING_KEY (openssl rand -hex 32)")
     signer = LinkSigner(settings.STORAGE_SIGNING_KEY)
     return LocalDiskStore(Path(settings.STORAGE_DIR), signer)
+
+
+def create_key_vault() -> KeyVault | None:
+    """
+    Open the vault that keeps people's AI keys.
+
+    :return: The vault; None if ``AI_KEY_SECRET`` isn't set, which leaves
+        AI help off rather than stopping the server.
+    :rtype: KeyVault | None
+    """
+    secret = settings.AI_KEY_SECRET
+    return KeyVault(secret) if secret else None
 
 
 def sign_in_registration() -> Registration:

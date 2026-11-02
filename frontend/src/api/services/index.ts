@@ -1,3 +1,4 @@
+export { aiService } from './aiService';
 export { authService } from './authService';
 export { adminService } from './adminService';
 export { catalogService } from './catalogService';
