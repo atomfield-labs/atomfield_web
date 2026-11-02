@@ -3,10 +3,15 @@ Request and response bodies for AI help. A person's key only ever comes
 in: nothing here sends one back.
 """
 
+from datetime import datetime
+from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
+from app.ai.evidence import FileLeft, ReviewKind
+from app.ai.suggestions import CheckedSuggestion
 from app.ai.vendors import AiVendor
-from app.models.ai import MODEL_NAME_LENGTH
+from app.models.ai import MODEL_NAME_LENGTH, ReviewStatus
 
 MAX_KEY_LENGTH = 512
 
@@ -70,3 +75,39 @@ class AiModelChoice(BaseModel):
     """
 
     model: str = Field(min_length=1, max_length=MODEL_NAME_LENGTH)
+
+
+class AiReadItem(BaseModel):
+    """
+    A file or page the model was given, and how much of it.
+    """
+
+    name: str
+    shown: str
+
+
+class AiReviewView(BaseModel):
+    """
+    One review, as the AI tab shows it.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    kind: ReviewKind
+    status: ReviewStatus
+    vendor: AiVendor
+    model: str
+    answered_by: str | None = None
+    summary: str | None = None
+    explanation: str | None = None
+    suggestions: list[CheckedSuggestion] | None = None
+    check_next: list[str] | None = None
+    read_parts: list[AiReadItem] | None = None
+    unread_pages: list[str] | None = None
+    left_behind: list[FileLeft] | None = None
+    error: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    created_at: datetime
+    finished_at: datetime | None = None

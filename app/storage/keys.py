@@ -83,6 +83,22 @@ def job_file_key(run_id: uuid.UUID, job_id: uuid.UUID, name: str) -> str:
     return f"{RUNS}/{run_id}/jobs/{job_id}/{validate_filename(name)}"
 
 
+def ai_sent_key(run_id: uuid.UUID, review_id: uuid.UUID) -> str:
+    """
+    Key of the exact text sent to a model for one review. It sits beside
+    the run's jobs, so the job file routes can't reach it, and it goes
+    when the run is deleted.
+
+    :param run_id: The job's run.
+    :type run_id: uuid.UUID
+    :param review_id: The review.
+    :type review_id: uuid.UUID
+    :return: ``runs/<run>/ai/<review>.txt``.
+    :rtype: str
+    """
+    return f"{RUNS}/{run_id}/ai/{review_id}.txt"
+
+
 def run_files_folder(run_id: uuid.UUID) -> str:
     """
     Folder of everything stored for one run (UI files and its zip).

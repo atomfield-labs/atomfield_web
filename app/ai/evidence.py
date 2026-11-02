@@ -8,7 +8,7 @@ never among them, and big files stay on the cluster.
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -182,6 +182,20 @@ class Evidence:
     parts: list[EvidencePart] = field(default_factory=list)
     left_behind: list[FileLeft] = field(default_factory=list)
     unread_pages: list[str] = field(default_factory=list)
+
+    def record(self) -> dict[str, list]:
+        """
+        What to store about it: what was read, without the text.
+
+        :return: Column values for ``AiReview``.
+        :rtype: dict[str, list]
+        """
+        read = [{"name": part.name, "shown": part.shown} for part in self.parts]
+        return {
+            "read_parts": read,
+            "unread_pages": self.unread_pages,
+            "left_behind": [asdict(item) for item in self.left_behind],
+        }
 
 
 def group_of(

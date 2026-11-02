@@ -11,6 +11,9 @@ from redis.asyncio import Redis
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.evidence import EvidenceCollector
+from app.ai.pages import PageLibrary
+from app.ai.reviews import ReviewRunner
 from app.ai.vault import KeyVault
 from app.ai.vendors import AiVendor, LlmClient, client_for
 from app.api.errors import (
@@ -21,7 +24,7 @@ from app.api.errors import (
 from app.core.config import settings
 from app.core.rate_limit import FixedWindowRateLimiter, RateLimit
 from app.core.security import API_KEY_HEADER, SESSION_COOKIE, hash_api_key
-from app.db.session import get_db
+from app.db.session import AsyncSessionLocal, get_db
 from app.events.bus import EventBus
 from app.labs.access import allowed_workflows
 from app.models.api_key import ApiKey
@@ -597,6 +600,38 @@ async def get_llm_factory() -> LlmFactory:
     :rtype: LlmFactory
     """
     return client_for
+
+
+async def get_review_runner(
+    request: Request,
+    vault: KeyVault | None = Depends(get_key_vault),
+    make_client: LlmFactory = Depends(get_llm_factory),
+) -> ReviewRunner | None:
+    """
+    Provide what runs an AI review.
+
+    :param request: Active FastAPI HTTP request object.
+    :type request: Request
+    :param vault: The vault; None if this server has no secret for it.
+    :type vault: KeyVault | None
+    :param make_client: Makes a vendor's client.
+    :type make_client: LlmFactory
+    :return: The runner; None without a vault, as no key can be read.
+    :rtype: ReviewRunner | None
+    """
+    if vault is None:
+        return None
+    state = request.app.state
+    library = PageLibrary(state.store, state.http)
+    collector = EvidenceCollector(state.store, library)
+    return ReviewRunner(
+        AsyncSessionLocal,
+        state.catalogs,
+        collector,
+        state.store,
+        vault,
+        make_client,
+    )
 
 
 async def ai_call_allowed(

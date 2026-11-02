@@ -2,7 +2,7 @@
 Database ORM models package.
 """
 
-from app.models.ai import AiKey
+from app.models.ai import AiKey, AiReview
 from app.models.api_key import ApiKey
 from app.models.browser_session import BrowserSession
 from app.models.compute_target import ComputeTarget
@@ -16,6 +16,7 @@ from app.models.user import User
 
 __all__ = [
     "AiKey",
+    "AiReview",
     "ApiKey",
     "BrowserSession",
     "ComputeTarget",
