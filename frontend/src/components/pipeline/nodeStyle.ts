@@ -35,13 +35,16 @@ export function nodeBox(selected: boolean, dashed = false): string {
 
 // A step's link points: every side takes links in and out, so
 // pipelines can run any way. The ids are stored in saved pipelines.
+// The order matters. Each side's two points overlap, and the later one
+// is on top: it must be the source, for a link to flow the way it is
+// dragged. Links with no handle named use the first of each type.
 export const STEP_HANDLES = [
-  { id: 'source-right', type: 'source', position: Position.Right },
   { id: 'target-left', type: 'target', position: Position.Left },
+  { id: 'target-right', type: 'target', position: Position.Right },
+  { id: 'source-right', type: 'source', position: Position.Right },
+  { id: 'source-left', type: 'source', position: Position.Left },
   { id: 'target-top', type: 'target', position: Position.Top },
   { id: 'source-top', type: 'source', position: Position.Top },
-  { id: 'source-bottom', type: 'source', position: Position.Bottom },
   { id: 'target-bottom', type: 'target', position: Position.Bottom },
-  { id: 'source-left', type: 'source', position: Position.Left },
-  { id: 'target-right', type: 'target', position: Position.Right },
+  { id: 'source-bottom', type: 'source', position: Position.Bottom },
 ] as const;

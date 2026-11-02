@@ -29,6 +29,7 @@ import StartScreen from './StartScreen';
 import BranchCircleNode from './BranchCircleNode';
 import BranchDotsNode from './BranchDotsNode';
 import { parseStructureFile } from '../../utils/structureParser';
+import { placedCopy, templateToBlueprint } from '../../utils/templates';
 import {
   EDGE_STYLE,
   orientConnection,
@@ -88,6 +89,67 @@ function isGroupMemberNode(node?: Node | null, targetGroupId?: string, parentId?
     ((node.type === 'branchDots' || node.type === 'branchExpander') &&
       (nodeData.groupId === targetGroupId || nodeData.branchGroupId === targetGroupId))
   );
+}
+
+/**
+ * The links that belong with one in a sweep: those between the same
+ * neighbours, one or both of them a sweep with its copies. The link
+ * itself is among them.
+ */
+function sisterEdgeIds(link: Edge, nodes: Node[], edges: Edge[]): Set<string> {
+  const groupOf = (nodeId: string) => {
+    const node = nodes.find((n) => n.id === nodeId);
+    const data = node?.data as any;
+    return data?.branchGroupId || (data?.isParentBranch ? nodeId : null);
+  };
+  const inGroup = (nodeId: string, groupId: string) =>
+    nodeId === groupId ||
+    isGroupMemberNode(nodes.find((n) => n.id === nodeId), groupId, groupId);
+  const sourceGroup = groupOf(link.source);
+  const targetGroup = groupOf(link.target);
+  if (!sourceGroup && !targetGroup) return new Set();
+  const sisters = edges.filter(
+    (edge) =>
+      (sourceGroup
+        ? inGroup(edge.source, sourceGroup)
+        : edge.source === link.source) &&
+      (targetGroup
+        ? inGroup(edge.target, targetGroup)
+        : edge.target === link.target)
+  );
+  return new Set(sisters.map((edge) => edge.id));
+}
+
+/**
+ * A sweep's links in and out use the connectors of the step's own link
+ * with that neighbour, so all its copies fan out of the same points.
+ */
+function withParentConnectors(
+  edges: Edge[],
+  parentId: string,
+  members: Set<string>
+): Edge[] {
+  const parentLinks = new Map(
+    edges
+      .filter((edge) => edge.source === parentId || edge.target === parentId)
+      .map((edge) => [`${edge.source}->${edge.target}`, edge])
+  );
+  return edges.map((edge) => {
+    const entering = members.has(edge.target) && !members.has(edge.source);
+    const leaving = members.has(edge.source) && !members.has(edge.target);
+    if (!entering && !leaving) return edge;
+    const own = parentLinks.get(
+      entering
+        ? `${edge.source}->${parentId}`
+        : `${parentId}->${edge.target}`
+    );
+    if (!own) return edge;
+    return {
+      ...edge,
+      sourceHandle: own.sourceHandle,
+      targetHandle: own.targetHandle,
+    };
+  });
 }
 
 export default function GraphCanvas({ 
@@ -908,6 +970,9 @@ export default function GraphCanvas({
       ...(downExpanderNode ? [downExpanderNode] : []),
     ];
 
+    const members = new Set([parentNode.id, ...keptReplicas.map((n) => n.id)]);
+    nextEdges = withParentConnectors(nextEdges, parentNode.id, members);
+
     setNodes(nextNodes);
     setEdges(nextEdges);
 
@@ -973,59 +1038,63 @@ export default function GraphCanvas({
     }
   }, [replicateNode, onRegisterReplicateHandler]);
 
+  // A saved or ready-made box as the canvas holds it.
+  const toCanvasNode = useCallback((n: any, i: number): Node => {
+    if (n.type === 'structure' || n.node_type === 'structure') {
+      return {
+        id: n.ui_id || n.id,
+        type: 'structure',
+        position: n.position || { x: 100, y: 150 },
+        sourcePosition: Position.Right,
+        data: {
+          ...n,
+          ...(n.data || {}),
+          onFileUpload: (nId: string, f: File) => processStructureFile(f, nId),
+        }
+      };
+    }
+    if (n.type === 'branchCircle') {
+      return {
+        id: n.ui_id || n.id,
+        type: 'branchCircle',
+        position: n.position || { x: 100, y: 150 },
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
+        data: {
+          ...n,
+          ...(n.data || {}),
+          index: (n.data as any)?.index || (n as any).index || 2,
+          cleanLabel: n.label || n.script_name,
+          branchGroupId:
+            (n.data as any)?.branchGroupId || (n as any).branchGroupId,
+        },
+      };
+    }
+    return {
+      id: n.ui_id || n.id,
+      type: 'default',
+      className: 'atomfield-pipeline-node',
+      position: n.position || { x: 250 * i + 100, y: 150 },
+      sourcePosition: Position.Right,
+      targetPosition: Position.Left,
+      data: { 
+        label: n.label || n.script_name, 
+        filename: n.filename || n.script_name,
+        task_id: n.task_id || n.script_name,
+        inputs: n.inputs || {},
+        script_id: n.script_id || n.ui_id || n.id,
+        status: n.status || 'Draft', 
+        parameters: n.parameters || {},
+        default_parameters: n.default_parameters || n.parameters || {},
+        originalData: n 
+      },
+    };
+  }, [processStructureFile]);
+
   // Hydrate from blueprint
   useEffect(() => {
     if (blueprint && blueprint.nodes) {
-      const initialNodes: Node[] = blueprint.nodes.map((n, i) => {
-        if (n.type === 'structure' || n.node_type === 'structure') {
-          return {
-            id: n.ui_id || n.id,
-            type: 'structure',
-            position: n.position || { x: 100, y: 150 },
-            sourcePosition: Position.Right,
-            data: {
-              ...n,
-              ...(n.data || {}),
-              onFileUpload: (nId: string, f: File) => processStructureFile(f, nId),
-            }
-          };
-        }
-        if (n.type === 'branchCircle') {
-          return {
-            id: n.ui_id || n.id,
-            type: 'branchCircle',
-            position: n.position || { x: 100, y: 150 },
-            sourcePosition: Position.Right,
-            targetPosition: Position.Left,
-            data: {
-              ...n,
-              ...(n.data || {}),
-              index: (n.data as any)?.index || (n as any).index || 2,
-              cleanLabel: n.label || n.script_name,
-              branchGroupId: (n.data as any)?.branchGroupId || (n as any).branchGroupId,
-            },
-          };
-        }
-        return {
-          id: n.ui_id || n.id,
-          type: 'default',
-          className: 'atomfield-pipeline-node',
-          position: n.position || { x: 250 * i + 100, y: 150 },
-          sourcePosition: Position.Right,
-          targetPosition: Position.Left,
-          data: { 
-            label: n.label || n.script_name, 
-            filename: n.filename || n.script_name,
-            task_id: n.task_id || n.script_name,
-            inputs: n.inputs || {},
-            script_id: n.script_id || n.ui_id || n.id,
-            status: n.status || 'Draft', 
-            parameters: n.parameters || {},
-            default_parameters: n.default_parameters || n.parameters || {},
-            originalData: n 
-          },
-        };
-      });
+      const initialNodes: Node[] = blueprint.nodes.map(toCanvasNode);
       setNodes(initialNodes);
       if (initialNodes.length > 0) {
         setTimeout(() => {
@@ -1046,7 +1115,7 @@ export default function GraphCanvas({
         .filter((edge): edge is Edge => edge !== null);
       setEdges(initialEdges);
     }
-  }, [blueprint, rfFitView]);
+  }, [blueprint, rfFitView, toCanvasNode]);
 
   const onNodesChange = useCallback(
     (changes: any[]) => setNodes((nds) => applyNodeChanges(changes, nds)),
@@ -1063,26 +1132,9 @@ export default function GraphCanvas({
         const sisterEdgeIdsToRemove = new Set<string>();
 
         removedEdges.forEach((re) => {
-          const sNode = nodesRef.current.find((n) => n.id === re.source);
-          const tNode = nodesRef.current.find((n) => n.id === re.target);
-          const sGroupId = (sNode?.data as any)?.branchGroupId || ((sNode?.data as any)?.isParentBranch ? sNode?.id : null);
-          const tGroupId = (tNode?.data as any)?.branchGroupId || ((tNode?.data as any)?.isParentBranch ? tNode?.id : null);
-
-          if (sGroupId || tGroupId) {
-            edgesRef.current.forEach((e) => {
-              const matchesSource = sGroupId
-                ? (e.source === sGroupId || isGroupMemberNode(nodesRef.current.find((n) => n.id === e.source), sGroupId, sGroupId))
-                : e.source === re.source;
-
-              const matchesTarget = tGroupId
-                ? (e.target === tGroupId || isGroupMemberNode(nodesRef.current.find((n) => n.id === e.target), tGroupId, tGroupId))
-                : e.target === re.target;
-
-              if (matchesSource && matchesTarget) {
-                sisterEdgeIdsToRemove.add(e.id);
-              }
-            });
-          }
+          sisterEdgeIds(re, nodesRef.current, edgesRef.current).forEach((id) =>
+            sisterEdgeIdsToRemove.add(id)
+          );
         });
 
         if (sisterEdgeIdsToRemove.size > 0) {
@@ -1220,9 +1272,28 @@ export default function GraphCanvas({
     [taskById]
   );
 
+  // A link moved to other connectors of the same boxes takes its sisters
+  // along, so a sweep's copies keep sharing them.
   const onReconnect = useCallback(
-    (oldEdge: Edge, newConnection: any) =>
-      setEdges((els) => reconnectEdge(oldEdge, newConnection, els)),
+    (oldEdge: Edge, newConnection: any) => {
+      const sameBoxes =
+        newConnection.source === oldEdge.source &&
+        newConnection.target === oldEdge.target;
+      const sisters = sameBoxes
+        ? sisterEdgeIds(oldEdge, nodesRef.current, edgesRef.current)
+        : new Set<string>();
+      setEdges((els) =>
+        reconnectEdge(oldEdge, newConnection, els).map((edge) =>
+          sisters.has(edge.id)
+            ? {
+                ...edge,
+                sourceHandle: newConnection.sourceHandle,
+                targetHandle: newConnection.targetHandle,
+              }
+            : edge
+        )
+      );
+    },
     []
   );
 
@@ -1245,6 +1316,33 @@ export default function GraphCanvas({
       });
     },
     [screenToFlowPosition, processStructureFile]
+  );
+
+  // A ready-made pipeline dragged from the list: on an empty canvas it
+  // opens as from the start screen, else its boxes join what is there.
+  const addTemplate = useCallback(
+    (template: PipelineTemplate, position: { x: number; y: number }) => {
+      if (nodesRef.current.length === 0) {
+        onLoadTemplate?.(template);
+        return;
+      }
+      const copy = placedCopy(
+        templateToBlueprint(template, taskById),
+        position,
+        uuidv4
+      );
+      const structureIds = new Set(
+        copy.nodes
+          .filter((node) => node.type === 'structure')
+          .map((node) => node.ui_id)
+      );
+      const links = copy.edges
+        .map((saved) => restoreEdge(saved, (id) => structureIds.has(id)))
+        .filter((edge): edge is Edge => edge !== null);
+      setNodes((nds) => nds.concat(copy.nodes.map(toCanvasNode)));
+      setEdges((eds) => eds.concat(links));
+    },
+    [onLoadTemplate, taskById, toCanvasNode]
   );
 
   const onDrop = useCallback(
@@ -1299,6 +1397,11 @@ export default function GraphCanvas({
         return;
       }
 
+      if (scriptData.type === 'template') {
+        addTemplate(scriptData.template, position);
+        return;
+      }
+
       // Catalog tasks carry parameter specs; their defaults seed the node.
       const defaults = Array.isArray(scriptData.parameters)
         ? defaultParameterValues(scriptData as TaskDefinition)
@@ -1324,7 +1427,7 @@ export default function GraphCanvas({
 
       setNodes((nds) => nds.concat(newNode));
     },
-    [screenToFlowPosition, isEditable, processStructureFile]
+    [screenToFlowPosition, isEditable, processStructureFile, addTemplate]
   );
 
   const onNodeClickInternal = (_: React.MouseEvent, node: Node) => {
@@ -1467,8 +1570,15 @@ export default function GraphCanvas({
         ).length + 1
       : 1);
 
+  // Drops are caught around both the canvas and its start screen, whose
+  // cards would otherwise swallow a task dragged onto them.
   return (
-    <div className="relative w-full h-full bg-stone-50" ref={reactFlowWrapper}>
+    <div
+      className="relative w-full h-full bg-stone-50"
+      ref={reactFlowWrapper}
+      onDrop={onDrop}
+      onDragOver={onDragOver}
+    >
       <ReactFlow 
         nodes={nodes} 
         edges={edges} 
@@ -1484,8 +1594,6 @@ export default function GraphCanvas({
         onPaneClick={onPaneClick}
         onNodesDelete={handleNodesDelete}
         deleteKeyCode={['Backspace', 'Delete']}
-        onDrop={onDrop}
-        onDragOver={onDragOver}
         fitView
         fitViewOptions={FIT_VIEW}
         minZoom={0.15}

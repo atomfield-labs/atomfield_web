@@ -9,8 +9,9 @@ import {
   Search,
   X,
 } from 'lucide-react';
+import { usePipelineTemplates } from '../../hooks/usePipelineTemplates';
 import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
-import type { TaskDefinition } from '../../types/api';
+import type { PipelineTemplate, TaskDefinition } from '../../types/api';
 import { groupByCategory } from '../../utils/taskCatalog';
 
 interface SidebarItem {
@@ -20,6 +21,8 @@ interface SidebarItem {
   // The input-file box, rather than a task.
   isInput?: boolean;
   task?: TaskDefinition;
+  // A ready-made pipeline: all its steps, linked.
+  template?: PipelineTemplate;
 }
 
 interface TaskGroup {
@@ -49,6 +52,12 @@ const INPUTS: TaskGroup = {
     },
   ],
 };
+// The catalog's group for ready-to-run tasks. Ready-made pipelines join
+// it here, so it takes the broader name.
+const PREBUILT_CATEGORY = 'Prebuilt Drivers';
+const PREBUILT_LABEL = 'Prebuilt Workflows';
+// The ready-made pipelines offered in this list; the start screen has all.
+const LISTED_TEMPLATES = new Set(['ahc']);
 const TOOLTIP_HEIGHT = 110;
 const TOOLTIP_GAP = 10;
 const PANEL = [
@@ -101,16 +110,41 @@ function taskItem(task: TaskDefinition): SidebarItem {
   };
 }
 
+function templateItem(template: PipelineTemplate): SidebarItem {
+  return {
+    id: `template:${template.id}`,
+    title: template.title,
+    description: template.description,
+    template,
+  };
+}
+
 /**
- * Inputs first, then one group per catalog category.
+ * Inputs first, then one group per catalog category, the prebuilt one
+ * also holding the listed ready-made pipelines.
  */
-function taskGroups(tasks: TaskDefinition[]): TaskGroup[] {
-  const catalog = groupByCategory(tasks).map(([label, group]) => ({
-    id: `catalog:${label}`,
-    label,
-    items: group.map(taskItem),
-  }));
-  return [INPUTS, ...catalog];
+function taskGroups(
+  tasks: TaskDefinition[],
+  templates: PipelineTemplate[]
+): TaskGroup[] {
+  const listed = templates
+    .filter((template) => LISTED_TEMPLATES.has(template.id))
+    .map(templateItem);
+  const categories = groupByCategory(tasks);
+  const catalog = categories.map(([label, group]) => {
+    const prebuilt = label === PREBUILT_CATEGORY;
+    return {
+      id: `catalog:${label}`,
+      label: prebuilt ? PREBUILT_LABEL : label,
+      items: [...group.map(taskItem), ...(prebuilt ? listed : [])],
+    };
+  });
+  const hasPrebuilt = categories.some(([label]) => label === PREBUILT_CATEGORY);
+  const ownGroup =
+    hasPrebuilt || listed.length === 0
+      ? []
+      : [{ id: 'catalog:prebuilt', label: PREBUILT_LABEL, items: listed }];
+  return [INPUTS, ...catalog, ...ownGroup];
 }
 
 /**
@@ -126,12 +160,19 @@ function matching(groups: TaskGroup[], query: string): TaskGroup[] {
 }
 
 /**
- * What a drag onto the canvas carries: the input-file box, or a task.
+ * What a drag onto the canvas carries: the input-file box, a task, or a
+ * ready-made pipeline.
  */
+function dragPayload(item: SidebarItem) {
+  if (item.isInput) return { type: 'structure', title: 'Structure Input' };
+  if (item.template) {
+    return { type: 'template', title: item.title, template: item.template };
+  }
+  return item.task;
+}
+
 function startDrag(event: React.DragEvent, item: SidebarItem): void {
-  const payload = item.isInput
-    ? { type: 'structure', title: 'Structure Input' }
-    : item.task;
+  const payload = dragPayload(item);
   if (!payload) return;
   event.dataTransfer.setData('application/reactflow', JSON.stringify(payload));
   event.dataTransfer.setData('scriptName', payload.title);
@@ -139,11 +180,12 @@ function startDrag(event: React.DragEvent, item: SidebarItem): void {
 }
 
 /**
- * The tasks a pipeline is built from, searchable and grouped by
- * category; drag one onto the canvas to add it.
+ * The tasks a pipeline is built from, and ready-made pipelines,
+ * searchable and grouped by category; drag one onto the canvas to add it.
  */
 export default function LeftSidebar() {
   const { tasks, isLoading } = useTaskDefinitions();
+  const templates = usePipelineTemplates();
   const [query, setQuery] = useState('');
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [isCollapsed, setIsCollapsed] = useState(
@@ -153,7 +195,7 @@ export default function LeftSidebar() {
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const searchText = query.trim().toLowerCase();
   const searching = searchText !== '';
-  const groups = matching(taskGroups(tasks), searchText);
+  const groups = matching(taskGroups(tasks, templates), searchText);
 
   const toggleGroup = (groupId: string) => {
     setOpenGroups((prev) => ({

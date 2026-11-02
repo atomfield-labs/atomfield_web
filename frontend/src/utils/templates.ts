@@ -119,3 +119,31 @@ export function templateToBlueprint(
   );
   return { nodes, edges };
 }
+
+/**
+ * A copy of a template's blueprint to add to a canvas: new ids, so it can
+ * be added twice, and moved so that its first box lands at a point.
+ */
+export function placedCopy(
+  blueprint: PipelineBlueprint,
+  at: Position,
+  newId: () => string
+): PipelineBlueprint {
+  const ids = new Map(blueprint.nodes.map((node) => [node.ui_id, newId()]));
+  const fresh = (key: string) => ids.get(key) ?? key;
+  const nodes = blueprint.nodes.map((node) => ({
+    ...node,
+    ui_id: fresh(node.ui_id),
+    id: fresh(node.ui_id),
+    position: {
+      x: (node.position?.x ?? ORIGIN.x) - ORIGIN.x + at.x,
+      y: (node.position?.y ?? ORIGIN.y) - ORIGIN.y + at.y,
+    },
+  }));
+  const edges = blueprint.edges.map((edge) => ({
+    ...edge,
+    upstream_ui_id: fresh(edge.upstream_ui_id),
+    downstream_ui_id: fresh(edge.downstream_ui_id),
+  }));
+  return { nodes, edges };
+}
