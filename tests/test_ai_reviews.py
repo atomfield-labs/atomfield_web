@@ -243,7 +243,7 @@ def press(browser: TestClient, job: Job) -> dict[str, Any]:
     """
     answer = browser.post(reviews_route(job), headers=OWN_PAGE)
     assert answer.status_code == 202, answer.text
-    return browser.get(f"{reviews_route(job)}/latest").json()
+    return browser.get(f"{reviews_route(job)}/latest").json()["review"]
 
 
 async def add_review(
@@ -332,6 +332,31 @@ def test_a_finished_step_gets_an_analysis(
     assert "finished" in vendor.questions[0].system
 
 
+def test_the_window_learns_which_steps_can_be_reviewed(
+    browser: TestClient, make_session: async_sessionmaker
+):
+    """
+    The web app shows a step whose parent failed as failed too, so the
+    server says what can be asked: nothing, for one that never ran.
+
+    :param browser: The signed-in browser.
+    :type browser: TestClient
+    :param make_session: Session factory on the test database.
+    :type make_session: async_sessionmaker
+    """
+    expected = {
+        JobStatus.FAILED: "fix",
+        JobStatus.SUCCEEDED: "analysis",
+        JobStatus.UPSTREAM_FAILED: None,
+        JobStatus.CANCELLED: None,
+        JobStatus.RUNNING: None,
+    }
+    for status, kind in expected.items():
+        job = asyncio.run(add_job(make_session, STUDENT.email, status, {}))
+        seen = browser.get(f"{reviews_route(job)}/latest").json()
+        assert seen["kind"] == kind
+
+
 @pytest.mark.parametrize(
     "status",
     [
@@ -409,7 +434,8 @@ def test_what_was_sent_can_be_read_and_holds_no_key(
     sent = browser.get(route)
     assert sent.status_code == 200
     assert sent.headers["x-content-type-options"] == "nosniff"
-    assert sent.text == vendor.questions[0].user
+    question = vendor.questions[0]
+    assert sent.text == f"{question.system}\n{question.user}"
     assert "the real error is here" in sent.text
     assert "Error: it broke" in sent.text
     assert SECRET_KEY not in sent.text
@@ -573,10 +599,8 @@ def test_asking_again_makes_a_new_review(
     """
     job = failed_job(make_session)
     first = press(browser, job)
-    assert (
-        browser.get(f"{reviews_route(job)}/latest").json()["id"]
-        == (first["id"])
-    )
+    latest = browser.get(f"{reviews_route(job)}/latest").json()
+    assert latest["review"]["id"] == first["id"]
     assert len(vendor.questions) == 1
     second = press(browser, job)
     assert second["id"] != first["id"]
@@ -621,7 +645,7 @@ def test_a_review_lost_with_its_server_clears_itself(
     """
     job = failed_job(make_session)
     lost = asyncio.run(add_review(make_session, job, timedelta(minutes=11)))
-    seen = browser.get(f"{reviews_route(job)}/latest").json()
+    seen = browser.get(f"{reviews_route(job)}/latest").json()["review"]
     assert seen["id"] == str(lost)
     assert seen["status"] == "failed"
     assert seen["error"] == INTERRUPTED
@@ -644,7 +668,7 @@ def test_a_recent_running_review_keeps_running(
     """
     job = failed_job(make_session)
     asyncio.run(add_review(make_session, job, timedelta(minutes=1)))
-    seen = browser.get(f"{reviews_route(job)}/latest").json()
+    seen = browser.get(f"{reviews_route(job)}/latest").json()["review"]
     assert seen["status"] == "running"
 
 
@@ -662,7 +686,7 @@ def test_a_step_with_no_review_says_so(
     job = failed_job(make_session)
     seen = browser.get(f"{reviews_route(job)}/latest")
     assert seen.status_code == 200
-    assert seen.json() is None
+    assert seen.json() == {"kind": "fix", "review": None}
 
 
 def test_with_no_key_or_no_secret_the_click_is_refused(

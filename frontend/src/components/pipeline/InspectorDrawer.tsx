@@ -1,4 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  lazy,
+  Suspense,
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+} from 'react';
 import { X, Trash2, Download, RotateCcw, FileText, Upload } from 'lucide-react';
 import { triggerFileDownload } from '../../utils/downloadHelper';
 import { INPUT_FILE_TYPES } from '../../utils/structureParser';
@@ -6,8 +13,15 @@ import JobArtifacts from './JobArtifacts';
 import JobPlots from './JobPlots';
 import RunFilesButton from './RunFilesButton';
 import ParameterForm from './ParameterForm';
+import AiStepButton from './AiStepButton';
+import { useAiKey } from '../../hooks/useAiKey';
+import { useAiReview } from '../../hooks/useAiReview';
 import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
 import type { InputFiles } from '../../types/api';
+
+// It brings a Markdown renderer, so it loads only when it is opened.
+const JobAiReview = lazy(() => import('./JobAiReview'));
+const AI_TAB_LOADING = <p className="text-xs text-slate-400">Loading...</p>;
 
 const WIRED_ROW_CLASS = [
   'p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center',
@@ -88,11 +102,18 @@ export default function InspectorDrawer({
   const modalRef = useRef<HTMLDivElement>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Tabs for script nodes: params | logs | plots | artifacts
+  // Tabs for script nodes: params | logs | plots | artifacts | ai
   const [scriptTab, setScriptTab] = useState<
-    'params' | 'logs' | 'plots' | 'artifacts'
+    'params' | 'logs' | 'plots' | 'artifacts' | 'ai'
   >('params');
   const { taskById } = useTaskDefinitions();
+  const shownNode = propNode || cachedNode;
+  const jobId: string | undefined =
+    shownNode?.job_id ?? shownNode?.data?.job_id;
+  const stepStatus: string | undefined =
+    shownNode?.status ?? shownNode?.data?.status;
+  const { state: aiKey } = useAiKey();
+  const ai = useAiReview(jobId, stepStatus);
 
   const handleClose = useCallback(() => {
     setIsAnimatingIn(false);
@@ -169,13 +190,13 @@ export default function InspectorDrawer({
     (node.data?.inputs ?? node.inputs ?? {}) as InputFiles
   );
   const logs = node.logs || node.data?.logs || '';
-  const jobId: string | undefined = node.job_id ?? node.data?.job_id;
-  const stepStatus: string | undefined = node.status ?? node.data?.status;
   const hasPlots = !!task?.outputs.some(
     (output) => output.name === PLOTS_OUTPUT
   );
   // The tab left open on another step may not exist on this one.
-  const openTab = scriptTab === 'plots' && !hasPlots ? 'params' : scriptTab;
+  const tabIsGone =
+    (scriptTab === 'plots' && !hasPlots) || (scriptTab === 'ai' && !ai.kind);
+  const openTab = tabIsGone ? 'params' : scriptTab;
   const fallbackDefaults =
     defaultParameters ||
     node.default_parameters ||
@@ -274,6 +295,13 @@ export default function InspectorDrawer({
               isActive={openTab === 'artifacts'}
               onClick={() => setScriptTab('artifacts')}
             />
+            {ai.kind && (
+              <TabButton
+                label="AI"
+                isActive={openTab === 'ai'}
+                onClick={() => setScriptTab('ai')}
+              />
+            )}
           </div>
         )}
 
@@ -337,6 +365,16 @@ export default function InspectorDrawer({
               {/* Artifacts Tab */}
               {openTab === 'artifacts' && (
                 <JobArtifacts jobId={jobId} status={stepStatus} />
+              )}
+
+              {openTab === 'ai' && jobId && (
+                <Suspense fallback={AI_TAB_LOADING}>
+                  <JobAiReview
+                    jobId={jobId}
+                    aiKey={aiKey}
+                    ai={ai}
+                  />
+                </Suspense>
               )}
             </div>
           )}
@@ -411,7 +449,17 @@ export default function InspectorDrawer({
             )}
           </div>
 
-          <RunFilesButton runId={runId ?? null} />
+          <div className="flex items-center gap-2 min-w-0">
+            {/* The AI tab has its own, and says the same about a key. */}
+            {!isStructureNode && openTab !== 'ai' && (
+              <AiStepButton
+                aiKey={aiKey}
+                ai={ai}
+                onOpen={() => setScriptTab('ai')}
+              />
+            )}
+            <RunFilesButton runId={runId ?? null} />
+          </div>
         </div>
       </div>
     </div>

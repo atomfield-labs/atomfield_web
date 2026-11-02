@@ -457,3 +457,43 @@ export interface AiKeyState {
 export interface AiKeySaved extends AiKeyState {
   models: string[];
 }
+
+// What a review does, which follows from how its step ended.
+export type AiReviewKind = 'fix' | 'analysis';
+
+// A setting the model suggests changing, after the server checked it.
+export interface AiSuggestion {
+  setting: string;
+  label?: string | null;
+  unit?: string | null;
+  current?: unknown;
+  value: string;
+  why: string;
+  // Why it can't be used as it is: made up, or out of range.
+  problem?: string | null;
+}
+
+export interface AiReview {
+  id: string;
+  kind: AiReviewKind;
+  status: 'running' | 'done' | 'failed';
+  vendor: AiVendor;
+  model: string;
+  answered_by?: string | null;
+  summary?: string | null;
+  explanation?: string | null;
+  suggestions?: AiSuggestion[] | null;
+  check_next?: string[] | null;
+  read_parts?: { name: string; shown: string }[] | null;
+  unread_pages?: string[] | null;
+  left_behind?: { name: string; size_bytes: number }[] | null;
+  error?: string | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+}
+
+export interface AiReviewState {
+  // None for a step that can't have one, such as one that never ran.
+  kind?: AiReviewKind | null;
+  review?: AiReview | null;
+}

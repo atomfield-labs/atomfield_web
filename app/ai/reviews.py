@@ -29,7 +29,13 @@ from app.ai.prompts import (
 )
 from app.ai.suggestions import CheckedSuggestion, check_suggestions
 from app.ai.vault import KeyUnreadableError, KeyVault
-from app.ai.vendors import AiVendor, LlmClient, LlmError, LlmReply
+from app.ai.vendors import (
+    AiVendor,
+    LlmClient,
+    LlmError,
+    LlmReply,
+    Question,
+)
 from app.catalog.catalog import Catalog, UnknownTaskError
 from app.catalog.models import TaskDefinition
 from app.models.ai import AiKey, AiReview, ReviewStatus
@@ -135,7 +141,6 @@ def new_review_statement(job: Job, kind: ReviewKind, key: AiKey) -> Any:
     return (
         insert(AiReview)
         .values(
-            id=uuid.uuid4(),
             job_id=job.id,
             requested_by=key.user_id,
             kind=kind.value,
@@ -372,15 +377,15 @@ class ReviewRunner:
         return list((await db.execute(query)).scalars())
 
     async def ask_model(
-        self, context: ReviewContext, sent_text: str
+        self, context: ReviewContext, question: Question
     ) -> LlmReply:
         """
         Make the one call a click pays for.
 
         :param context: The review's context.
         :type context: ReviewContext
-        :param sent_text: What the model reads.
-        :type sent_text: str
+        :param question: What the model is asked.
+        :type question: Question
         :return: Its reply.
         :rtype: LlmReply
         :raises LlmError: If the call fails or the key can't be read.
@@ -389,25 +394,25 @@ class ReviewRunner:
             secret = self.vault.reveal(context.key.sealed_key)
         except KeyUnreadableError:
             raise LlmError(SECRET_CHANGED) from None
-        kind = ReviewKind(context.review.kind)
-        question = build_question(kind, context.review.model, sent_text)
         vendor = AiVendor(context.review.vendor)
         async with self.make_client(vendor, secret) as llm:
             return await llm.ask(question)
 
     async def keep_sent_text(
-        self, context: ReviewContext, sent_text: str
+        self, context: ReviewContext, question: Question
     ) -> None:
         """
-        Keep the exact text the model reads, for "See what was sent".
+        Keep the exact text the model gets, its instructions included, for
+        "See what was sent".
 
         :param context: The review's context.
         :type context: ReviewContext
-        :param sent_text: The text.
-        :type sent_text: str
+        :param question: What the model is asked.
+        :type question: Question
         """
         key = ai_sent_key(context.run_id, context.review.id)
-        await self.store.write(key, sent_text.encode(ENCODING))
+        text = f"{question.system}\n{question.user}"
+        await self.store.write(key, text.encode(ENCODING))
 
     async def gather(self, context: ReviewContext) -> Evidence:
         """
@@ -442,15 +447,17 @@ class ReviewRunner:
         """
         evidence = await self.gather(context)
         job, task = context.job, context.task
+        kind = ReviewKind(context.review.kind)
         sent_text = render_evidence(job, task, evidence)
-        await self.keep_sent_text(context, sent_text)
-        reply = await self.ask_model(context, sent_text)
-        answer = read_answer(reply)
+        question = build_question(kind, context.review.model, sent_text)
+        await self.keep_sent_text(context, question)
+        answer_reply = await self.ask_model(context, question)
+        answer = read_answer(answer_reply)
         values = setting_values(job, task)
         checked = check_suggestions(
             answer.suggestions, context.catalog, task.id, values
         )
-        return finished_fields(evidence, reply, answer, checked)
+        return finished_fields(evidence, answer_reply, answer, checked)
 
     async def record(
         self, review_id: uuid.UUID, fields: dict[str, Any]

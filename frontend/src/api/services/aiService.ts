@@ -1,7 +1,20 @@
 import apiClient from '../client';
-import type { AiKeySaved, AiKeyState, AiVendor } from '../../types/api';
+import type {
+  AiKeySaved,
+  AiKeyState,
+  AiReview,
+  AiReviewState,
+  AiVendor,
+} from '../../types/api';
 
 const KEY_ROUTE = '/api/ai/key';
+
+/**
+ * Where a job's reviews live.
+ */
+function reviewsRoute(jobId: string): string {
+  return `/api/jobs/${jobId}/ai-reviews`;
+}
 
 // A person's own key for an AI vendor. A key only ever goes to the
 // server: nothing here gets one back.
@@ -31,5 +44,24 @@ export const aiService = {
 
   async removeKey(): Promise<void> {
     await apiClient.delete(KEY_ROUTE);
+  },
+
+  // What can be asked about a step, and its newest answer.
+  async reviewState(jobId: string): Promise<AiReviewState> {
+    const response = await apiClient.get<AiReviewState>(
+      `${reviewsRoute(jobId)}/latest`
+    );
+    return response.data;
+  },
+
+  // One click: it answers at once, and the work carries on afterwards.
+  async startReview(jobId: string): Promise<AiReview> {
+    const response = await apiClient.post<AiReview>(reviewsRoute(jobId));
+    return response.data;
+  },
+
+  // Opens in its own tab: the browser's cookie is all it needs.
+  sentTextLink(jobId: string, reviewId: string): string {
+    return `${reviewsRoute(jobId)}/${reviewId}/sent`;
   },
 };

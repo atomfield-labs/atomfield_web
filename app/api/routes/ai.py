@@ -51,6 +51,7 @@ from app.schemas.ai import (
     AiKeySaved,
     AiKeyState,
     AiModelChoice,
+    AiReviewState,
     AiReviewView,
     AiVendorView,
     SavedAiKey,
@@ -377,14 +378,15 @@ async def start_my_review(
     return review_view(review)
 
 
-@reviews_router.get("/latest", response_model=AiReviewView | None)
+@reviews_router.get("/latest", response_model=AiReviewState)
 async def read_latest_review(
     job: Job = Depends(get_owned_job),
     user: User = Depends(get_browser_user),
     db: AsyncSession = Depends(get_db),
-) -> AiReviewView | None:
+) -> AiReviewState:
     """
-    A step's newest review, which the AI tab shows and asks after.
+    What can be asked about a step, and its newest answer, which the AI
+    tab shows and asks after.
 
     :param job: A job the caller may act on.
     :type job: Job
@@ -392,11 +394,12 @@ async def read_latest_review(
     :type user: User
     :param db: Asynchronous database session.
     :type db: AsyncSession
-    :return: The review, if there is one.
-    :rtype: AiReviewView | None
+    :return: The kind of review it can have, and the review, if any.
+    :rtype: AiReviewState
     """
     review = await latest_review(db, job.id)
-    return review_view(review) if review is not None else None
+    shown = review_view(review) if review is not None else None
+    return AiReviewState(kind=kind_for(job), review=shown)
 
 
 @reviews_router.get("/{review_id}/sent", response_class=PlainTextResponse)

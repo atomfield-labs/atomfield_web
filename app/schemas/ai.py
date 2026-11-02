@@ -111,3 +111,18 @@ class AiReviewView(BaseModel):
     output_tokens: int | None = None
     created_at: datetime
     finished_at: datetime | None = None
+
+
+class AiReviewState(BaseModel):
+    """
+    What the step's window needs: what can be asked about this step, which
+    its ending decides, and the newest answer. The web app shows a step
+    whose parent failed as failed too, so only the server can tell them
+    apart.
+    """
+
+    kind: ReviewKind | None = Field(
+        default=None,
+        description="What a review would do; none if it can't have one.",
+    )
+    review: AiReviewView | None = None
