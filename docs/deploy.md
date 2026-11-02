@@ -139,6 +139,28 @@ Make a lab and give it its workflows (`docs/labs.md`). Each person then
 connects their cluster (`docs/cluster-agent.md`). Until someone has one,
 Run stays off and **Run on** offers to add one.
 
+## From a published image
+
+A server can run an image built elsewhere instead of a copy of the code.
+On your own computer, from a clean copy of the committed code (so nothing
+uncommitted or local goes in), build for the server's kind of machine
+(`docker version --format '{{.Server.Os}}/{{.Server.Arch}}'` on the
+server says which) and push it to GitHub's registry:
+
+```bash
+docker buildx build --platform linux/arm64 \
+  -t ghcr.io/OWNER/atomfield:TAG --push .
+```
+
+The image holds the server's code and the built web app; scripts still
+arrive only as releases (step 5). On the server, put three files in one
+folder: `docker-compose.server.yml` saved as `docker-compose.yml`,
+`.env.example` and `backup.sh`. Make `.env` as in step 2, add
+`ATOMFIELD_IMAGE=ghcr.io/OWNER/atomfield:TAG`, log in with
+`docker login ghcr.io` if the image is private, and start it with
+`docker compose up -d`. To update, push a new tag, change
+`ATOMFIELD_IMAGE`, and run `docker compose up -d` again.
+
 ## Updating
 
 ```bash
