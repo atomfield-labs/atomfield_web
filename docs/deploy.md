@@ -41,7 +41,9 @@ chmod 600 .env
 ```
 
 Replace each `change-me` with its own value from `openssl rand -hex 32`.
-The server refuses to start while one is left. Then fill in:
+The server refuses to start while one is left. `AI_KEY_SECRET` encrypts each
+person's AI key (`docs/ai-help.md`): with it removed the AI buttons stay off,
+and if it changes people add their keys again. Then fill in:
 
 | Setting | Value |
 |---|---|

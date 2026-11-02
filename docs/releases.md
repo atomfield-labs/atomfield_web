@@ -137,6 +137,29 @@ template refuses the release. `GET /api/pipeline-templates` lists the
 templates of the newest release; the editor lays each one out left to
 right and fills in every other setting from the task's defaults.
 
+## Pages AI help reads
+
+A task's TOML file lists the pages that explain it, which AI help may read
+(`docs/ai-help.md`). A page is a web address, or a guide in this repository's
+`docs/`:
+
+```toml
+[[references]]
+title = "pw.x input"
+page = "https://www.quantum-espresso.org/Doc/INPUT_PW.html"
+```
+
+The export moves these into a `references` map beside the tasks in
+`catalog.json`, and stops on one that can't work. They stay out of the task
+itself because an agent reads a task strictly, and one not yet copied again
+would refuse a field it doesn't know. **Update the server before publishing a
+release that lists pages**: an older server refuses the release.
+
+The server only ever fetches addresses listed here, never one from a log or a
+model. It keeps a copy of each page for 30 days, and sends only the parts that
+match the step's settings and errors. A page it can't read is skipped, and the
+AI tab says so.
+
 ## Plots
 
 A step's modal draws the plots its script leaves, in the browser. The

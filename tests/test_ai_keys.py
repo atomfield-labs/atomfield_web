@@ -20,7 +20,11 @@ from app.ai.vendors import (
     LlmError,
 )
 from app.api.dependencies import get_key_vault, get_llm_factory
-from app.api.routes.ai import NO_SECRET_MESSAGE, SECRET_CHANGED_MESSAGE
+from app.api.routes.ai import (
+    NO_SECRET_MESSAGE,
+    NOT_A_KEY_MESSAGE,
+    SECRET_CHANGED_MESSAGE,
+)
 from app.core.config import settings
 from app.main import app
 from app.models.ai import AiKey
@@ -157,6 +161,37 @@ def test_spaces_around_a_pasted_key_are_dropped(
     body = {"vendor": "gemini", "key": f"  {SECRET_KEY}\n"}
     browser.put(KEY_ROUTE, json=body, headers=OWN_PAGE)
     assert vendor.used == [(AiVendor.GEMINI, SECRET_KEY)]
+
+
+@pytest.mark.parametrize(
+    "pasted",
+    ["two words", "sk-with-accent-é", "line\nbreak", "   "],
+)
+def test_something_else_pasted_by_mistake_is_refused_plainly(
+    browser: TestClient,
+    vendor: FakeLlm,
+    make_session: async_sessionmaker,
+    pasted: str,
+):
+    """
+    A key travels in a request's headers, which this text can't, so it is
+    turned back before any vendor is called.
+
+    :param browser: The signed-in browser.
+    :type browser: TestClient
+    :param vendor: The fake vendor.
+    :type vendor: FakeLlm
+    :param make_session: Session factory on the test database.
+    :type make_session: async_sessionmaker
+    :param pasted: What was pasted.
+    :type pasted: str
+    """
+    body = {"vendor": "claude", "key": pasted}
+    answer = browser.put(KEY_ROUTE, json=body, headers=OWN_PAGE)
+    assert answer.status_code == 400
+    assert answer.json()["detail"] == NOT_A_KEY_MESSAGE
+    assert vendor.used == []
+    assert asyncio.run(stored(make_session)) is None
 
 
 def test_a_key_the_vendor_refuses_is_not_saved(

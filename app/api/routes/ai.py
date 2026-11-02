@@ -68,6 +68,7 @@ SENT_TEXT_KIND = "Text sent"
 # a page.
 NEVER_A_PAGE = {"X-Content-Type-Options": "nosniff"}
 NO_KEY_MESSAGE = "Add an AI key first."
+NOT_A_KEY_MESSAGE = "That doesn't look like a key. Paste it again."
 NOT_ENDED_MESSAGE = "Only a step that failed or finished can be reviewed."
 NO_SECRET_MESSAGE = (
     "This server has no AI_KEY_SECRET set, so it can't keep AI keys."
@@ -106,6 +107,19 @@ def key_state(vault: KeyVault | None, key: AiKey | None) -> AiKeyState:
     return AiKeyState(
         available=vault is not None, vendors=vendor_views(), saved=saved
     )
+
+
+def looks_like_a_key(text: str) -> bool:
+    """
+    Whether pasted text could be a key. A key travels in a request's
+    headers, which something else pasted by mistake can't.
+
+    :param text: The pasted text.
+    :type text: str
+    :return: True if it is one word of plain characters.
+    :rtype: bool
+    """
+    return bool(text) and text.isascii() and len(text.split()) == 1
 
 
 def require_vault(vault: KeyVault | None) -> KeyVault:
@@ -213,6 +227,8 @@ async def save_my_key(
         raise too_many_requests(TOO_MANY_MESSAGE)
     keeper = require_vault(vault)
     secret = payload.key.get_secret_value().strip()
+    if not looks_like_a_key(secret):
+        raise bad_request(NOT_A_KEY_MESSAGE)
     try:
         async with make_client(payload.vendor, secret) as llm:
             models = await llm.list_models()

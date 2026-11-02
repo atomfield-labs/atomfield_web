@@ -21,6 +21,12 @@ const GUIDES: Guide[] = [
     audience: 'everyone',
   },
   {
+    id: 'ai-help',
+    title: 'AI help on a step',
+    group: 'Start here',
+    audience: 'everyone',
+  },
+  {
     id: 'cluster-agent',
     title: 'Running jobs on your cluster',
     group: 'Run on your cluster',

@@ -42,6 +42,8 @@ Double-click a step again:
 - **Logs** shows what the program printed.
 - **Plots**, on steps that draw them, shows charts you can hover over and zoom.
 - **Artifacts** shows the step's text files.
+- **AI**, once the step has ended, shows what a model makes of it, using your
+  own key. See `docs/ai-help.md`.
 
 ## 7. Get your files
 
