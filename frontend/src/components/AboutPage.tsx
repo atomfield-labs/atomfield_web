@@ -11,6 +11,10 @@ const PROMISE_TITLE = [
 const LABEL = [
   'text-[11px] font-semibold tracking-wider uppercase text-slate-500',
 ].join(' ');
+const EMAIL = [
+  'inline-block mt-2 text-sm font-medium text-orange-600',
+  'underline-offset-2 hover:underline',
+].join(' ');
 
 /**
  * What AtomField is, what it promises, and who built it. The words are in
@@ -51,6 +55,9 @@ export default function AboutPage() {
             {builtBy.name}
           </p>
           <p className="mt-1 text-sm text-slate-600">{builtBy.role}</p>
+          <a href={`mailto:${builtBy.email}`} className={EMAIL}>
+            {builtBy.email}
+          </a>
           {builtBy.bio && (
             <p className="mt-4 text-base leading-relaxed text-slate-600">
               {builtBy.bio}

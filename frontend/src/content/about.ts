@@ -34,6 +34,7 @@ export const ABOUT = {
   builtBy: {
     name: 'Ujjawal Modanwal',
     role: 'Sole developer, and the idea behind the product.',
+    email: 'ujjawal.m.wal@gmail.com',
     // A paragraph under the name, shown once this is filled in.
     bio: '',
   },

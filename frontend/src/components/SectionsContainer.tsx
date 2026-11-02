@@ -142,11 +142,9 @@ export default function SectionsContainer() {
     >
       <div className={SECTION_WIDTH}>
         <div className={SECTION_HEAD}>
-          <h2 className={SECTION_TITLE}>
-            Start from a workflow, make it yours
-          </h2>
+          <h2 className={SECTION_TITLE}>Prebuilt modules, ready to run</h2>
           <p className={SECTION_TEXT}>
-            Ready-made pipelines you can open, change step by step and run on
+            From structure to results in one pipeline. Tune any step, run on
             your own compute.
           </p>
         </div>
