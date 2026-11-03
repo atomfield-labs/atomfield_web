@@ -17,6 +17,7 @@ import AiStepButton from './AiStepButton';
 import { useAiKey } from '../../hooks/useAiKey';
 import { useAiReview } from '../../hooks/useAiReview';
 import { useTaskDefinitions } from '../../hooks/useTaskDefinitions';
+import { defaultParameterValues } from '../../utils/taskCatalog';
 import type { InputFiles } from '../../types/api';
 
 // It brings a Markdown renderer, so it loads only when it is opened.
@@ -213,10 +214,14 @@ export default function InspectorDrawer({
     structData.line_count || (rawContent ? rawContent.split(/\r?\n/).filter(Boolean).length : 0);
   const sizeKb = structData.size_bytes ? (structData.size_bytes / 1024).toFixed(1) : '0.0';
 
+  // Every setting back where the step started: the task's defaults as
+  // the catalog has them now, under the values it was created with (a
+  // prebuilt workflow's own).
+  const canReset = !!task || hasDefaults;
   const handleResetDefaults = () => {
-    if (onUpdateParameters && hasDefaults) {
-      onUpdateParameters({ ...fallbackDefaults });
-    }
+    if (!onUpdateParameters || !canReset) return;
+    const taskDefaults = task ? defaultParameterValues(task) : {};
+    onUpdateParameters({ ...taskDefaults, ...fallbackDefaults });
   };
 
   return (
@@ -397,7 +402,7 @@ export default function InspectorDrawer({
               </button>
             )}
 
-            {!isStructureNode && hasDefaults && (
+            {!isStructureNode && canReset && (
               <button
                 type="button"
                 onClick={handleResetDefaults}

@@ -90,12 +90,26 @@ path does.
   The step stops if it does not, and warns if the SCF was too loose. A
   mode counts as imaginary below -5 cm^-1; smaller negative values are
   noise from the acoustic sum rule, `crystal` by default.
+- **Under Advanced**, how each run converges: the SCF's mixing (0.7,
+  or 0.3 when the run has spin, unless you set it) and most iterations
+  (100); ph.x's convergence (1e-14) and mixing (0.7). The charge sum
+  rule q2r.x imposes, `simple` by default, sits beside the acoustic
+  one.
+
+Every value the steps write into the programs' inputs is a setting,
+with its default filled in, or, when the step decides it as it runs,
+a word on what decides it. Only names of files and folders and program
+paths are not. **Reset** puts every setting back: to the template's
+values for a step that came from one, to the task's defaults for one
+you added.
 
 ## What to check on your own system
 
-The scripts were tried on silicon with Quantum ESPRESSO 7.2: the
-inputs run, the outputs are read, silicon's gap is indirect, its
-acoustic modes vanish at Gamma, and none of its modes is imaginary.
+The scripts were tried on silicon with Quantum ESPRESSO 7.2 (since
+7.3, `matdyn.x` also writes each q-point's weight in its frequency
+file, which they read too): the inputs run, the outputs are read,
+silicon's gap is indirect, its acoustic modes vanish at Gamma, and
+none of its modes is imaginary.
 That checks the plumbing. Whether a calculation is **converged** for
 your crystal is for you to judge: raise the cutoffs, the k-mesh and
 the q-mesh until the result stops moving.

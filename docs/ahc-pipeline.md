@@ -24,14 +24,16 @@ package (`docs/quantum-espresso.md`).
 2. **NSCF** (`pw.x`) keeps that density fixed and computes the bands
    at every point of an unshifted k-mesh, symmetry switched off,
    because Wannier90 needs the whole mesh, not just the points
-   symmetry would keep. It computes every occupied band plus 24
-   empty ones, room for the next step's windows.
+   symmetry would keep. By default it computes every occupied band
+   plus 24 empty ones, room for the next step's windows; the template
+   asks for 36 in all.
 3. **Wannier** (`wannier90.x -pp`, `pw2wannier90.x`, `wannier90.x`)
    turns those bands into a small set of localized orbitals,
    Wannier functions, and from them a tight-binding model of the
    bands near the Fermi level.
-4. **Berry** (`postw90.x`) interpolates that model onto a very dense
-   mesh (100³ by default, finer still where the curvature peaks) and
+4. **Berry** (`postw90.x`) interpolates that model onto a dense mesh
+   (100³ by default, 25³ in the template; finer still where the
+   curvature peaks) and
    sums the Berry curvature into the AHC, at every Fermi energy from
    2 eV below to 2 eV above the SCF's.
 
@@ -68,6 +70,44 @@ module load quantum-espresso/7.2 && which pw2wannier90.x wannier90.x postw90.x
 A program built with MPI runs under `mpirun` on the task's processes;
 one built without MPI runs once, on one process (running it many
 times would only repeat the work).
+
+## A quick example, not a converged one
+
+The template follows Wannier90's own iron tutorial (its example 18),
+so a first run finishes in reasonable time:
+
+| Step | Template | Step's own default |
+|---|---|---|
+| SCF k-mesh | 10×10×10 | 8×8×8 |
+| NSCF k-mesh | 8×8×8 (512 points) | 10×10×10 |
+| NSCF bands | 36 | occupied + 24 (40 for Fe) |
+| Berry mesh | 25×25×25, refined 5×5×5 at peaks | 100×100×100 |
+
+The tutorial's iron has 8 valence electrons and 28 bands; pslibrary's
+has 16 (3s and 3p too), so 36 keeps the same 20 empty bands. The
+tutorial says itself that 25³ does not converge the AHC: for a number
+to quote, raise the Berry mesh as described below, and the NSCF mesh
+if the Wannier spreads stay large.
+
+## Every setting in the form
+
+Every value the steps write into the programs' inputs is a setting in
+the step's window, with its default filled in. Those decided when the
+step runs say what decides them (the cutoffs: from the
+pseudopotentials). How tightly each part converges is under
+**Advanced**:
+
+- SCF: convergence (1e-8 Ry), mixing (0.7), most iterations (100);
+- NSCF: convergence of the bands (1e-10 Ry);
+- Wannier: localization and window convergence (1e-10 Å² each),
+  window mixing (0.5); and **Guiding centres**, off by default,
+  under Projections.
+
+Only names of files and folders, program paths, and what the method
+needs fixed (no symmetry in the NSCF, spinor Wannier functions, the
+written Hamiltonian) are not settings. **Reset** puts every setting
+back: to the template's values for a step that came from it, to the
+task's defaults for one you added.
 
 ## The defaults, and why
 
@@ -124,3 +164,7 @@ grows.
 - *Wannier90 stopped with an error*: the text comes from Wannier90's
   `.werr` file; an *unrecognised keyword* there usually means
   Wannier90 2.x, which lacks `dis_froz_min`. Use Wannier90 3.x.
+- *Line N of ahc_calc.eig is not 'band k-point energy'*: the band
+  energies file was cut short, which usually means `pw2wannier90.x`
+  ran out of disk or memory while writing. Check both where the job
+  ran; a smaller NSCF mesh or fewer bands shrinks the step's files.

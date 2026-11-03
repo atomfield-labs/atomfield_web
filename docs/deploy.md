@@ -209,10 +209,57 @@ docker compose up -d
 
 ## Running jobs on the server itself
 
-The server runs no jobs by default. Its image holds no scientific
-programs, so `docker compose --profile house up -d`, with
-`HOUSE_AGENT_TOKEN` set, runs only tasks that need none; **AtomField
-server** then shows under **Run on** for everyone. To run real programs
-on this machine, install them on it and treat it as a cluster: run an
-agent there as `docs/cluster-agent.md` describes, with `process` as how
-jobs run.
+The server runs no jobs by default. To run Quantum ESPRESSO and
+Wannier90 on this machine too, start its **worker**: the same agent
+people run on clusters, in an image that also holds the programs
+(`Dockerfile.worker`). This needs a server running a published image
+(above). **AtomField server** then shows under **Run on** for everyone
+signed in; the workflows ticked for each person still decide what they
+can run.
+
+On your own computer, after pushing the server image, build the worker
+on top of it, for the same kind of machine and with the same TAG:
+
+```bash
+docker buildx build --platform linux/amd64 -f Dockerfile.worker \
+  --build-arg ATOMFIELD_IMAGE=ghcr.io/OWNER/atomfield:TAG \
+  -t ghcr.io/OWNER/atomfield-worker:TAG --push .
+```
+
+Built on a Mac for `linux/amd64`, this is emulated and takes a while.
+Releases are compiled for `linux-x86_64` only, so the worker needs an
+x86 server.
+
+On the server, add to `.env` a new `HOUSE_AGENT_TOKEN` (from
+`openssl rand -hex 32`) and `ATOMFIELD_WORKER_IMAGE`, and optionally
+`WORKER_CPUS` (default 2) and `WORKER_MAX_JOBS` (default 1). Jobs run
+as uid 1000, so give that the work folder:
+
+```bash
+mkdir -p work
+```
+
+```bash
+sudo chown 1000:1000 work
+```
+
+```bash
+docker compose --profile house up -d
+```
+
+```bash
+docker compose logs -f worker
+```
+
+Jobs share this machine's CPUs and memory with the API and the
+database; `WORKER_CPUS` caps them. A step sized for a cluster node
+(16 CPUs) runs here on `WORKER_CPUS` MPI processes, since MPI refuses
+to start more than the machine has cores: keep `WORKER_CPUS` at or
+below its physical cores (`lscpu`: cores per socket times sockets;
+`nproc` counts hyperthreads too). Each finished run is zipped
+into `storage/` and its folder in `work/` removed, so watch the disk.
+The programs are conda-forge's generic builds: fine for small systems
+and teaching, slower than a cluster's own.
+
+An agent anywhere can be held to fewer CPUs per job the same way, with
+`max_cpus = N` in its settings file or `ATOMFIELD_MAX_CPUS`.

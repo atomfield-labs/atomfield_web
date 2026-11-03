@@ -1085,7 +1085,8 @@ export default function GraphCanvas({
         script_id: n.script_id || n.ui_id || n.id,
         status: n.status || 'Draft', 
         parameters: n.parameters || {},
-        default_parameters: n.default_parameters || n.parameters || {},
+        // Never the step's current values: Reset would then undo nothing.
+        default_parameters: n.default_parameters || {},
         originalData: n 
       },
     };

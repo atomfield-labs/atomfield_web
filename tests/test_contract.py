@@ -64,6 +64,8 @@ def probe_value(spec: ParameterSpec) -> Any:
         single = (spec.default or spec.minimum or 0) + 1
     elif spec.kind is ParameterKind.NUMBER:
         single = (spec.default or spec.minimum or 0.0) + 0.5
+        if spec.maximum is not None and single > spec.maximum:
+            single = ((spec.minimum or 0.0) + spec.maximum) / 2
     else:
         single = "probe"
     return [single, single] if spec.multiple else single

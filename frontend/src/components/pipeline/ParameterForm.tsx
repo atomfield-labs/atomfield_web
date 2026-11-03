@@ -32,7 +32,10 @@ interface FormCardSpec {
 // Up to this many short choices are buttons; others are a menu.
 const MAX_BUTTONS = 4;
 const MAX_BUTTON_CHARACTERS = 22;
-const DEFAULT_WORD = 'default';
+// A default left to the script: its help says what decides it, as in
+// "(default: the pseudopotentials' suggestion)".
+const DEFAULT_IN_HELP = /\(default: ([^)]+)\)/;
+const AUTOMATIC_WORD = 'automatic';
 const MESH_SIZE = 3;
 const SIDE_BY_SIDE = 2;
 const ROW_OF_NUMBERS = 3;
@@ -155,7 +158,7 @@ function choiceOptions(spec: ParameterSpec): ChoiceOption[] {
     value: choice,
   }));
   if (spec.default !== null || spec.required) return options;
-  return [{ label: DEFAULT_WORD, value: null }, ...options];
+  return [{ label: automaticDefault(spec), value: null }, ...options];
 }
 
 function fitsAsButtons(options: ChoiceOption[]): boolean {
@@ -189,8 +192,16 @@ function isShown(
   });
 }
 
+/**
+ * What a default the script decides at run time comes from, as its
+ * help says; "automatic" if it doesn't say.
+ */
+function automaticDefault(spec: ParameterSpec): string {
+  return spec.help?.match(DEFAULT_IN_HELP)?.[1] ?? AUTOMATIC_WORD;
+}
+
 function placeholderOf(spec: ParameterSpec): string {
-  return spec.default === null ? DEFAULT_WORD : String(spec.default);
+  return spec.default === null ? automaticDefault(spec) : String(spec.default);
 }
 
 function numberOf(value: ParameterValue): number | null {
