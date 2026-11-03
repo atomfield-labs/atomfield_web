@@ -54,6 +54,7 @@ ENVIRONMENT_SETTINGS = {
     "ATOMFIELD_AGENT_TOKEN": "token",
     "ATOMFIELD_RUNNER": "runner",
     "ATOMFIELD_MAX_JOBS": "max_jobs",
+    "ATOMFIELD_MAX_CPUS": "max_cpus",
     "CHEMISTRY_PYTHON_BIN": "python",
     "ATOMFIELD_PACK_DIR": "pack_dir",
     "ARTIFACTS_DIR": "artifacts_dir",
@@ -89,6 +90,10 @@ class AgentConfig:
     :type token: str
     :param max_jobs: Jobs run at the same time.
     :type max_jobs: int
+    :param max_cpus: Most CPUs one job may use here; a task asking for
+        more gets this many. None takes each task's own count (on a
+        cluster, the scheduler holds jobs to what it can give).
+    :type max_cpus: int | None
     :param python_bin: Interpreter of the domain pack's environment.
     :type python_bin: str
     :param pack_source_dir: The owner's own copy of the scripts (the
@@ -121,6 +126,7 @@ class AgentConfig:
     api_url: str
     token: str
     max_jobs: int = 2
+    max_cpus: int | None = None
     python_bin: str = sys.executable
     pack_source_dir: Path | None = None
     artifacts_dir: Path = REPO_ROOT / "artifacts"
@@ -224,6 +230,7 @@ def config_values(
         "api_url": str(settings["api_url"]).rstrip("/"),
         "token": str(settings["token"]),
         "max_jobs": int(settings.get("max_jobs", defaults.max_jobs)),
+        "max_cpus": optional_count(settings.get("max_cpus")),
         "python_bin": str(settings.get("python", defaults.python_bin)),
         "pack_source_dir": optional_path(settings.get("pack_dir")),
         "artifacts_dir": artifacts,
@@ -306,6 +313,24 @@ def runner_kind(value: Any) -> RunnerKind:
     except ValueError:
         kinds = " or ".join(RunnerKind)
         raise ValueError(f"runner must be {kinds}, not {value!r}") from None
+
+
+def optional_count(value: Any) -> int | None:
+    """
+    A count setting that may be absent.
+
+    :param value: The setting's value, if any.
+    :type value: Any
+    :return: The count, or None if not set.
+    :rtype: int | None
+    :raises ValueError: For a count below one.
+    """
+    if not value:
+        return None
+    count = int(value)
+    if count < 1:
+        raise ValueError(f"max_cpus must be at least 1, not {count}")
+    return count
 
 
 def optional_path(value: Any) -> Path | None:

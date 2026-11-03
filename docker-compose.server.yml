@@ -76,6 +76,39 @@ services:
       - ./backups:/app/backups
     restart: unless-stopped
 
+  # The house agent with Quantum ESPRESSO and Wannier90 (Dockerfile.worker):
+  # runs jobs for "AtomField server" under Run on. Off unless asked for:
+  # docker compose --profile house up -d
+  worker:
+    profiles: ["house"]
+    image: ${ATOMFIELD_WORKER_IMAGE:-}
+    command: ["/app/.venv/bin/python", "-m", "agent", "run"]
+    environment:
+      ATOMFIELD_API_URL: http://api:8000
+      ATOMFIELD_AGENT_TOKEN: ${HOUSE_AGENT_TOKEN:-}
+      ATOMFIELD_RUNNER: process
+      ATOMFIELD_MAX_JOBS: ${WORKER_MAX_JOBS:-1}
+      # A task's CPU count is sized for a cluster node; here each job
+      # gets at most what the worker has.
+      ATOMFIELD_MAX_CPUS: ${WORKER_CPUS:-2}
+      ARTIFACTS_DIR: /work/runs
+      # In the volume, so a restart remembers the jobs it was running.
+      ATOMFIELD_AGENT_STATE: /work/state/agent-state.json
+      # Our disk, not the user's: once a run's zip is uploaded (users
+      # download that), its folder here is removed.
+      ATOMFIELD_DELETE_AFTER_UPLOAD: "true"
+    # No docker.sock: access to the Docker daemon would equal root on
+    # the host.
+    volumes:
+      - ./work:/work
+    # MPI ranks share memory through /dev/shm; Docker's 64 MB is too small.
+    shm_size: 1gb
+    # Leave CPUs for the API and the database.
+    cpus: ${WORKER_CPUS:-2}
+    depends_on:
+      - api
+    restart: unless-stopped
+
 volumes:
   pg_data:
   redis_data:

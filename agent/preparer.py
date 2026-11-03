@@ -23,6 +23,7 @@ from agent.workspace import (
 )
 from app.agents.schemas import ArchiveRef, JobAssignment, ReleaseRef
 from app.catalog.argv import Invocation, build_argv
+from app.catalog.models import Resources
 
 
 class NoScriptsError(RuntimeError):
@@ -61,12 +62,14 @@ class PreparedJob:
     command: Command
 
 
-def invocation_for(assignment: JobAssignment) -> Invocation:
+def invocation_for(assignment: JobAssignment, cpus: int) -> Invocation:
     """
     Describe one run of an assigned job for ``build_argv``.
 
     :param assignment: What the server handed out.
     :type assignment: JobAssignment
+    :param cpus: CPUs the job gets on this machine.
+    :type cpus: int
     :return: Values, inputs and platform-filled values.
     :rtype: Invocation
     """
@@ -74,8 +77,26 @@ def invocation_for(assignment: JobAssignment) -> Invocation:
         values=assignment.parameters,
         inputs=assignment.input_files,
         job_name=assignment.task.id,
-        cpus=assignment.task.resources.cpus,
+        cpus=cpus,
     )
+
+
+def capped_resources(resources: Resources, max_cpus: int | None) -> Resources:
+    """
+    What a task asks for, held to the CPUs this machine gives one job.
+    A task's count is sized for a cluster node; on a smaller machine
+    MPI would refuse to start more processes than it has cores.
+
+    :param resources: What the task asks for.
+    :type resources: Resources
+    :param max_cpus: Most CPUs per job here; None for no limit.
+    :type max_cpus: int | None
+    :return: The same, with at most ``max_cpus`` CPUs.
+    :rtype: Resources
+    """
+    if max_cpus is None or resources.cpus <= max_cpus:
+        return resources
+    return resources.model_copy(update={"cpus": max_cpus})
 
 
 async def fetch_archive(cache: ArchiveCache, archive: ArchiveRef) -> Path:
@@ -227,9 +248,11 @@ class Preparer:
         :return: Command for the runner.
         :rtype: Command
         """
-        argv = build_argv(
-            assignment.task, invocation_for(assignment), self.config.python_bin
+        resources = capped_resources(
+            assignment.task.resources, self.config.max_cpus
         )
+        invocation = invocation_for(assignment, resources.cpus)
+        argv = build_argv(assignment.task, invocation, self.config.python_bin)
         packs = {variable: str(folder) for variable, folder in data.items()}
         return Command(
             argv=argv,
@@ -237,5 +260,5 @@ class Preparer:
             log_path=workspace / EXECUTION_LOG,
             environment={**job_environment(scripts), **packs},
             name=f"af-{assignment.node_key}",
-            resources=assignment.task.resources,
+            resources=resources,
         )

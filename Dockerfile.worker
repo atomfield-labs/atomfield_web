@@ -1,0 +1,25 @@
+# The house agent with Quantum ESPRESSO and Wannier90: the server's own
+# image plus the programs, so both always carry the same code. Build it
+# on top of a pushed server image (docs/deploy.md, "Running jobs on the
+# server itself").
+ARG ATOMFIELD_IMAGE=ghcr.io/atomfield-labs/atomfield:9f12b41
+FROM ${ATOMFIELD_IMAGE}
+
+COPY --from=mambaorg/micromamba:2.0.5 /bin/micromamba /bin/micromamba
+
+# Jobs run this Python, from conda-forge only; the agent itself keeps
+# the image's own. The scripts need only ase and numpy beside the
+# programs.
+RUN micromamba create -y -p /opt/chem --override-channels -c conda-forge \
+        python=3.11 ase numpy qe wannier90 openmpi && \
+    micromamba clean -a -y
+
+# QE runs as MPI processes; threads on top of them would oversubscribe
+# the CPUs.
+ENV PATH=/opt/chem/bin:$PATH \
+    CHEMISTRY_PYTHON_BIN=/opt/chem/bin/python \
+    OMP_NUM_THREADS=1
+
+# Jobs never run as root; uid 1000 owns the work folder on the host.
+RUN useradd -m -u 1000 worker
+USER worker

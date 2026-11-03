@@ -120,6 +120,26 @@ def test_settings_survive_a_round_trip_and_the_environment_wins(
     assert other.api_url == "http://x"
 
 
+def test_the_cpus_per_job_can_be_capped_from_the_environment(
+    tmp_path: Path,
+):
+    """
+    A container's worker sets its CPU limit without a file; a limit
+    below one is refused rather than starting nothing.
+
+    :param tmp_path: Empty folder.
+    :type tmp_path: Path
+    """
+    settings = settings_for(tmp_path)
+    assert AgentConfig.from_settings(settings).max_cpus is None
+    path = tmp_path / "agent.toml"
+    write_settings(path, settings)
+    config = AgentConfig.load(path, environ={"ATOMFIELD_MAX_CPUS": "4"})
+    assert config.max_cpus == 4
+    with pytest.raises(ValueError, match="at least 1"):
+        AgentConfig.from_settings({**settings, "max_cpus": -2})
+
+
 def test_without_settings_the_agent_says_to_log_in(tmp_path: Path):
     """
     No file and no environment: a clear message, not a stack trace.
